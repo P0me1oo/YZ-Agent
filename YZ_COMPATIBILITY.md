@@ -2,20 +2,64 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
-## v1.14.0 发布准备
+## 当前正式发布（v1.14.0，2026-09-15）
 
 展示名与 GitHub 仓库统一为 `YZ-Agent`，程序、服务与管理命令使用 `yz-agent`，Go 模块为 `github.com/P0me1oo/YZ-Agent`，GHCR 发布目标为 `ghcr.io/p0me1oo/yz-agent`。旧 `/etc/xboard-node` 安装数据迁到 `/etc/yz-agent`；节点通过 `yz-agent run` 启动。面板通信格式及固定双核心依赖保持原有约定。
 
-本次仅发布 Node 仓库的改名与迁移变更，双核心依赖和面板版本保持原配套关系。正式来源、CI 结果及产物校验记录在发布核对后补充；下方保留历史镜像地址与校验值。名称迁移、旧升级器的两阶段限制、验证范围和回退方式见 [改名说明](docs/agent-name-migration.md)。
+本次仅发布 Node 仓库的改名与迁移变更；名称迁移、旧升级器的两阶段限制和回退方式见 [改名说明](docs/agent-name-migration.md)。
 
-## 当前正式发布（v1.13.1，2026-09-10）
+| 项目 | 标识 |
+| --- | --- |
+| 正式来源 Tag / commit | `v1.14.0` / `1bd29cbf23a72c682f25b66beae3ec874b527501`；后续发布记录提交不改变构建来源 |
+| Node 上游基线 | `cedar2025/xboard-node` 的 `v1.13` / `0a29338e1f102a462363ce3527417029f89bab28` |
+| Release | [v1.14.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.14.0)；发布时间 `2026-09-14T17:37:19Z`，对应新加坡时间 2026-09-15；已核对为 GitHub 最新正式 Release |
+| 正式发布 CI | [34874770653](https://github.com/P0me1oo/YZ-Agent/actions/runs/34874770653)，测试、双架构构建、镜像与 Release 全部通过 |
+| 安装附件 | 两个架构的 `yz-agent`、同内容的 `xboard-node` 兼容附件、`xbctl` 迁移附件、安装器、四份构建信息及 SHA256SUMS，共 12 个 |
+| 镜像 | `ghcr.io/p0me1oo/yz-agent:v1.14.0`，支持匿名拉取；完整提交标签与 `latest` 指向同一镜像 |
+| 不可变镜像标签 | `ghcr.io/p0me1oo/yz-agent:1bd29cbf23a72c682f25b66beae3ec874b527501` |
+| 镜像索引 | `sha256:92b1b6ff60d9e99aa7c36df6cb5d6dcdc115a3566ad1438f3436a6fb24de7aec` |
+| 镜像平台与 OCI 标识 | `linux/amd64`、`linux/arm64`；两架构均为 `revision=1bd29cbf23a72c682f25b66beae3ec874b527501`、`version=v1.14.0` |
+| Xray 固定依赖 | `v26.7.11-yz.6` / `b4caa82d6414196565599c19ebc1b53e331349b6`；实际 replacement 为 `github.com/P0me1oo/YZ-Xray-core v0.0.0-20260907200713-b4caa82d6414` |
+| sing-box 固定依赖 | `v1.14.0-yz.2` / `09615a105e219076330d9d2a25ea1e2e733d5427`；实际 replacement 为 `github.com/P0me1oo/YZ-sing-box v1.14.0-yz.2` |
+| 面板兼容核对 | 只读核对当前面板 `1.15.2` / `c5333caef4d917aa3d9b00d5205a8a7f80ddab30` 的机器安装入口；旧下载地址和原参数继续有效，通信格式不变，不要求配套发布面板 |
+| 回滚基线 | Node `v1.13.1` / `ebc52dfd522c140bb03ac34940b46ad77523c58c`；旧镜像 `ghcr.io/p0me1oo/yzboard-node:v1.13.1`，索引 `sha256:6cd65852f0c11a85296660add721f843a6f94d0f7b0ccc81d72e72076638b1eb` |
+
+Linux 正式 CI 完成 `make test`：20 个安装目录场景、68 个名称与目录迁移场景、2 个原目录恢复检查、2 个防火墙回退清理检查及服务模板、默认内核检查全部通过；完整 Go 测试与六个依赖测试包的数据竞争检测通过。发布前修复了部分 Bash 版本在错误回调中沿用原失败状态的问题，目录尚未搬迁时能够按原身份恢复服务。
+
+12 个 Release 附件已下载，实际 SHA256 与 GitHub 附件摘要一致；SHA256SUMS 的 11 项记录全部匹配。两个旧程序名附件与对应的 `yz-agent` 内容一致。四个程序的实际构建信息与附件记录一致，均为 Go `1.26.4`、模块版本 `v1.14.0`、对应 Linux 架构、`CGO_ENABLED=0`、上述来源与 `vcs.modified=false`；两份核心 replacement 及模块校验值匹配固定依赖，`xbctl` 不链接核心。
+
+四个程序内嵌的安装器与正式 `install.sh` 及固定提交中的文件逐字节一致。新旧仓库的 `releases/latest/download/install.sh` 地址都返回本版安装器，SHA256 为 `31131e24ace7bcda452cb1df5cf95e18cddf94a8e8229729e59b094983f665a9`。两个架构的镜像均在 CI 中执行了版本检查；匿名获取的索引、平台清单、配置及 OCI 标识与正式来源一致，入口为 `yz-agent`，默认参数为 `run -c /etc/yz-agent/config.yml`。
+
+| 正式附件 | SHA256 |
+| --- | --- |
+| `yz-agent-linux-amd64` | `11304b2f3f27be786b68e50f5439cd67eee82fb7941d9ebce3b28576e33e895f` |
+| `yz-agent-linux-arm64` | `86377c7642c4be2c1e3fa8df92c163174c154f634b5573b85a2196f7acca86a5` |
+| `xboard-node-linux-amd64` | `11304b2f3f27be786b68e50f5439cd67eee82fb7941d9ebce3b28576e33e895f` |
+| `xboard-node-linux-arm64` | `86377c7642c4be2c1e3fa8df92c163174c154f634b5573b85a2196f7acca86a5` |
+| `xbctl-linux-amd64` | `96ac64b20ea4de689aa3f56b8705702e4b08b72ed0b51e80848388133b212e74` |
+| `xbctl-linux-arm64` | `9b99545cc37b59741ace2a363ac1bd9295e8e1494f5665ec7dbe6ed14e430292` |
+| `install.sh` | `31131e24ace7bcda452cb1df5cf95e18cddf94a8e8229729e59b094983f665a9` |
+| `SHA256SUMS` | `76a3ddb604758d5ca74272669c56038140153edd7e2936ea4e4bb46821b26d35` |
+| `yz-agent-linux-amd64.buildinfo.txt` | `7df894896673b1efa557ecafbd48b2aad8ec9d8bae4d9855357255c039eaa293` |
+| `yz-agent-linux-arm64.buildinfo.txt` | `bd6882d0d97e190c611454b2b10fa8ea86314b3f69ff46fc455c47a43b779f2b` |
+| `xbctl-linux-amd64.buildinfo.txt` | `607bb07dc986b9a0147e816d6f30396552a4a7c7a4a2dffa1ff3d46bd5bc080e` |
+| `xbctl-linux-arm64.buildinfo.txt` | `c5e19bbeb778123b12cce11c9770410c5e1bc52207f5c1c497aef614585a9f8e` |
+
+| 镜像平台 | 平台 manifest |
+| --- | --- |
+| `linux/amd64` | `sha256:334f3d03b2f893d4426a552cb7d301bfa7e802739b940289d7c02ca7fbfdadeb` |
+| `linux/arm64` | `sha256:73e7c069a77bf59cdb3c290b3fb52103f4d06b6c47eb22dbf6cf67f8e8841996` |
+
+本次只需更新 Node。仍使用 YZ 旧版 `xbctl` 的服务器先执行两次 `xbctl upgrade`：第一次更新程序和升级器，第二次完成名称与目录迁移；随后使用 `yz-agent version` 和 `yz-agent service status` 检查。已完成改名的安装使用 `yz-agent upgrade` 常规更新。Docker 部署同步使用新镜像地址和 `/etc/yz-agent` 容器内配置挂载路径；服务器操作由用户执行。
+
+## 上一正式发布（v1.13.1，2026-09-10）
 
 | 项目 | 标识 |
 | --- | --- |
 | Node 正式版本 | `v1.13.1`；Tag、Release、安装包及双架构镜像已发布并核验 |
 | 正式来源 Tag / commit | `v1.13.1` / `ebc52dfd522c140bb03ac34940b46ad77523c58c`；后续发布记录提交不改变此构建来源 |
 | Node 上游基线 | `cedar2025/xboard-node` 的 `v1.13` / `0a29338e1f102a462363ce3527417029f89bab28` |
-| Release | [v1.13.1](https://github.com/P0me1oo/YZboard-Node/releases/tag/v1.13.1)，最新正式版本；发布时间 `2026-09-09T16:56:00Z`，对应新加坡时间 2026-09-10 |
+| Release | [v1.13.1](https://github.com/P0me1oo/YZboard-Node/releases/tag/v1.13.1)，当次正式版本；发布时间 `2026-09-09T16:56:00Z`，对应新加坡时间 2026-09-10 |
 | 正式发布 CI | [34378744231](https://github.com/P0me1oo/YZboard-Node/actions/runs/34378744231)，全部通过；来源为本节固定提交 |
 | 正式安装附件 | Node、xbctl 各两个 Linux 架构，安装器、四份构建信息和 SHA256SUMS，共 10 个附件 |
 | 正式镜像 | `ghcr.io/p0me1oo/yzboard-node:v1.13.1`；完整提交标签和 `latest` 已核对指向同一镜像 |
@@ -88,7 +132,7 @@ Linux 正式 CI 完成 `make test`：安装器服务、默认内核和路径测�
 
 从本版起，新正式 Tag、Release 和程序版本使用 `v<主版本>.<次版本>.<修订号>`；上游基线单独记录。历史 `-yz.N` Tag、Release 与镜像保持原样，安装器和 `xbctl upgrade` 继续支持显式下载旧版。发布顺序为 Node `v1.13.1`、面板 `v1.13.3`。
 
-以下各节保留此前的开发和历史发布记录，其中“未发布”“待发布”等状态仅对应当时的验证阶段。当前正式版本及最近回滚基线以顶部 `v1.13.1` 发布记录为准。
+以下各节保留此前的开发和历史发布记录，其中“未发布”“待发布”等状态仅对应当时的验证阶段。当前正式版本及最近回滚基线以顶部 `v1.14.0` 发布记录为准。
 
 ## 直连出站切换兼容（v1.13-yz.24，未发布）
 
