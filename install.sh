@@ -719,8 +719,10 @@ migrate_install_root() {
 restore_install_root() {
     [ "$ROOT_MIGRATION_STARTED" -eq 1 ] || return 0
     if [ "$(stat -c '%d:%i' "$TARGET_INSTALL_ROOT" 2>/dev/null)" != "$ROOT_SOURCE_ID" ]; then
-        [ "$(stat -c '%d:%i' "$PREVIOUS_INSTALL_ROOT" 2>/dev/null)" = "$ROOT_SOURCE_ID" ]
-        return
+        [ "$(stat -c '%d:%i' "$PREVIOUS_INSTALL_ROOT" 2>/dev/null)" = "$ROOT_SOURCE_ID" ] || return 1
+        ROOT_MIGRATION_STARTED=0
+        # 错误回调中的无参数 return 在部分 Bash 版本会沿用原失败状态。
+        return 0
     fi
     if [ -L "$PREVIOUS_INSTALL_ROOT" ] && [ "$(readlink "$PREVIOUS_INSTALL_ROOT")" = "$TARGET_INSTALL_ROOT" ]; then
         rm "$PREVIOUS_INSTALL_ROOT" || return 1

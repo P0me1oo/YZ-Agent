@@ -276,6 +276,34 @@ for manager in systemd openrc; do
     done
 done
 
+# 模拟从 ERR 回调恢复尚未搬迁的目录，同时拒绝原路径被替换的情况。
+for source_identity in match mismatch; do
+    (
+        case_root="$TEST_ROOT/root-recovery-$source_identity"
+        mkdir -p "$case_root/original"
+        source <(sed '/^main "$@"$/d' "$REPO_ROOT/install.sh")
+        PREVIOUS_INSTALL_ROOT="$case_root/original"
+        TARGET_INSTALL_ROOT="$case_root/missing"
+        ROOT_MIGRATION_STARTED=1
+        ROOT_SOURCE_ID=$(stat -c '%d:%i' "$PREVIOUS_INSTALL_ROOT")
+        expected=0
+        if [ "$source_identity" = mismatch ]; then ROOT_SOURCE_ID+=-replaced; expected=1; fi
+        check_root_recovery() {
+            trap - ERR
+            local result=0
+            restore_install_root || result=$?
+            if [ "$result" -ne "$expected" ] || [ "$ROOT_MIGRATION_STARTED" -ne "$expected" ]; then
+                echo '错误回调未正确区分原目录保留和目录被替换的情况' >&2
+                exit 1
+            fi
+            [ -d "$PREVIOUS_INSTALL_ROOT" ] && [ ! -e "$TARGET_INSTALL_ROOT" ] || exit 1
+            exit 0
+        }
+        trap check_root_recovery ERR
+        false
+    )
+done
+
 # 回退清理失败时保留新安装和备份；未启动过新服务则可直接恢复旧安装。
 for started in 0 1; do
     (
@@ -313,4 +341,5 @@ for started in 0 1; do
     )
 done
 echo "installer name migration tests passed ($scenario_count scenarios)"
+echo 'installer unmoved-root recovery checks passed (2 scenarios)'
 echo 'installer rollback firewall cleanup checks passed (2 scenarios)'
