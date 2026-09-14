@@ -175,7 +175,18 @@ CLI
 fi
 
 TEST_ROOT=$(mktemp -d)
-trap 'rm -rf "$TEST_ROOT"' EXIT
+cleanup_name_test() {
+    local exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+        printf '名称迁移测试失败：%s/%s，行 %s：%s\n' "${manager:-unknown}" "${requested_scenario:-unknown}" "${failure_line:-unknown}" "${failure_command:-unknown}" >&2
+        if [ -n "${case_root:-}" ] && [ -f "$case_root/result.log" ]; then
+            cat "$case_root/result.log" >&2
+        fi
+    fi
+    rm -rf "$TEST_ROOT"
+}
+trap cleanup_name_test EXIT
+trap 'failure_line="$LINENO"; failure_command="$BASH_COMMAND"' ERR
 scenario_count=0
 for manager in systemd openrc; do
     for requested_scenario in upgrade downgrade repeat parent-lock modern-move disabled-upgrade disabled-failure restart-failure health-failure disable-failure interrupted collision binary-collision command-entry command-entry-failure command-entry-collision interim root-upgrade root-downgrade root-repeat root-parent-lock root-restart-failure root-health-failure root-disable-failure root-interrupted root-move-failure root-move-interrupted root-alias-failure root-config-failure root-conflict root-interim root-disabled-upgrade root-disabled-failure root-binary-overlap; do
