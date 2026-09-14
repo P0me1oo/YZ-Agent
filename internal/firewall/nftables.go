@@ -11,8 +11,18 @@ import (
 
 var redirectMarker = regexp.MustCompile(`^redirect:[0-9a-f]{16}$`)
 
-func (b *systemBackend) nftTable() string { return "yz_node_" + b.scope }
-func (b *systemBackend) nftOwner() string { return "yzboard-node:" + b.scope }
+func (b *systemBackend) nftTable() string {
+	if b.state.Namespace == "" {
+		return "yz_node_" + b.scope
+	}
+	return "yz_agent_" + b.scope
+}
+func (b *systemBackend) nftOwner() string {
+	if b.state.Namespace == "" {
+		return "yzboard-node:" + b.scope
+	}
+	return "yz-agent:" + b.scope
+}
 
 func redirectComment(rule Rule) string {
 	sum := sha256.Sum256([]byte(rule.key()))

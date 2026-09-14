@@ -31,7 +31,7 @@ firewall:
 | `zone` | 空 | firewalld 自动使用活动区域及默认区域；填写区域名时仅管理该区域 |
 | `state_dir` | 配置文件目录下的 `firewall/` | 归属记录目录；相对路径以配置文件目录为基准 |
 
-同一进程中所有实例的最终 `firewall` 配置必须一致。`xbctl` 修改绑定时保留这些字段。Node 不会自动安装或启用防火墙服务；没有运行中的 UFW/firewalld 时不创建过滤规则，跳跃转发仍需要相应的系统工具。
+同一进程中所有实例的最终 `firewall` 配置必须一致。`yz-agent` 修改绑定时保留这些字段。Node 不会自动安装或启用防火墙服务；没有运行中的 UFW/firewalld 时不创建过滤规则，跳跃转发仍需要相应的系统工具。
 
 该功能面向具备系统防火墙权限的 Linux 主机安装。UFW 需要 `ufw`，firewalld 需要 `firewall-cmd` 及可用的系统服务；跳跃需要 `nft`，或所用地址族对应的 `iptables`/`ip6tables` 与 `*-restore`。非 Linux 平台不自动管理防火墙，启用自动跳跃会返回不支持。
 
@@ -72,7 +72,9 @@ standalone:
 
 ## 规则实现和范围
 
-UFW 使用带 `yzboard-node:` 注释的独立放行规则。firewalld 使用独立优先级的运行时 rich rule 及归属记录，不执行全局重载或修改永久配置。nftables 使用单独的 `inet yz_node_<标识>` 表，iptables 使用单独的 `YZH_<标识>` 链；更新和退出只操作本实例规则。
+UFW 使用带 `yz-agent:` 注释的独立放行规则。firewalld 使用独立优先级的运行时 rich rule 及归属记录，不执行全局重载或修改永久配置。nftables 使用单独的 `inet yz_agent_<标识>` 表，iptables 使用单独的 `YZ_AGENT_<标识>` 链；更新和退出只操作本实例规则。
+
+从旧版升级时，先按归属记录清理 `yzboard-node:`、`yz_node_` 和 `YZH_` 旧规则，成功后再切换新名称；清理失败保留记录供重启重试。默认配置目录搬迁后继续使用原实例标识，避免遗漏旧规则；已有手工规则和其他实例的规则保持原归属。
 
 跳跃只匹配发往本机的 UDP 流量，真实监听端口从转发集合中排除。通配监听使用 REDIRECT，指定地址使用 DNAT。进入本机的流量适用这些规则；本机客户端应直接连接真实监听端口。
 
@@ -82,7 +84,7 @@ UFW 使用带 `yzboard-node:` 注释的独立放行规则。firewalld 使用独�
 
 原生命令验证使用专用 rootfs、私有挂载/进程/网络命名空间和独立客户端，覆盖 UFW/firewalld 与 nftables/iptables 组合。完整 Node 验证使用临时面板接口、临时身份、自签名证书和官方 Hysteria 客户端，检查真实换端口传输、面板停用、重载错误、状态及流量回传。
 
-复测需要在专用 rootfs 安装相应防火墙工具、iproute2、D-Bus 和 Python，在根目录创建 `.yz-firewall-test-rootfs` 标记。将防火墙 Go 测试二进制放入 `/work/firewall-linux.test`；完整测试还需要 `/work/xboard-node-linux-amd64`、`/work/hysteria-linux-amd64` 和 `scripts/test-firewall-node.py`。测试入口拒绝使用 `/` 或没有标记的目录。
+复测需要在专用 rootfs 安装相应防火墙工具、iproute2、D-Bus 和 Python，在根目录创建 `.yz-firewall-test-rootfs` 标记。将防火墙 Go 测试二进制放入 `/work/firewall-linux.test`；完整测试还需要 `/work/yz-agent-linux-amd64`、`/work/hysteria-linux-amd64` 和 `scripts/test-firewall-node.py`。测试入口拒绝使用 `/` 或没有标记的目录。
 
 ```bash
 # 参数依次为专用 rootfs、运行的防火墙、转发工具、测试类型、内核。

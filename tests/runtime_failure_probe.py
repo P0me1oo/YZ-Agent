@@ -387,7 +387,7 @@ def main():
     if os.readlink("/proc/self/ns/net") == os.readlink("/proc/1/ns/net"):
         raise RuntimeError("需要独立网络空间")
     subprocess.run(["ip", "link", "set", "lo", "up"], check=True, capture_output=True)
-    binary = (args.artifacts / "xboard-node-linux-amd64").resolve(strict=True)
+    binary = (args.artifacts / "yz-agent-linux-amd64").resolve(strict=True)
     results = []
     for scenario in (first_start_failure, certificate_bypass, invalid_outbound_update,
                      invalid_outbound_initial, slow_shutdown_report, slow_failed_shutdown_report):

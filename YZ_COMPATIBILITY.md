@@ -1,6 +1,12 @@
-# YZboard-Node 兼容矩阵
+# YZ-Agent 兼容矩阵
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
+
+## v1.14.0 发布准备
+
+展示名与 GitHub 仓库统一为 `YZ-Agent`，程序、服务与管理命令使用 `yz-agent`，Go 模块为 `github.com/P0me1oo/YZ-Agent`，GHCR 发布目标为 `ghcr.io/p0me1oo/yz-agent`。旧 `/etc/xboard-node` 安装数据迁到 `/etc/yz-agent`；节点通过 `yz-agent run` 启动。面板通信格式及固定双核心依赖保持原有约定。
+
+本次仅发布 Node 仓库的改名与迁移变更，双核心依赖和面板版本保持原配套关系。正式来源、CI 结果及产物校验记录在发布核对后补充；下方保留历史镜像地址与校验值。名称迁移、旧升级器的两阶段限制、验证范围和回退方式见 [改名说明](docs/agent-name-migration.md)。
 
 ## 当前正式发布（v1.13.1，2026-09-10）
 

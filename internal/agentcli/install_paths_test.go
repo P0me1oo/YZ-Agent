@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"os"
@@ -18,7 +18,7 @@ func TestLoadInstallPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	paths, err = loadInstallPaths(file)
-	if err != nil || paths.binary() != "/boot/node-bin/xboard-node" || paths.cli() != "/boot/node-bin/xbctl" {
+	if err != nil || paths.binary() != "/boot/node-bin/yz-agent" || paths.cli() != "/boot/node-bin/yz-agent" {
 		t.Fatalf("自定义目录解析失败: %+v, %v", paths, err)
 	}
 }
@@ -55,6 +55,27 @@ func TestInstallationLockRejectsConcurrentMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	second()
+}
+
+func TestInstallationLockFollowsDirectoryMigration(t *testing.T) {
+	dir := t.TempDir()
+	previous, current := filepath.Join(dir, "previous"), filepath.Join(dir, "current")
+	release, err := lockInstallationRoots([]string{previous, current})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if err := os.Rename(previous, current); err != nil {
+		t.Fatal(err)
+	}
+	if other, err := lockInstallation(current); err == nil {
+		other()
+		t.Fatal("搬迁后丢失安装锁")
+	}
+	release()
+	if _, err := os.Stat(filepath.Join(current, installLockName)); !os.IsNotExist(err) {
+		t.Fatalf("父进程没有释放搬迁后的锁: %v", err)
+	}
 }
 
 func TestCustomDirectoryServiceDefinitions(t *testing.T) {

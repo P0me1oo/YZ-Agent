@@ -2,7 +2,10 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 // FirewallConfig 在同一进程内共享，避免多个节点互相回收端口规则。
@@ -12,6 +15,38 @@ type FirewallConfig struct {
 	RedirectBackend string `yaml:"redirect_backend,omitempty"`
 	Zone            string `yaml:"zone,omitempty"`
 	StateDir        string `yaml:"state_dir,omitempty"`
+}
+
+// LoadFirewall 只读取规则清理所需配置，不要求加载面板凭据或启动内核。
+func LoadFirewall(name string) (FirewallConfig, error) {
+	data, err := os.ReadFile(name)
+	if err != nil {
+		return FirewallConfig{}, err
+	}
+	var root RootConfig
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return FirewallConfig{}, err
+	}
+	baseDir := configBaseDir(name)
+	result := root.Firewall
+	if len(root.Instances) == 0 {
+		result.setDefaults(baseDir)
+		return result, ValidateFirewall(result)
+	}
+	for index, instance := range root.Instances {
+		current := instance.Firewall
+		current.inheritFrom(root.Firewall)
+		current.setDefaults(baseDir)
+		if err := ValidateFirewall(current); err != nil {
+			return FirewallConfig{}, err
+		}
+		if index == 0 {
+			result = current
+		} else if !result.Equal(current) {
+			return FirewallConfig{}, fmt.Errorf("实例的防火墙配置不一致，停止清理")
+		}
+	}
+	return result, nil
 }
 
 func (c FirewallConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }

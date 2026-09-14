@@ -4,7 +4,7 @@
 
 xray-core 从 v26.7.11 起，如果生成的 `realitySettings` 中没有 `minClientVer`，内核会自动写入内置下限 `26.3.27`。低于该版本的客户端在 REALITY 握手阶段会被服务端拒绝，表现为节点可用但部分旧客户端连不上。
 
-YZboard-Node 生成 Xray 配置时总是显式写入 `minClientVer`，默认值为 `0.0.0`，即不限制客户端版本。需要主动拦截旧客户端时，再按下面的方式抬高门槛。
+YZ-Agent 生成 Xray 配置时总是显式写入 `minClientVer`，默认值为 `0.0.0`，即不限制客户端版本。需要主动拦截旧客户端时，再按下面的方式抬高门槛。
 
 ## 配置项
 
@@ -58,7 +58,7 @@ instances:
 配置文件修改后重启节点服务，内核会按新值重新生成 REALITY 入站：
 
 ```bash
-sudo xbctl service restart
+yz-agent service restart
 ```
 
 Xray 配置由 Node 在内存中生成并直接交给内核，磁盘上没有可查看的 `config.json`。是否生效以实际握手结果为准：
@@ -71,4 +71,4 @@ Xray 配置由 Node 在内存中生成并直接交给内核，磁盘上没有可
 
 - 该配置只影响服务端接受的客户端版本下限，不改变 REALITY 的密钥、`serverNames`、`dest` 等参数，这些仍由面板下发。
 - 抬高下限属于兼容性收紧操作，会直接影响仍在使用旧客户端的用户，调整前先确认用户端版本分布。
-- `xbctl bind` 等会重写配置文件的命令保留该字段，不会在改绑节点时丢失已有取值。
+- `yz-agent bind` 等会重写配置文件的命令保留该字段，不会在改绑节点时丢失已有取值。

@@ -1,0 +1,23 @@
+# 排除产物，命令源码目录必须保留。
+/yz-agent
+/yz-agent-linux-*
+/xboard-node
+/xboard-node-linux-*
+/xbctl
+/xbctl-linux-*
+!cmd/
+!cmd/**
+*.exe
+**/__pycache__/
+
+# 本地规则、运行配置和验证数据不进入镜像构建上下文。
+AGENTS.md
+CLAUDE.md
+**/AGENTS.md
+**/CLAUDE.md
+.env
+**/.env
+config.yml
+credentials.env
+.hy2-ech-validation-*/
+.ss2022-direct-validation-*/

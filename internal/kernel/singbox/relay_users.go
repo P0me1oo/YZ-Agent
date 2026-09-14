@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cedar2025/xboard-node/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	singJSON "github.com/sagernet/sing/common/json"

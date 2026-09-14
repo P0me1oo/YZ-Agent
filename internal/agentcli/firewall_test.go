@@ -1,11 +1,11 @@
-package main
+package agentcli
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/cedar2025/xboard-node/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

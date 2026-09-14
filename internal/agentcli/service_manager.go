@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"errors"
@@ -8,14 +8,47 @@ import (
 	"strings"
 )
 
-const (
-	serviceName             = "xboard-node"
-	systemdServiceName      = serviceName + ".service"
-	systemdServiceFilePath  = "/etc/systemd/system/" + systemdServiceName
-	openRCServiceFilePath   = "/etc/init.d/" + serviceName
-	openRCLogPath           = "/var/log/" + serviceName + ".log"
-	systemdRuntimeDirectory = "/run/systemd/system"
+var (
+	serviceName            = "yz-agent"
+	systemdServiceName     = serviceName + ".service"
+	systemdServiceFilePath = "/etc/systemd/system/" + systemdServiceName
+	openRCServiceFilePath  = "/etc/init.d/" + serviceName
+	openRCLogPath          = "/var/log/" + serviceName + ".log"
 )
+
+const systemdRuntimeDirectory = "/run/systemd/system"
+
+// 旧管理器升级后仍可能保留旧服务，迁移前继续管理实际存在的服务。
+func selectInstalledService() {
+	serviceName = "yz-agent"
+	for _, name := range []string{"yz-agent", "agent", "xboard-node"} {
+		if fileExists("/etc/systemd/system/"+name+".service") || fileExists("/etc/init.d/"+name) {
+			serviceName = name
+			break
+		}
+	}
+	systemdServiceName = serviceName + ".service"
+	systemdServiceFilePath = "/etc/systemd/system/" + systemdServiceName
+	openRCServiceFilePath = "/etc/init.d/" + serviceName
+	openRCLogPath = "/var/log/" + serviceName + ".log"
+}
+
+func validateInstalledServices(manager serviceManager) error {
+	count := 0
+	for _, name := range []string{"yz-agent", "agent", "xboard-node"} {
+		file := "/etc/systemd/system/" + name + ".service"
+		if manager == serviceManagerOpenRC {
+			file = "/etc/init.d/" + name
+		}
+		if fileExists(file) {
+			count++
+		}
+	}
+	if count > 1 {
+		return errors.New("multiple installation service names exist; resolve the service conflict first")
+	}
+	return nil
+}
 
 type serviceManager string
 
@@ -182,11 +215,15 @@ func serviceDefinitionFor(manager serviceManager) (string, []byte, os.FileMode, 
 }
 
 func serviceDefinitionForPaths(manager serviceManager, paths installPaths) (string, []byte, os.FileMode, error) {
+	runArg := ""
+	if paths.installedBinary() == paths.binary() {
+		runArg = "run "
+	}
 	switch manager {
 	case serviceManagerSystemd:
 		unit := fmt.Sprintf(`[Unit]
-Description=Xboard Node Backend
-Documentation=https://github.com/P0me1oo/YZboard-Node
+Description=YZ-Agent
+Documentation=https://github.com/P0me1oo/YZ-Agent
 After=network-online.target
 Wants=network-online.target
 RequiresMountsFor=%s
@@ -195,7 +232,7 @@ RequiresMountsFor=%s
 Type=simple
 WorkingDirectory=%s
 EnvironmentFile=-%s
-ExecStart=%s -c %s
+ExecStart=%s %s-c %s
 Restart=always
 RestartSec=5
 TimeoutStopSec=150s
@@ -206,16 +243,16 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-`, paths.binDir, defaultInstallRoot, defaultCredentialsPath, paths.binary(), defaultConfigPath)
+`, paths.binDir, defaultInstallRoot, defaultCredentialsPath, paths.installedBinary(), runArg, defaultConfigPath)
 		return systemdServiceFilePath, []byte(unit), 0o644, nil
 	case serviceManagerOpenRC:
 		script := fmt.Sprintf(`#!/sbin/openrc-run
 
-name="Xboard Node Backend"
-description="YZboard node backend"
+name="YZ-Agent"
+description="YZ-Agent node backend"
 supervisor=supervise-daemon
 command="%s"
-command_args="-c %s"
+command_args="%s-c %s"
 directory="%s"
 pidfile="/run/%s.pid"
 output_log="%s"
@@ -254,7 +291,7 @@ start_pre() {
     fi
     checkpath -f -m 0640 -o root:root "%s"
 }
-`, paths.binary(), defaultConfigPath, defaultInstallRoot, serviceName, openRCLogPath, openRCLogPath,
+`, paths.installedBinary(), runArg, defaultConfigPath, defaultInstallRoot, serviceName, openRCLogPath, openRCLogPath,
 			defaultCredentialsPath, defaultCredentialsPath, openRCLogPath)
 		return openRCServiceFilePath, []byte(script), 0o755, nil
 	default:

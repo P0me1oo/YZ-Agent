@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cedar2025/xboard-node/internal/config"
-	"github.com/cedar2025/xboard-node/internal/portset"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/portset"
 )
 
 type commandSpy struct {

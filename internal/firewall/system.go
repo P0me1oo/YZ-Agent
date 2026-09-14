@@ -8,15 +8,30 @@ import (
 )
 
 func (b *systemBackend) Apply(ctx context.Context, allows, redirects []Rule) error {
+	for _, rule := range append(append([]Rule(nil), allows...), redirects...) {
+		if !rule.valid() {
+			return fmt.Errorf("拒绝无效的防火墙规则")
+		}
+	}
+	if b.state.Namespace == "" {
+		// 旧记录必须先按原标记清理成功；失败时保持旧标记，重启后继续恢复。
+		if err := b.apply(ctx, nil, nil); err != nil {
+			return err
+		}
+		b.state.Namespace = "yz-agent"
+		if err := b.save(); err != nil {
+			b.state.Namespace = ""
+			return err
+		}
+	}
+	return b.apply(ctx, allows, redirects)
+}
+
+func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) error {
 	if !b.cfg.IsEnabled() {
 		allows, redirects = nil, nil
 		if len(b.state.Owned) == 0 && b.state.Redirect == "" {
 			return nil
-		}
-	}
-	for _, rule := range append(append([]Rule(nil), allows...), redirects...) {
-		if !rule.valid() {
-			return fmt.Errorf("拒绝无效的防火墙规则")
 		}
 	}
 	ufwWanted := b.cfg.Backend == "" || b.cfg.Backend == "auto" || b.cfg.Backend == "ufw"

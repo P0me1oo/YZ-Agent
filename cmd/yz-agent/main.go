@@ -14,17 +14,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/buildinfo"
-	"github.com/cedar2025/xboard-node/internal/config"
-	"github.com/cedar2025/xboard-node/internal/firewall"
-	"github.com/cedar2025/xboard-node/internal/machine"
-	"github.com/cedar2025/xboard-node/internal/nlog"
-	"github.com/cedar2025/xboard-node/internal/service"
-	"github.com/cedar2025/xboard-node/internal/timesync"
+	"github.com/P0me1oo/YZ-Agent/internal/agentcli"
+	"github.com/P0me1oo/YZ-Agent/internal/buildinfo"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/firewall"
+	"github.com/P0me1oo/YZ-Agent/internal/machine"
+	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/service"
+	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 )
 
 var (
-	version   = "dev"
+	version   = "v1.14.0"
 	buildTime = "unknown"
 	commit    = "unknown"
 )
@@ -33,12 +34,23 @@ var (
 const shutdownGracePeriod = 2 * time.Minute
 
 func main() {
+	args := os.Args[1:]
+	// 显式 run 启动节点；保留旧服务及 Docker 使用的 -c 参数入口。
+	if len(args) > 0 && args[0] == "run" {
+		os.Args = append([]string{os.Args[0]}, args[1:]...)
+	} else if len(args) == 0 || !strings.HasPrefix(args[0], "-") || args[0] == "-h" || args[0] == "--help" || args[0] == "--version" {
+		if err := agentcli.Run(args, version, buildTime, commit); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	configPath := flag.String("c", "config.yml", "config file path")
 	showVersion := flag.Bool("v", false, "show version")
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(buildinfo.Report("xboard-node", version, buildTime, commit))
+		fmt.Println(buildinfo.Report("yz-agent", version, buildTime, commit))
 		os.Exit(0)
 	}
 

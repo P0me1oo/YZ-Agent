@@ -1,4 +1,4 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= v1.14.0
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.commit=$(COMMIT)
@@ -9,17 +9,18 @@ BUILD_TAGS := with_quic with_utls with_wireguard with_acme with_clash_api
 
 # Build for current platform
 build:
-	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -tags "$(BUILD_TAGS)" -o xboard-node ./cmd/xboard-node
-	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o xbctl ./cmd/xbctl
+	go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -tags "$(BUILD_TAGS)" -o yz-agent ./cmd/yz-agent
 
 # Build for Linux amd64
 build-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -tags "$(BUILD_TAGS)" -o xboard-node-linux-amd64 ./cmd/xboard-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -tags "$(BUILD_TAGS)" -o yz-agent-linux-amd64 ./cmd/yz-agent
+	cp yz-agent-linux-amd64 xboard-node-linux-amd64
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o xbctl-linux-amd64 ./cmd/xbctl
 
 # Build for Linux arm64
 build-linux-arm64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -tags "$(BUILD_TAGS)" -o xboard-node-linux-arm64 ./cmd/xboard-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -tags "$(BUILD_TAGS)" -o yz-agent-linux-arm64 ./cmd/yz-agent
+	cp yz-agent-linux-arm64 xboard-node-linux-arm64
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(BUILD_FLAGS) -ldflags "$(LDFLAGS)" -o xbctl-linux-arm64 ./cmd/xbctl
 
 # Build all platforms
@@ -30,6 +31,7 @@ test:
 	bash tests/install_service_manager_test.sh
 	bash tests/install_kernel_defaults_test.sh
 	bash tests/install_paths_test.sh
+	bash tests/install_name_migration_test.sh
 	go test -mod=readonly -v -race -count=1 -tags "$(BUILD_TAGS)" ./...
 	go test -mod=readonly -v -race -count=1 github.com/anytls/sing-anytls/session
 	go test -mod=readonly -v -race -count=1 github.com/sagernet/sing-shadowsocks/shadowaead_2022
@@ -37,18 +39,17 @@ test:
 
 # Clean build artifacts
 clean:
-	rm -f xboard-node xbctl xboard-node-linux-* xbctl-linux-*
+	rm -f yz-agent yz-agent-linux-* xboard-node xbctl xboard-node-linux-* xbctl-linux-*
 
 # Build Docker image
 docker:
-	docker build --build-arg NODE_VERSION=$(VERSION) --build-arg SOURCE_COMMIT=$(COMMIT) -t xboard-node:$(VERSION) -t xboard-node:latest .
+	docker build --build-arg NODE_VERSION=$(VERSION) --build-arg SOURCE_COMMIT=$(COMMIT) -t yz-agent:$(VERSION) -t yz-agent:latest .
 
 # Install to system (single node, legacy compat)
 install: build
-	sudo cp xboard-node /usr/local/bin/
-	sudo cp xbctl /usr/local/bin/
-	sudo mkdir -p /etc/xboard-node
-	@if [ ! -f /etc/xboard-node/config.yml ]; then \
-		sudo cp config.yml.example /etc/xboard-node/config.yml; \
-		echo "Config copied to /etc/xboard-node/config.yml - please edit it"; \
+	sudo cp yz-agent /usr/local/bin/
+	sudo mkdir -p /etc/yz-agent
+	@if [ ! -f /etc/yz-agent/config.yml ]; then \
+		sudo cp config.yml.example /etc/yz-agent/config.yml; \
+		echo "Config copied to /etc/yz-agent/config.yml - please edit it"; \
 	fi

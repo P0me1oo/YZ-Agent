@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"crypto/rand"
@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/cedar2025/xboard-node/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
 )
 
 func kernelInitArgs(path string, extra ...string) []string {

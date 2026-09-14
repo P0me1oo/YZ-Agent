@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/config"
-	"github.com/cedar2025/xboard-node/internal/kernel"
-	xrayKernel "github.com/cedar2025/xboard-node/internal/kernel/xray"
-	"github.com/cedar2025/xboard-node/internal/model"
-	"github.com/cedar2025/xboard-node/internal/tracker"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/kernel"
+	xrayKernel "github.com/P0me1oo/YZ-Agent/internal/kernel/xray"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/tracker"
 )
 
 func TestSingBoxReloadRemovesPreviousProtocolListener(t *testing.T) {

@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/config"
-	"github.com/cedar2025/xboard-node/internal/model"
-	"github.com/cedar2025/xboard-node/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/installroot"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
 
 // Controller 由所有节点共享；实现只保留计算后的端口计划，不持有节点凭据。
@@ -52,7 +53,7 @@ func New(cfg config.FirewallConfig, configPath string) (*Manager, error) {
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = resolved
 	}
-	scope := fmt.Sprintf("%x", sha256.Sum256([]byte(abs)))[:12]
+	scope := fmt.Sprintf("%x", sha256.Sum256([]byte(installroot.CanonicalConfig(abs))))[:12]
 	backend, err := newSystemBackend(cfg, scope, systemCommands{})
 	if err != nil {
 		return nil, err

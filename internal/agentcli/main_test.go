@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"bytes"
@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/timesync"
+	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 )
 
 func TestResolveDownloadURLUsesYZboardNodeRelease(t *testing.T) {
 	t.Parallel()
 
 	got := resolveDownloadURL("xboard-node-linux-amd64", "v1.13-yz.2")
-	want := "https://github.com/P0me1oo/YZboard-Node/releases/download/v1.13-yz.2/xboard-node-linux-amd64"
+	want := "https://github.com/P0me1oo/YZ-Agent/releases/download/v1.13-yz.2/xboard-node-linux-amd64"
 	if got != want {
 		t.Fatalf("resolveDownloadURL() = %q, want %q", got, want)
 	}

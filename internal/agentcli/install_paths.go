@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"errors"
@@ -7,20 +7,38 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	"github.com/P0me1oo/YZ-Agent/internal/installroot"
 )
 
 const (
-	defaultBinDir     = "/usr/local/bin"
-	defaultBinDirFile = defaultInstallRoot + "/bin-dir"
-	installLockName   = ".install-lock"
+	defaultBinDir   = "/usr/local/bin"
+	installLockName = ".install-lock"
 )
+
+var defaultBinDirFile = defaultInstallRoot + "/bin-dir"
 
 type installPaths struct {
 	binDir string
 }
 
-func (p installPaths) binary() string { return path.Join(p.binDir, "xboard-node") }
-func (p installPaths) cli() string    { return path.Join(p.binDir, "xbctl") }
+func (p installPaths) binary() string { return path.Join(p.binDir, "yz-agent") }
+func (p installPaths) installedBinary() string {
+	for _, name := range []string{serviceName, "yz-agent", "agent", "xboard-node"} {
+		candidate := path.Join(p.binDir, name)
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return p.binary()
+}
+func (p installPaths) cli() string {
+	if path.Base(p.installedBinary()) == "xboard-node" {
+		return path.Join(p.binDir, "xbctl")
+	}
+	return p.installedBinary()
+}
 
 // 程序目录会写入 shell 和 systemd 服务文件，只接受无需额外转义的绝对路径。
 func validateBinDir(dir string) (string, error) {
@@ -59,7 +77,7 @@ func runConfigBinDir(args []string) error {
 	file := defaultBinDirFile
 	if len(args) != 0 {
 		if len(args) != 2 || args[0] != "--path-file" {
-			return errors.New("usage: xbctl config bin-dir [--path-file PATH]")
+			return errors.New("usage: yz-agent config bin-dir [--path-file PATH]")
 		}
 		file = args[1]
 	}
@@ -73,6 +91,18 @@ func runConfigBinDir(args []string) error {
 
 // 与安装脚本共用锁目录，避免两个升级过程互相覆盖备份或安装位置。
 func lockInstallation(root string) (func(), error) {
+	roots := []string{root}
+	if root == installroot.Current {
+		roots = append(roots, installroot.Legacy)
+	}
+	if root == installroot.Legacy {
+		roots = append(roots, installroot.Current)
+	}
+	return lockInstallationRoots(roots)
+}
+
+func lockInstallationRoots(roots []string) (func(), error) {
+	root := roots[0]
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
 	}
@@ -80,5 +110,26 @@ func lockInstallation(root string) (func(), error) {
 	if err := os.Mkdir(lock, 0o700); err != nil {
 		return nil, fmt.Errorf("cannot lock installation at %s; check for another installer or an interrupted operation: %w", lock, err)
 	}
-	return func() { _ = os.Remove(lock) }, nil
+	info, err := os.Stat(lock)
+	if err != nil {
+		_ = os.Remove(lock)
+		return nil, err
+	}
+	// Windows 的 Stat 延迟读取文件编号，必须在目录搬迁前固定身份。
+	if !os.SameFile(info, info) {
+		_ = os.Remove(lock)
+		return nil, errors.New("cannot identify installation lock")
+	}
+	// 安装器可能在持锁期间迁移整个目录，只释放本次创建的同一个锁。
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			for _, candidate := range roots {
+				name := filepath.Join(candidate, installLockName)
+				if current, err := os.Stat(name); err == nil && os.SameFile(info, current) {
+					_ = os.Remove(name)
+				}
+			}
+		})
+	}, nil
 }

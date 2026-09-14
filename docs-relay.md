@@ -29,10 +29,10 @@ sing-box 只接受已下发的线路身份：未知编号、已删除用户或�
 安装器默认写入 xray；已经装好的节点可以用下面的命令切换，改完重启服务生效：
 
 ```bash
-xbctl config kernel xray            # 全部实例
-xbctl config kernel xray --instance <实例 ID>
-xbctl config kernel singbox         # 使用 sing-box
-systemctl restart xboard-node
+yz-agent config kernel xray            # 全部实例
+yz-agent config kernel xray --instance <实例 ID>
+yz-agent config kernel singbox         # 使用 sing-box
+yz-agent service restart
 ```
 
 xray 能承载的入站协议少于 sing-box（不支持 tuic、naive、anytls、mieru、socks、http），
@@ -197,7 +197,7 @@ H2/HTTP 已由固定的 Xray 核心移除。mKCP 不接受旧 `header`/`seed`，
 `xtls-rprx-vision`。Node 会在构建配置前二次校验这些组合，不能依靠忽略未知字段启动。
 
 两端均为 Xray 时，VLESS Encryption 的两项由面板拆分下发：入口 child 只带 `encryption`，落地顶层只带
-`decryption`。xboard-node 不负责生成这对配置；面板 `1.4.0` 可以在浏览器中复用 Reality
+`decryption`。YZ-Agent 不负责生成这对配置；面板 `1.4.0` 可以在浏览器中复用 Reality
 的 X25519 生成器，管理员点击 `decryption` 右侧的钥匙按钮即可一次填入两项。需要
 ML-KEM-768 时仍可运行兼容 Xray 的 `xray vlessenc` 后手工填写，Node 不需要修改本地
 `config.yml`。

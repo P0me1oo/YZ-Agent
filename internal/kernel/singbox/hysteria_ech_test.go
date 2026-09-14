@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/kernel"
-	"github.com/cedar2025/xboard-node/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/kernel"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/sagernet/quic-go"
 	"github.com/sagernet/sing-box/adapter"
 	boxTLS "github.com/sagernet/sing-box/common/tls"

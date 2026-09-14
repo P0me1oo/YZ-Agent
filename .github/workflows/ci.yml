@@ -61,7 +61,7 @@ jobs:
 
       - name: Validate installer syntax
         run: |
-          bash -n install.sh tests/install_service_manager_test.sh tests/install_kernel_defaults_test.sh tests/install_paths_test.sh tests/singbox_isolated_install.sh
+          bash -n install.sh tests/install_service_manager_test.sh tests/install_kernel_defaults_test.sh tests/install_paths_test.sh tests/install_name_migration_test.sh tests/singbox_isolated_install.sh
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(encoding="utf-8")) for path in pathlib.Path("tests").glob("*.py")]'
 
   build:
@@ -105,7 +105,8 @@ jobs:
           BUILD_VERSION: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || needs.test.outputs.source_sha }}
         run: |
           set -euo pipefail
-          for name in xboard-node xbctl; do
+          cmp "yz-agent-linux-${TARGET_ARCH}" "xboard-node-linux-${TARGET_ARCH}"
+          for name in yz-agent xbctl; do
             binary="${name}-linux-${TARGET_ARCH}"
             go version -m "$binary" | tee "${binary}.buildinfo.txt"
             grep -Fq "vcs.revision=${SOURCE_COMMIT}" "${binary}.buildinfo.txt"
@@ -113,6 +114,7 @@ jobs:
             grep -Fq 'GOOS=linux' "${binary}.buildinfo.txt"
             grep -Fq "GOARCH=${TARGET_ARCH}" "${binary}.buildinfo.txt"
             grep -Fq 'CGO_ENABLED=0' "${binary}.buildinfo.txt"
+            grep -Eq "^[[:space:]]*path[[:space:]]+github.com/P0me1oo/YZ-Agent/cmd/${name}$" "${binary}.buildinfo.txt"
             if [[ "$TARGET_ARCH" == amd64 ]]; then
               version_output=$("./$binary" -v)
               printf '%s\n' "$version_output"
@@ -132,12 +134,21 @@ jobs:
         with:
           name: xboard-node-${{ matrix.goos }}-${{ matrix.goarch }}
           path: xboard-node-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
 
       - name: Upload xbctl artifact
         uses: actions/upload-artifact@v4
         with:
           name: xbctl-${{ matrix.goos }}-${{ matrix.goarch }}
           path: xbctl-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
+
+      - name: Upload yz-agent artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yz-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: yz-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          if-no-files-found: error
 
   build-docker:
     name: Build & Push Docker Image
@@ -177,7 +188,7 @@ jobs:
             NODE_VERSION=${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || needs.test.outputs.source_sha }}
             SOURCE_COMMIT=${{ needs.test.outputs.source_sha }}
           tags: |
-            ghcr.io/p0me1oo/yzboard-node:${{ needs.test.outputs.source_sha }}
+            ghcr.io/p0me1oo/yz-agent:${{ needs.test.outputs.source_sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.test.outputs.source_sha }}
@@ -190,14 +201,14 @@ jobs:
           BUILD_VERSION: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || needs.test.outputs.source_sha }}
         run: |
           set -euo pipefail
-          image_index=$(docker buildx imagetools inspect "ghcr.io/p0me1oo/yzboard-node@$IMAGE_DIGEST" --raw)
+          image_index=$(docker buildx imagetools inspect "ghcr.io/p0me1oo/yz-agent@$IMAGE_DIGEST" --raw)
           for arch in amd64 arm64; do
             platform_digest=$(jq -er --arg arch "$arch" \
               '.manifests | map(select(.platform.os == "linux" and .platform.architecture == $arch)) | if length == 1 then .[0].digest else error("expected exactly one platform manifest") end' \
               <<< "$image_index")
-            version_output=$(docker run --rm --platform "linux/$arch" "ghcr.io/p0me1oo/yzboard-node@$platform_digest" -v)
+            version_output=$(docker run --rm --platform "linux/$arch" "ghcr.io/p0me1oo/yz-agent@$platform_digest" -v)
             printf '%s\n' "$version_output"
-            grep -Fq "xboard-node ${BUILD_VERSION} (built " <<< "$version_output"
+            grep -Fq "yz-agent ${BUILD_VERSION} (built " <<< "$version_output"
             grep -Fq "commit ${SOURCE_COMMIT})" <<< "$version_output"
           done
           echo "Image digest: $IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
@@ -209,9 +220,9 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_tag || github.ref_name }}
         run: |
           docker buildx imagetools create \
-            --tag "ghcr.io/p0me1oo/yzboard-node:$RELEASE_VERSION" \
-            --tag ghcr.io/p0me1oo/yzboard-node:latest \
-            "ghcr.io/p0me1oo/yzboard-node@$IMAGE_DIGEST"
+            --tag "ghcr.io/p0me1oo/yz-agent:$RELEASE_VERSION" \
+            --tag ghcr.io/p0me1oo/yz-agent:latest \
+            "ghcr.io/p0me1oo/yz-agent@$IMAGE_DIGEST"
 
   release:
     name: Release
@@ -235,13 +246,15 @@ jobs:
         run: install -m 0755 install.sh dist/install.sh
       - name: Generate checksums
         working-directory: dist
-        run: sha256sum xboard-node-linux-amd64 xboard-node-linux-arm64 xbctl-linux-amd64 xbctl-linux-arm64 install.sh *.buildinfo.txt > SHA256SUMS
+        run: sha256sum yz-agent-linux-amd64 yz-agent-linux-arm64 xboard-node-linux-amd64 xboard-node-linux-arm64 xbctl-linux-amd64 xbctl-linux-arm64 install.sh *.buildinfo.txt > SHA256SUMS
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'dev' }}
           make_latest: ${{ inputs.release_tag != '' || startsWith(github.ref, 'refs/tags/') }}
           files: |
+            dist/yz-agent-linux-amd64
+            dist/yz-agent-linux-arm64
             dist/xboard-node-linux-amd64
             dist/xboard-node-linux-arm64
             dist/xbctl-linux-amd64

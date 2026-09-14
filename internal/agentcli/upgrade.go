@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 type upgradeOperations struct {
@@ -13,6 +14,7 @@ type upgradeOperations struct {
 	run      func(string, ...string) ([]byte, error)
 	restart  func() error
 	rename   func(string, string) error
+	migrate  func(string, string) error
 }
 
 type upgradeFile struct {
@@ -26,7 +28,7 @@ type upgradeFile struct {
 // 新文件和旧文件的硬链接都位于程序分区，升级最多保存两份二进制内容。
 // 失败时只有本次创建的临时目录会被清理；无法回滚的备份会保留供恢复。
 func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) (string, error) {
-	stage, err := os.MkdirTemp(paths.binDir, ".xboard-node-upgrade-")
+	stage, err := os.MkdirTemp(paths.binDir, ".yz-agent-upgrade-")
 	if err != nil {
 		return "", fmt.Errorf("create upgrade directory: %w", err)
 	}
@@ -45,8 +47,13 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 	if err != nil {
 		return "", fmt.Errorf("read release checksums: %w", err)
 	}
+	nodeArtifact, err := releaseNodeArtifact(checksums, runtime.GOARCH)
+	if err != nil {
+		return "", err
+	}
+	nodeName := strings.TrimSuffix(nodeArtifact, "-linux-"+runtime.GOARCH)
 	files := []upgradeFile{
-		{target: paths.binary(), staged: filepath.Join(stage, "xboard-node"), backup: filepath.Join(stage, "previous-xboard-node")},
+		{target: paths.installedBinary(), staged: filepath.Join(stage, nodeName), backup: filepath.Join(stage, "previous-"+nodeName)},
 		{target: paths.cli(), staged: filepath.Join(stage, "xbctl"), backup: filepath.Join(stage, "previous-xbctl")},
 	}
 	var report []byte
@@ -72,12 +79,34 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 		}
 		if i == 0 {
 			report = out
+			// 统一程序同时提供节点和管理功能，只下载一份并复用安装事务。
+			if strings.HasPrefix(string(report), "yz-agent ") || strings.HasPrefix(string(report), "agent ") {
+				if ops.migrate == nil {
+					return "", errors.New("yz-agent installation transaction is unavailable")
+				}
+				if err := ops.migrate(files[0].staged, files[0].staged); err != nil {
+					return "", err
+				}
+				return installedVersion(release, report), nil
+			}
 		}
 	}
 	if paths.binDir != defaultBinDir {
 		if _, err := ops.run(files[1].staged, "config", "bin-dir"); err != nil {
 			return "", fmt.Errorf("release does not support custom binary directories; use the installer to migrate to %s before downgrading: %w", defaultBinDir, err)
 		}
+	}
+
+	// 附件保留历史名称；实际安装名称取自校验后的程序版本输出。
+	targetName := "xboard-node"
+	if targetName != filepath.Base(files[0].target) {
+		if ops.migrate == nil {
+			return "", errors.New("installation name migration is unavailable")
+		}
+		if err := ops.migrate(files[0].staged, files[1].staged); err != nil {
+			return "", err
+		}
+		return installedVersion(release, report), nil
 	}
 
 	for i := range files {
@@ -135,4 +164,18 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 		return "", rollback(fmt.Errorf("upgrade restart failed: %w", err), true)
 	}
 	return installedVersion(release, report), nil
+}
+
+// 优先使用正式名称；历史 Release 继续按原附件名下载并校验。
+func releaseNodeArtifact(checksums []byte, arch string) (string, error) {
+	for _, name := range []string{"yz-agent", "agent", "xboard-node"} {
+		artifact := name + "-linux-" + arch
+		for _, line := range strings.Split(string(checksums), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == artifact {
+				return artifact, nil
+			}
+		}
+	}
+	return "", errors.New("release checksums contain no supported node artifact")
 }

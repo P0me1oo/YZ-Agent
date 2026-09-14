@@ -27,7 +27,7 @@ grep -F 'respawn_max=0' "$TMP_DIR/service" >/dev/null
 grep -F 'retry="TERM/150/KILL/5"' "$TMP_DIR/service" >/dev/null
 grep -F 'key=${line%%=*}' "$TMP_DIR/service" >/dev/null
 grep -F 'export "${key}=${value}"' "$TMP_DIR/service" >/dev/null
-if grep -F '. /etc/xboard-node/credentials.env' "$TMP_DIR/service" >/dev/null; then
+if grep -F '. /etc/yz-agent/credentials.env' "$TMP_DIR/service" >/dev/null; then
     echo "OpenRC service must not execute credentials.env as a shell script" >&2
     exit 1
 fi
@@ -36,7 +36,7 @@ TMP_DIR="$TEST_ROOT/systemd"
 mkdir -p "$TMP_DIR"
 SERVICE_MANAGER="systemd"
 render_service
-grep -F 'EnvironmentFile=-/etc/xboard-node/credentials.env' "$TMP_DIR/service" >/dev/null
+grep -F 'EnvironmentFile=-/etc/yz-agent/credentials.env' "$TMP_DIR/service" >/dev/null
 grep -F 'Restart=always' "$TMP_DIR/service" >/dev/null
 grep -F 'TimeoutStopSec=150s' "$TMP_DIR/service" >/dev/null
 

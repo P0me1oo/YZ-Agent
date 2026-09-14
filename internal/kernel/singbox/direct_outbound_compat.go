@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/cedar2025/xboard-node/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 )
 
 // 只翻译有明确对应关系的旧参数；优先级、回落和其他原生选项仍由对应内核解释。

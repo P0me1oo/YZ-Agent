@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/outbound"

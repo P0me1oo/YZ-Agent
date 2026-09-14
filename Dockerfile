@@ -25,19 +25,19 @@ RUN test -n "$NODE_VERSION" && \
     -X main.version=$NODE_VERSION -X main.commit=$SOURCE_COMMIT \
     -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -tags "with_quic with_utls with_wireguard with_acme with_clash_api" \
-    -o /out/xboard-node ./cmd/xboard-node && \
-    go version -m /out/xboard-node | grep -F 'vcs.modified=false'
+    -o /out/yz-agent ./cmd/yz-agent && \
+    go version -m /out/yz-agent | grep -F 'vcs.modified=false'
 
 # Runtime stage — sing-box & xray-core are embedded as Go libraries
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata
 
-COPY --from=builder /out/xboard-node /usr/local/bin/xboard-node
+COPY --from=builder /out/yz-agent /usr/local/bin/yz-agent
 
-RUN mkdir -p /etc/xboard-node
+RUN mkdir -p /etc/yz-agent
 
-WORKDIR /etc/xboard-node
+WORKDIR /etc/yz-agent
 
 # Config can be provided via file mount OR environment variables.
 # Env var mode (no config file needed):
@@ -45,7 +45,7 @@ WORKDIR /etc/xboard-node
 #     -e apiHost=https://panel.example.com \
 #     -e apiKey=YOUR_TOKEN \
 #     -e nodeID=1 \
-#     ghcr.io/p0me1oo/yzboard-node:v1.13-yz.19
+#     ghcr.io/p0me1oo/yz-agent:v1.14.0
 #
 # Supported env vars:
 #   apiHost  / API_HOST    → panel URL
@@ -58,5 +58,5 @@ WORKDIR /etc/xboard-node
 #   keyFile  / KEY_FILE    → TLS key path
 #   logLevel / LOG_LEVEL   → log level
 
-ENTRYPOINT ["xboard-node"]
-CMD ["-c", "/etc/xboard-node/config.yml"]
+ENTRYPOINT ["yz-agent"]
+CMD ["run", "-c", "/etc/yz-agent/config.yml"]

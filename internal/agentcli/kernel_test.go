@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"os"
@@ -275,7 +275,7 @@ instances:
       node_id: 7
     kernel:
       type: singbox
-      config_dir: /etc/xboard-node/inst-a
+      config_dir: /etc/yz-agent/inst-a
     log:
       level: info
       output: stdout

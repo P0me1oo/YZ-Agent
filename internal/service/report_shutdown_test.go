@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/controlplane"
-	"github.com/cedar2025/xboard-node/internal/tracker"
+	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
+	"github.com/P0me1oo/YZ-Agent/internal/tracker"
 )
 
 type shutdownReportPlane struct {

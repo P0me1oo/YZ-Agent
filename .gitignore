@@ -1,4 +1,6 @@
 # Binaries
+/yz-agent
+/yz-agent-linux-*
 /xboard-node
 /xboard-node-linux-*
 /xbctl

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/cedar2025/xboard-node/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
 
 // snapshot is an immutable point-in-time view of tracker state.

@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cedar2025/xboard-node/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
@@ -477,7 +477,7 @@ func (rc *RootConfig) assignInstanceIDs() error {
 func configBaseDir(configPath string) string {
 	abs, err := filepath.Abs(configPath)
 	if err != nil {
-		return "/etc/xboard-node"
+		return "/etc/yz-agent"
 	}
 	return filepath.Dir(abs)
 }

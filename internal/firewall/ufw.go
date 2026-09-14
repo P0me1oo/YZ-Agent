@@ -60,7 +60,7 @@ func parseUFWStatus(output string) []ufwRule {
 
 func (b *systemBackend) ufwComment(rule Rule) string {
 	sum := sha256.Sum256([]byte(rule.key()))
-	return fmt.Sprintf("yzboard-node:%s:%x", b.scope, sum[:6])
+	return fmt.Sprintf("%s:%x", b.nftOwner(), sum[:6])
 }
 
 func (b *systemBackend) ufwArgs(rule Rule, remove bool) []string {
@@ -91,7 +91,7 @@ func (b *systemBackend) ensureUFW(ctx context.Context, owned ownedRule, existing
 		if rule.Comment == b.ufwComment(owned.Rule) {
 			return b.remember(owned)
 		}
-		if strings.HasPrefix(rule.Comment, "yzboard-node:") {
+		if strings.HasPrefix(rule.Comment, "yz-agent:") || strings.HasPrefix(rule.Comment, "yzboard-node:") {
 			return fmt.Errorf("UFW 端口 %s/%s 已由另一个 Node 进程托管，请合并到同一进程或使用独立监听地址", owned.Rule.Ports, owned.Rule.Protocol)
 		}
 		// UFW 会改写完全相同规则的注释，因此已有手工规则直接复用，不认领。

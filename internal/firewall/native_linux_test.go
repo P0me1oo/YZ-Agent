@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cedar2025/xboard-node/internal/config"
-	"github.com/cedar2025/xboard-node/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 )
 
 // 原生命令测试只能在独立 rootfs、网络命名空间和专用客户端中显式运行。

@@ -183,7 +183,7 @@ class NodeTest:
         self.node_path.write_text(json.dumps(node_config))
 
     def start_node(self):
-        self.node = self.start(["/work/xboard-node-linux-amd64", "-c", str(self.node_path)], "node")
+        self.node = self.start(["/work/yz-agent-linux-amd64", "-c", str(self.node_path)], "node")
 
     def state(self):
         if not self.state_path.exists():

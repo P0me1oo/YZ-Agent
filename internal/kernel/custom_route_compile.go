@@ -3,7 +3,7 @@ package kernel
 import (
 	"strings"
 
-	"github.com/cedar2025/xboard-node/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 )
 
 func NeedsGeoIPRules(rules []model.CustomRouteRule) bool {

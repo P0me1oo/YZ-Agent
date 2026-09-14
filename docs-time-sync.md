@@ -2,7 +2,7 @@
 
 Shadowsocks 2022 会使用 Unix 时间戳做重放防护。Unix 时间本身不受服务器时区影响，但前置与落地服务器的系统时间相差过大时，SS2022 握手仍可能被拒绝。
 
-YZboard-Node 默认启用进程内时间校准。它不会修改 Linux 系统时间，也不会安装、启动、停止或替换 `systemd-timesyncd`、chrony、ntpd 等系统服务。
+YZ-Agent 默认启用进程内时间校准。它不会修改 Linux 系统时间，也不会安装、启动、停止或替换 `systemd-timesyncd`、chrony、ntpd 等系统服务。
 
 ## 生效范围
 
@@ -90,8 +90,8 @@ time_sync:
 ## 主动诊断
 
 ```bash
-xbctl doctor time
-xbctl doctor time --config /etc/xboard-node/config.yml --output json
+yz-agent doctor time
+yz-agent doctor time --config /etc/yz-agent/config.yml --output json
 ```
 
 该命令直接查询配置中的 NTP 源并输出偏移、来源和状态，不需要面板 Token，也不修改系统时间。即使运行时自动校准被关闭，诊断命令仍会执行一次只读探测。探测失败或状态不是 `normal` 时返回非零退出码。

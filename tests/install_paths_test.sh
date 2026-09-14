@@ -44,7 +44,9 @@ BIN_DIR_FILE="$INSTALL_ROOT/bin-dir"
 DEFAULT_BIN_DIR="$CASE_ROOT/original"
 BIN_DIR="$CASE_ROOT/target"
 CLI_SYMLINK_PATH="$CASE_ROOT/entry/xbctl"
-SERVICE_PATH="$CASE_ROOT/service"
+SERVICE_PATH="$CASE_ROOT/xboard-node"
+SERVICE_NAME=xboard-node
+APP_NAME=xboard-node
 INSTALLER_COPY_PATH="$INSTALL_ROOT/install.sh"
 SERVICE_MANAGER=openrc
 HEALTH_ENABLED=0
@@ -95,6 +97,14 @@ CLI
 chmod 755 "$CASE_ROOT/package/"*
 BINARY_SOURCE="$CASE_ROOT/package/xboard-node"
 CLI_BINARY_SOURCE="$CASE_ROOT/package/xbctl"
+
+if [ "$CASE_NAME" = fresh ]; then
+    cp "$CLI_BINARY_SOURCE" "$BINARY_SOURCE"
+    sed -i '/^case /i if [ "${1-}" = -v ]; then printf "yz-agent v1.14.0\\n"; exit 0; fi' "$BINARY_SOURCE"
+    SERVICE_NAME=yz-agent
+    APP_NAME=yz-agent
+    SERVICE_PATH="$CASE_ROOT/yz-agent"
+fi
 
 if [ "$CASE_NAME" != fresh ]; then
     printf '#!/usr/bin/env bash\nprintf old-xboard-node\\n\n' >"$DEFAULT_BIN_DIR/xboard-node"
@@ -210,7 +220,7 @@ for case_name in fresh migrate repeat uninstall replace-failure restart-failure-
         cat "$TEST_ROOT/$case_name.log" >&2
         require_equal "$actual" "$expected" "$case_name 退出状态"
     fi
-    if find "$case_root" "$TEST_BIN_ROOT/$case_name" -name '.xboard-node-install.*' -o -name '.xbctl-entry.*' -o -name '.install-lock' | grep .; then
+    if find "$case_root" "$TEST_BIN_ROOT/$case_name" -name '.yz-agent-install.*' -o -name '.yz-agent-entry.*' -o -name '.install-lock' | grep .; then
         echo "$case_name 未清理本次临时文件或锁" >&2
         exit 1
     fi
@@ -219,15 +229,23 @@ for case_name in fresh migrate repeat uninstall replace-failure restart-failure-
         fresh|migrate|repeat|entry-in-old-dir|entry-in-new-dir)
             installed=$(cd "$case_root/target" && pwd -P)
             [ "$case_name" != entry-in-new-dir ] || installed="$case_root/entry"
-            cmp "$installed/xboard-node" "$case_root/package/xboard-node"
-            cmp "$installed/xbctl" "$case_root/package/xbctl"
+            node_name=xboard-node
+            [ "$case_name" != fresh ] || node_name=yz-agent
+            cmp "$installed/$node_name" "$case_root/package/xboard-node"
+            if [ "$case_name" = fresh ]; then
+                [ ! -e "$installed/xbctl" ]
+            else
+                cmp "$installed/xbctl" "$case_root/package/xbctl"
+            fi
             require_equal "$(cat "$case_root/etc/bin-dir")" "$installed" "$case_name 保存目录"
-            grep -F "command=\"$installed/xboard-node\"" "$case_root/service" >/dev/null
-            grep -F 'need net localmount' "$case_root/service" >/dev/null
+            grep -F "command=\"$installed/$node_name\"" "$case_root/$node_name" >/dev/null
+            grep -F 'need net localmount' "$case_root/$node_name" >/dev/null
             if [ "$case_name" != entry-in-new-dir ]; then
-                entry="$case_root/entry/xbctl"
+                cli_name=xbctl
+                [ "$case_name" != fresh ] || cli_name=yz-agent
+                entry="$case_root/entry/$cli_name"
                 [ "$case_name" != entry-in-old-dir ] || entry="$case_root/original/xbctl"
-                require_equal "$(readlink "$entry")" "$installed/xbctl" "$case_name 管理入口"
+                require_equal "$(readlink "$entry")" "$installed/$cli_name" "$case_name 管理入口"
             fi
             [ ! -f "$case_root/original/xboard-node" ]
             ;;
@@ -240,7 +258,7 @@ for case_name in fresh migrate repeat uninstall replace-failure restart-failure-
         *)
             cmp "$case_root/original/xboard-node" "$case_root/original-node-fixture"
             cmp "$case_root/original/xbctl" "$case_root/original-cli-fixture"
-            require_equal "$(cat "$case_root/service")" original-service "$case_name 恢复服务"
+            require_equal "$(cat "$case_root/xboard-node")" original-service "$case_name 恢复服务"
             require_equal "$(cat "$case_root/etc/install-meta.json")" '{"version":"original"}' "$case_name 恢复元数据"
             if [ "$case_name" = conflict ]; then
                 require_equal "$(cat "$case_root/target/xboard-node")" unrelated-program '目标冲突不能覆盖文件'

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cedar2025/xboard-node/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
 )
 
 type ownedRule struct {
@@ -18,6 +18,7 @@ type ownedRule struct {
 type savedState struct {
 	Version          int         `json:"version"`
 	Scope            string      `json:"scope"`
+	Namespace        string      `json:"namespace,omitempty"`
 	Owned            []ownedRule `json:"owned,omitempty"`
 	Redirect         string      `json:"redirect_backend,omitempty"`
 	RedirectFamilies []int       `json:"redirect_families,omitempty"`
@@ -45,12 +46,13 @@ func newSystemBackend(cfg config.FirewallConfig, scope string, runner commands) 
 		return nil, err
 	}
 	b := &systemBackend{cfg: cfg, scope: scope, commands: runner, path: path, lock: lock,
-		state: savedState{Version: 1, Scope: scope}}
+		state: savedState{Version: 1, Scope: scope, Namespace: "yz-agent"}}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return b, nil
 	}
 	if err == nil {
+		b.state = savedState{}
 		err = json.Unmarshal(data, &b.state)
 	}
 	if err == nil {
@@ -66,6 +68,9 @@ func newSystemBackend(cfg config.FirewallConfig, scope string, runner commands) 
 func (b *systemBackend) validateState() error {
 	if b.state.Version != 1 || b.state.Scope != b.scope {
 		return fmt.Errorf("防火墙状态版本或实例标识不匹配")
+	}
+	if b.state.Namespace != "" && b.state.Namespace != "yz-agent" {
+		return fmt.Errorf("未知的防火墙规则名称空间")
 	}
 	if b.state.Redirect != "" && b.state.Redirect != "nftables" && b.state.Redirect != "iptables" {
 		return fmt.Errorf("无效的端口转发状态")

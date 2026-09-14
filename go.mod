@@ -1,4 +1,4 @@
-module github.com/cedar2025/xboard-node
+module github.com/P0me1oo/YZ-Agent
 
 go 1.26
 

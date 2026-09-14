@@ -1,4 +1,4 @@
-package main
+package agentcli
 
 import (
 	"crypto/sha256"
@@ -48,6 +48,93 @@ func upgradeFixture(t *testing.T) (installPaths, upgradeOperations) {
 	return paths, ops
 }
 
+func TestUpgradeDelegatesNameMigrationBeforeReplacingFiles(t *testing.T) {
+	paths, ops := upgradeFixture(t)
+	ops.run = func(string, ...string) ([]byte, error) { return []byte("yz-agent v1.14.0 (test build)"), nil }
+	called := false
+	ops.migrate = func(node, cli string) error {
+		called = true
+		requireFileContents(t, node, "new-xboard-node")
+		if cli != node {
+			t.Fatal("统一程序必须复用同一下载文件")
+		}
+		requireFileContents(t, paths.installedBinary(), "old-xboard-node")
+		requireFileContents(t, paths.cli(), "old-xbctl")
+		return errors.New("模拟迁移失败")
+	}
+	if _, err := upgradeBinaries(paths, "v1.14.0", ops); err == nil || !called {
+		t.Fatalf("迁移未执行或未返回错误: %v", err)
+	}
+	requireOriginalUpgradeFiles(t, paths)
+}
+
+func TestUpgradePrefersCanonicalArtifactAndDownloadsOnce(t *testing.T) {
+	paths, ops := upgradeFixture(t)
+	artifact := "yz-agent-linux-" + runtime.GOARCH
+	downloads := 0
+	ops.download = func(url, destination string) error {
+		if path.Base(url) == "SHA256SUMS" {
+			return os.WriteFile(destination, []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte("new-yz-agent")), artifact)), 0o600)
+		}
+		if path.Base(url) != artifact {
+			t.Fatalf("新版不应下载历史附件: %s", path.Base(url))
+		}
+		downloads++
+		return os.WriteFile(destination, []byte("new-yz-agent"), 0o600)
+	}
+	ops.run = func(string, ...string) ([]byte, error) { return []byte("yz-agent v1.14.0"), nil }
+	ops.migrate = func(node, cli string) error {
+		if node != cli {
+			t.Fatal("节点和管理命令必须复用同一文件")
+		}
+		requireFileContents(t, node, "new-yz-agent")
+		return nil
+	}
+	if _, err := upgradeBinaries(paths, "v1.14.0", ops); err != nil {
+		t.Fatal(err)
+	}
+	if downloads != 1 {
+		t.Fatalf("程序下载次数 = %d", downloads)
+	}
+	requireNoUpgradeStage(t, paths)
+}
+
+func TestUpgradeAgentInPlaceKeepsAgentFilename(t *testing.T) {
+	paths, ops := upgradeFixture(t)
+	if err := os.Rename(paths.installedBinary(), paths.binary()); err != nil {
+		t.Fatal(err)
+	}
+	ops.run = func(string, ...string) ([]byte, error) { return []byte("yz-agent v1.14.0 (test build)"), nil }
+	ops.migrate = func(node, cli string) error {
+		if node != cli {
+			t.Fatal("统一程序不应下载独立管理器")
+		}
+		return os.Rename(node, paths.binary())
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := upgradeBinaries(paths, "v1.14.0", ops); err != nil {
+			t.Fatal(err)
+		}
+		requireFileContents(t, paths.binary(), "new-xboard-node")
+		if _, err := os.Stat(filepath.Join(paths.binDir, "xboard-node")); !os.IsNotExist(err) {
+			t.Fatalf("升级不应恢复旧文件名: %v", err)
+		}
+		requireNoUpgradeStage(t, paths)
+	}
+}
+
+func TestUpgradeAgentDowngradeUsesMigration(t *testing.T) {
+	paths, ops := upgradeFixture(t)
+	if err := os.Rename(paths.installedBinary(), paths.binary()); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	ops.migrate = func(node, cli string) error { called = true; return nil }
+	if _, err := upgradeBinaries(paths, "v1.13-yz.23", ops); err != nil || !called {
+		t.Fatalf("历史版本回退必须迁移程序和服务名称: %v", err)
+	}
+}
+
 func requireFileContents(t *testing.T, file, expected string) {
 	t.Helper()
 	data, err := os.ReadFile(file)
@@ -58,7 +145,7 @@ func requireFileContents(t *testing.T, file, expected string) {
 
 func requireOriginalUpgradeFiles(t *testing.T, paths installPaths) {
 	t.Helper()
-	requireFileContents(t, paths.binary(), "old-xboard-node")
+	requireFileContents(t, paths.installedBinary(), "old-xboard-node")
 	requireFileContents(t, paths.cli(), "old-xbctl")
 	requireNoUpgradeStage(t, paths)
 }
@@ -70,7 +157,7 @@ func requireNoUpgradeStage(t *testing.T, paths installPaths) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".xboard-node-upgrade-") {
+		if strings.HasPrefix(entry.Name(), ".yz-agent-upgrade-") {
 			t.Fatalf("升级留下临时目录: %s", entry.Name())
 		}
 	}
@@ -98,7 +185,7 @@ func TestUpgradeUsesTwoCopiesAndSupportsRepeatedCalls(t *testing.T) {
 			return os.Rename(source, destination)
 		}
 		ops.restart = func() error {
-			stages, err := filepath.Glob(filepath.Join(paths.binDir, ".xboard-node-upgrade-*"))
+			stages, err := filepath.Glob(filepath.Join(paths.binDir, ".yz-agent-upgrade-*"))
 			if err != nil || len(stages) != 1 {
 				t.Fatalf("升级临时目录 = %v, 错误 = %v", stages, err)
 			}
@@ -208,7 +295,7 @@ func TestUpgradeRestartsOriginalFilesOnFailure(t *testing.T) {
 		if restarts == 1 {
 			return errors.New("new service failed")
 		}
-		requireFileContents(t, paths.binary(), "old-xboard-node")
+		requireFileContents(t, paths.installedBinary(), "old-xboard-node")
 		requireFileContents(t, paths.cli(), "old-xbctl")
 		return nil
 	}
@@ -235,7 +322,7 @@ func TestUpgradePreservesBackupWhenRollbackFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "recovery files retained") {
 		t.Fatalf("应指出恢复文件位置: %v", err)
 	}
-	stages, err := filepath.Glob(filepath.Join(paths.binDir, ".xboard-node-upgrade-*"))
+	stages, err := filepath.Glob(filepath.Join(paths.binDir, ".yz-agent-upgrade-*"))
 	if err != nil || len(stages) != 1 {
 		t.Fatalf("恢复目录 = %v, 错误 = %v", stages, err)
 	}

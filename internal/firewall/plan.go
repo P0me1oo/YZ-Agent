@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cedar2025/xboard-node/internal/model"
-	"github.com/cedar2025/xboard-node/internal/portset"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/portset"
 )
 
 // Rule 只保存监听地址、协议和端口，不保存节点凭据或完整运行配置。

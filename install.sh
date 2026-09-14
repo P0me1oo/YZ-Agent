@@ -8,8 +8,14 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-APP_NAME="xboard-node"
-INSTALL_ROOT="/etc/xboard-node"
+APP_NAME="yz-agent"
+CURRENT_INSTALL_ROOT="/etc/yz-agent"
+LEGACY_INSTALL_ROOT="/etc/xboard-node"
+INSTALL_ROOT="$CURRENT_INSTALL_ROOT"
+PREVIOUS_INSTALL_ROOT=""
+TARGET_INSTALL_ROOT=""
+ROOT_MIGRATION_STARTED=0
+ROOT_SOURCE_ID=""
 BACKUP_DIR="${INSTALL_ROOT}/backups"
 INSTALL_META="${INSTALL_ROOT}/install-meta.json"
 CONFIG_FILE="${INSTALL_ROOT}/config.yml"
@@ -20,18 +26,22 @@ BIN_DIR_FILE="${INSTALL_ROOT}/bin-dir"
 PREVIOUS_BIN_DIR=""
 PREVIOUS_BINARY_PATH=""
 PREVIOUS_CLI_PATH=""
-BINARY_PATH="/usr/local/bin/xboard-node"
-SERVICE_NAME="xboard-node"
+PREVIOUS_CLI_ENTRY_PATH=""
+BINARY_PATH="/usr/local/bin/yz-agent"
+SERVICE_NAME="yz-agent"
 SYSTEMD_SERVICE_NAME="${SERVICE_NAME}.service"
 SYSTEMD_SERVICE_PATH="/etc/systemd/system/${SYSTEMD_SERVICE_NAME}"
 OPENRC_SERVICE_PATH="/etc/init.d/${SERVICE_NAME}"
 OPENRC_LOG_PATH="/var/log/${SERVICE_NAME}.log"
 SERVICE_MANAGER=""
 SERVICE_PATH=""
-CLI_PATH="/usr/local/bin/xbctl"
-CLI_SYMLINK_PATH="/usr/bin/xbctl"
+CLI_NAME="yz-agent"
+CLI_PATH="/usr/local/bin/yz-agent"
+CLI_SYMLINK_PATH="/usr/bin/yz-agent"
+RUN_COMMAND="run "
 INSTALLER_COPY_PATH="${INSTALL_ROOT}/install.sh"
 CLI_BINARY_SOURCE=""
+FIREWALL_CLEANUP_PROGRAM=""
 DEFAULT_HEALTH_PORT=65530
 DEFAULT_KERNEL="singbox"
 DEFAULT_MODE="node"
@@ -39,7 +49,7 @@ DEFAULT_ACTION="install"
 DEFAULT_RELEASE_VERSION="latest"
 DEFAULT_LOG_LEVEL="info"
 DEFAULT_KERNEL_LOG_LEVEL="warn"
-DEFAULT_DOWNLOAD_BASE="https://github.com/P0me1oo/YZboard-Node/releases"
+DEFAULT_DOWNLOAD_BASE="https://github.com/P0me1oo/YZ-Agent/releases"
 
 ACTION="${DEFAULT_ACTION}"
 MODE=""
@@ -78,6 +88,12 @@ INSTALL_COMMITTED=0
 BACKUP_PATH=""
 BACKUP_PENDING=""
 SERVICE_EXISTED=0
+REPLACEMENT_SERVICE_STARTED=0
+PREVIOUS_SERVICE_NAME=""
+PREVIOUS_SERVICE_PATH=""
+NAME_CHANGED=0
+OLD_SERVICE_DISABLED=0
+OLD_SERVICE_ENABLED=0
 CLEANUP_DONE=0
 
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
@@ -137,11 +153,26 @@ same_directory_entry() {
 
 rollback_install() {
     log_warn "Rolling back installation"
-    service_stop >/dev/null 2>&1 || true
+    if [ -f "$SERVICE_PATH" ] || service_is_active; then
+        if ! service_stop >/dev/null 2>&1; then
+            ROLLBACK_FAILED=1
+            log_error "Could not stop the replacement service; recovery files retained"
+            return 1
+        fi
+    fi
+    if [ "$REPLACEMENT_SERVICE_STARTED" -eq 1 ]; then
+        if ! cleanup_installation_firewall; then
+            ROLLBACK_FAILED=1
+            log_error "Could not clean replacement firewall rules; recovery files retained"
+            return 1
+        fi
+    fi
     local failed=0 name target previous
     if [ "$BINARIES_CHANGED" -eq 1 ]; then
-        for name in xboard-node xbctl; do
-            if [ "$name" = xboard-node ] && [ "$BINARY_REPLACE_STARTED" -eq 0 ]; then continue; fi
+        local names=("$APP_NAME")
+        if [ "$CLI_NAME" != "$APP_NAME" ]; then names+=("$CLI_NAME"); fi
+        for name in "${names[@]}"; do
+            if [ "$name" = "$APP_NAME" ] && [ "$BINARY_REPLACE_STARTED" -eq 0 ]; then continue; fi
             if [ "$name" = xbctl ] && [ "$CLI_REPLACE_STARTED" -eq 0 ]; then continue; fi
             target="$BIN_DIR/$name"
             previous="$BIN_STAGE_DIR/previous-$name"
@@ -165,13 +196,14 @@ rollback_install() {
     fi
     if [ -n "$BACKUP_PATH" ] && [ -d "$BACKUP_PATH" ]; then
         local item mode
-        for item in config.yml credentials.env install-meta.json bin-dir service; do
+        for item in config.yml credentials.env install-meta.json bin-dir install.sh service; do
             case "$item" in
                 config.yml) target="$CONFIG_FILE"; mode=600 ;;
                 credentials.env) target="$CREDENTIALS_FILE"; mode=600 ;;
                 install-meta.json) target="$INSTALL_META"; mode=644 ;;
                 bin-dir) target="$BIN_DIR_FILE"; mode=644 ;;
-                service) target="$SERVICE_PATH"; mode=$(service_file_mode) ;;
+                install.sh) target="$INSTALLER_COPY_PATH"; mode=755 ;;
+                service) target="${PREVIOUS_SERVICE_PATH:-$SERVICE_PATH}"; mode=$(service_file_mode) ;;
             esac
             if [ -f "$BACKUP_PATH/$item" ]; then
                 install -m "$mode" "$BACKUP_PATH/$item" "$target" || failed=1
@@ -179,6 +211,13 @@ rollback_install() {
                 rm -f "$target" || failed=1
             fi
         done
+    fi
+    restore_install_root || failed=1
+    if [ "$NAME_CHANGED" -eq 1 ]; then
+        service_disable >/dev/null 2>&1 || true
+        rm -f "$SERVICE_PATH" || failed=1
+        set_service_name "$PREVIOUS_SERVICE_NAME"
+        if [ "$OLD_SERVICE_DISABLED" -eq 1 ] && [ "$OLD_SERVICE_ENABLED" -eq 1 ]; then service_enable || failed=1; fi
     fi
     if [ "$failed" -ne 0 ]; then
         ROLLBACK_FAILED=1
@@ -236,7 +275,7 @@ trap 'on_signal 143' TERM
 usage() {
     cat <<'HELP'
 
-  xboard-node Installer
+  yz-agent Installer
 
   ACTIONS:
     install      Install or reconcile the configured deployment (default)
@@ -263,21 +302,21 @@ usage() {
     --node-type, -T     Explicit node type for node mode
     --kernel, -k        xray 或 singbox；新建默认 singbox，VLESS 默认 xray，已有实例保留原内核
     --version           Release version or latest (default: latest)
-    --binary            Use a local xboard-node binary path instead of downloading
-    --xbctl-binary      Use a local xbctl binary path instead of downloading
+    --binary            Use a local yz-agent binary path instead of downloading
+    --xbctl-binary      Use a local management binary for historical releases
     --bin-dir           程序目录，默认 /usr/local/bin；升级时可迁移已有安装
     --health-port       Local health port (default: 65530, use 0 to disable)
     --gomemlimit        Runtime GOMEMLIMIT value, e.g. 256MiB
     --gogc              Runtime GOGC value, e.g. 50
     --force-reconfigure Overwrite an existing install even if mode/target changed
-    --purge             With uninstall, delete /etc/xboard-node too
+    --purge             With uninstall, delete the installation data directory too
     --yes, -y           Non-interactive confirmation for destructive operations
 
   EXAMPLES:
     sudo bash install.sh --panel https://panel.example.com --token TOKEN --node-id 1
     sudo bash install.sh --panel https://panel.example.com --token TOKEN --machine-id 1
     sudo bash install.sh upgrade
-    sudo bash install.sh upgrade --bin-dir /boot/xboard-node
+    sudo bash install.sh upgrade --bin-dir /boot/yz-agent
     sudo bash install.sh uninstall --purge --yes
 
 HELP
@@ -471,7 +510,43 @@ normalize_bin_dir() {
     printf '%s\n' "$dir"
 }
 
+set_install_root() {
+    local previous="$INSTALL_ROOT"
+    INSTALL_ROOT="$1"
+    BACKUP_DIR="$INSTALL_ROOT/backups"
+    CONFIG_FILE="$INSTALL_ROOT/config.yml"
+    CREDENTIALS_FILE="$INSTALL_ROOT/credentials.env"
+    INSTALL_META="$INSTALL_ROOT/install-meta.json"
+    BIN_DIR_FILE="$INSTALL_ROOT/bin-dir"
+    INSTALLER_COPY_PATH="$INSTALL_ROOT/install.sh"
+    if [[ "$BACKUP_PATH" == "$previous/"* ]]; then BACKUP_PATH="$INSTALL_ROOT/${BACKUP_PATH#"$previous/"}"; fi
+}
+
+select_install_root() {
+    if { [ -e "$CURRENT_INSTALL_ROOT" ] || [ -L "$CURRENT_INSTALL_ROOT" ]; } &&
+       { [ -e "$LEGACY_INSTALL_ROOT" ] || [ -L "$LEGACY_INSTALL_ROOT" ]; }; then
+        log_error "Both installation directories exist; resolve the directory conflict first"
+        return 1
+    fi
+    if [ -e "$LEGACY_INSTALL_ROOT" ] || [ -L "$LEGACY_INSTALL_ROOT" ]; then
+        set_install_root "$LEGACY_INSTALL_ROOT"
+    else
+        set_install_root "$CURRENT_INSTALL_ROOT"
+    fi
+}
+
 load_install_paths() {
+    local installed_service="" name
+    for name in yz-agent agent xboard-node; do
+        if [ -e "$(dirname "$SYSTEMD_SERVICE_PATH")/$name.service" ] ||
+           [ -e "$(dirname "$OPENRC_SERVICE_PATH")/$name" ]; then
+            if [ -n "$installed_service" ]; then
+                log_error "Multiple installation service names exist; resolve the service conflict first"
+                return 1
+            fi
+            installed_service="$name"
+        fi
+    done
     local saved="$DEFAULT_BIN_DIR"
     if [ -f "$BIN_DIR_FILE" ]; then
         local saved_lines=()
@@ -491,10 +566,22 @@ load_install_paths() {
     if [ -d "$BIN_DIR" ]; then
         BIN_DIR=$(cd "$BIN_DIR" && pwd -P)
     fi
-    PREVIOUS_BINARY_PATH="$PREVIOUS_BIN_DIR/xboard-node"
-    PREVIOUS_CLI_PATH="$PREVIOUS_BIN_DIR/xbctl"
-    BINARY_PATH="$BIN_DIR/xboard-node"
-    CLI_PATH="$BIN_DIR/xbctl"
+    if [ -n "$installed_service" ]; then
+        set_service_name "$installed_service"
+    else
+        for name in yz-agent agent xboard-node; do
+            if [ -e "$PREVIOUS_BIN_DIR/$name" ]; then set_service_name "$name"; break; fi
+        done
+    fi
+    APP_NAME="$SERVICE_NAME"
+    PREVIOUS_BINARY_PATH="$PREVIOUS_BIN_DIR/$APP_NAME"
+    CLI_NAME="$APP_NAME"
+    [ "$APP_NAME" != xboard-node ] || CLI_NAME=xbctl
+    CLI_SYMLINK_PATH="$(dirname "$CLI_SYMLINK_PATH")/$CLI_NAME"
+    PREVIOUS_CLI_ENTRY_PATH="$CLI_SYMLINK_PATH"
+    PREVIOUS_CLI_PATH="$PREVIOUS_BIN_DIR/$CLI_NAME"
+    BINARY_PATH="$BIN_DIR/$APP_NAME"
+    CLI_PATH="$BIN_DIR/$CLI_NAME"
     if [ "$ACTION" != install ] && [ "$ACTION" != upgrade ] && [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
         log_error "Use install or upgrade to change --bin-dir" >&2
         return 1
@@ -503,11 +590,162 @@ load_install_paths() {
 
 lock_installation() {
     mkdir -p "$INSTALL_ROOT"
+    if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ] && [ -d "$INSTALL_ROOT/.install-lock" ]; then
+        return
+    fi
     if ! mkdir "$INSTALL_ROOT/.install-lock"; then
         log_error "Another installer may be running; check $INSTALL_ROOT/.install-lock before retrying" >&2
         return 1
     fi
     LOCK_HELD=1
+}
+
+# 程序与服务一起迁移，历史名称只用于发现旧安装和版本回退。
+set_service_name() {
+    SERVICE_NAME="$1"
+    RUN_COMMAND="run "
+    [ "$SERVICE_NAME" != xboard-node ] || RUN_COMMAND=""
+    SYSTEMD_SERVICE_NAME="${SERVICE_NAME}.service"
+    SYSTEMD_SERVICE_PATH="$(dirname "$SYSTEMD_SERVICE_PATH")/$SYSTEMD_SERVICE_NAME"
+    OPENRC_SERVICE_PATH="$(dirname "$OPENRC_SERVICE_PATH")/$SERVICE_NAME"
+    OPENRC_LOG_PATH="$(dirname "$OPENRC_LOG_PATH")/$SERVICE_NAME.log"
+    if [ -n "$SERVICE_PATH" ]; then
+        case "$SERVICE_MANAGER" in
+            systemd) SERVICE_PATH="$(dirname "$SERVICE_PATH")/$SYSTEMD_SERVICE_NAME" ;;
+            openrc) SERVICE_PATH="$(dirname "$SERVICE_PATH")/$SERVICE_NAME" ;;
+        esac
+    fi
+}
+
+select_target_name() {
+    local report="$1" target=xboard-node
+    case "$report" in 'yz-agent '*) target=yz-agent ;; 'agent '*) target=agent ;; esac
+    PREVIOUS_SERVICE_NAME="$SERVICE_NAME"
+    PREVIOUS_SERVICE_PATH="$SERVICE_PATH"
+    if [ "$target" != "$SERVICE_NAME" ]; then
+        set_service_name "$target"
+        # 同名目标必须由当前安装拥有，不能覆盖其他程序或服务。
+        if [ -e "$SERVICE_PATH" ] || [ -L "$SERVICE_PATH" ] ||
+           [ -e "$BIN_DIR/$target" ] || [ -L "$BIN_DIR/$target" ]; then
+            log_error "Name migration destination already exists: $SERVICE_PATH or $BIN_DIR/$target"
+            return 1
+        fi
+        NAME_CHANGED=1
+    fi
+    APP_NAME="$target"
+    BINARY_PATH="$BIN_DIR/$APP_NAME"
+    CLI_NAME="$APP_NAME"
+    [ "$APP_NAME" != xboard-node ] || CLI_NAME=xbctl
+    CLI_PATH="$BIN_DIR/$CLI_NAME"
+    CLI_SYMLINK_PATH="$(dirname "$CLI_SYMLINK_PATH")/$CLI_NAME"
+    if [ "$CLI_SYMLINK_PATH" != "$PREVIOUS_CLI_ENTRY_PATH" ] &&
+       [ "$CLI_SYMLINK_PATH" != "$CLI_PATH" ] &&
+       { [ -e "$CLI_SYMLINK_PATH" ] || [ -L "$CLI_SYMLINK_PATH" ]; }; then
+        log_error "Command entry already exists: $CLI_SYMLINK_PATH"
+        return 1
+    fi
+    if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ] && { [ -e "$BINARY_PATH" ] || [ -L "$BINARY_PATH" ]; }; then
+        log_error "Destination already exists: $BINARY_PATH"
+        return 1
+    fi
+}
+
+select_target_root() {
+    if [ "$APP_NAME" = yz-agent ]; then
+        FIREWALL_CLEANUP_PROGRAM="$BIN_STAGE_DIR/xboard-node"
+    elif [ -x "$PREVIOUS_BINARY_PATH" ]; then
+        case "$("$PREVIOUS_BINARY_PATH" -v)" in 'yz-agent '*) FIREWALL_CLEANUP_PROGRAM="$PREVIOUS_BINARY_PATH" ;; esac
+    fi
+    PREVIOUS_INSTALL_ROOT="$INSTALL_ROOT"
+    TARGET_INSTALL_ROOT="$INSTALL_ROOT"
+    # 测试和调用方指定的独立目录沿用原路径。
+    if [ "$INSTALL_ROOT" != "$CURRENT_INSTALL_ROOT" ] && [ "$INSTALL_ROOT" != "$LEGACY_INSTALL_ROOT" ]; then return; fi
+    TARGET_INSTALL_ROOT="$CURRENT_INSTALL_ROOT"
+    [ "$APP_NAME" = yz-agent ] || TARGET_INSTALL_ROOT="$LEGACY_INSTALL_ROOT"
+    if [ "$TARGET_INSTALL_ROOT" = "$INSTALL_ROOT" ]; then return; fi
+    if [ -e "$TARGET_INSTALL_ROOT" ] || [ -L "$TARGET_INSTALL_ROOT" ]; then
+        log_error "Installation directory destination already exists: $TARGET_INSTALL_ROOT"
+        return 1
+    fi
+    if [ -L "$INSTALL_ROOT" ] ||
+       [ "$(stat -c %d "$INSTALL_ROOT")" != "$(stat -c %d "$(dirname "$TARGET_INSTALL_ROOT")")" ]; then
+        log_error "Installation directory migration requires a regular directory on the same filesystem"
+        return 1
+    fi
+    local program_dir
+    for program_dir in "$BIN_DIR" "$PREVIOUS_BIN_DIR"; do
+        if [ "$program_dir" = "$INSTALL_ROOT" ] || [[ "$program_dir" == "$INSTALL_ROOT/"* ]]; then
+            log_error "Move the program directory outside the installation data directory before renaming"
+            return 1
+        fi
+    done
+    ROOT_SOURCE_ID=$(stat -c '%d:%i' "$INSTALL_ROOT")
+}
+
+cleanup_installation_firewall() {
+    [ -f "$CONFIG_FILE" ] || return 0
+    local helper="$FIREWALL_CLEANUP_PROGRAM"
+    if [ "$APP_NAME" = yz-agent ] && [ "$BINARY_REPLACE_STARTED" -eq 1 ] && [ -x "$BINARY_PATH" ]; then helper="$BINARY_PATH"; fi
+    [ -n "$helper" ] || return 0
+    "$helper" config cleanup-firewall --config "$CONFIG_FILE"
+}
+
+prepare_root_config() {
+    [ "$TARGET_INSTALL_ROOT" != "$INSTALL_ROOT" ] || return 0
+    local source="$CONFIG_FILE" helper="$PREVIOUS_BINARY_PATH"
+    [ ! -f "$TMP_DIR/config.yml" ] || source="$TMP_DIR/config.yml"
+    [ -f "$source" ] || return 0
+    [ "$APP_NAME" != yz-agent ] || helper="$BIN_STAGE_DIR/xboard-node"
+    "$helper" config migrate-root --config "$source" --output "$TMP_DIR/migrated-config.yml" \
+        --from "$INSTALL_ROOT" --to "$TARGET_INSTALL_ROOT"
+    chmod 600 "$TMP_DIR/migrated-config.yml"
+    if [ "$source" = "$TMP_DIR/config.yml" ]; then
+        mv -f "$TMP_DIR/migrated-config.yml" "$TMP_DIR/config.yml"
+    fi
+}
+
+migrate_install_root() {
+    [ "$TARGET_INSTALL_ROOT" != "$INSTALL_ROOT" ] || return 0
+    ROOT_MIGRATION_STARTED=1
+    mv -T "$INSTALL_ROOT" "$TARGET_INSTALL_ROOT"
+    set_install_root "$TARGET_INSTALL_ROOT"
+    # 父升级进程仍持有原路径的锁；事务期间旧路径指向同一把锁。
+    ln -s "$TARGET_INSTALL_ROOT" "$PREVIOUS_INSTALL_ROOT"
+    if [ -f "$TMP_DIR/migrated-config.yml" ]; then
+        install -m 600 "$TMP_DIR/migrated-config.yml" "$CONFIG_FILE"
+    fi
+}
+
+restore_install_root() {
+    [ "$ROOT_MIGRATION_STARTED" -eq 1 ] || return 0
+    if [ "$(stat -c '%d:%i' "$TARGET_INSTALL_ROOT" 2>/dev/null)" != "$ROOT_SOURCE_ID" ]; then
+        [ "$(stat -c '%d:%i' "$PREVIOUS_INSTALL_ROOT" 2>/dev/null)" = "$ROOT_SOURCE_ID" ]
+        return
+    fi
+    if [ -L "$PREVIOUS_INSTALL_ROOT" ] && [ "$(readlink "$PREVIOUS_INSTALL_ROOT")" = "$TARGET_INSTALL_ROOT" ]; then
+        rm "$PREVIOUS_INSTALL_ROOT" || return 1
+    elif [ -e "$PREVIOUS_INSTALL_ROOT" ] || [ -L "$PREVIOUS_INSTALL_ROOT" ]; then
+        log_error "Original installation path is occupied; retaining the migrated directory for recovery"
+        return 1
+    fi
+    mv -T "$TARGET_INSTALL_ROOT" "$PREVIOUS_INSTALL_ROOT" || return 1
+    set_install_root "$PREVIOUS_INSTALL_ROOT"
+    ROOT_MIGRATION_STARTED=0
+}
+
+stop_previous_service() {
+    if [ "$NAME_CHANGED" -eq 1 ] && [ -f "$PREVIOUS_SERVICE_PATH" ]; then
+        case "$SERVICE_MANAGER" in
+            systemd)
+                if systemctl is-enabled "$PREVIOUS_SERVICE_NAME.service" >/dev/null 2>&1; then OLD_SERVICE_ENABLED=1; fi
+                systemctl stop "$PREVIOUS_SERVICE_NAME.service"
+                ;;
+            openrc)
+                if rc-update show default | awk -v name="$PREVIOUS_SERVICE_NAME" '$1 == name { found=1 } END { exit !found }'; then OLD_SERVICE_ENABLED=1; fi
+                rc-service "$PREVIOUS_SERVICE_NAME" stop
+                ;;
+        esac
+    fi
 }
 
 service_file_mode() {
@@ -625,11 +863,16 @@ ensure_dirs() {
     chmod 700 "$INSTALL_ROOT"
     BIN_DIR=$(cd "$BIN_DIR" && pwd -P)
     BIN_DIR=$(normalize_bin_dir "$BIN_DIR")
-    BINARY_PATH="$BIN_DIR/xboard-node"
-    CLI_PATH="$BIN_DIR/xbctl"
+    BINARY_PATH="$BIN_DIR/$APP_NAME"
+    CLI_PATH="$BIN_DIR/$CLI_NAME"
     local target
     for target in "$BINARY_PATH" "$CLI_PATH"; do
         if [ -e "$target" ] || [ -L "$target" ]; then
+            if [ "$target" = "$BINARY_PATH" ] && [ "$APP_NAME" = yz-agent ] &&
+               [ ! -f "$CONFIG_FILE" ] && [ ! -f "$INSTALL_META" ]; then
+                log_error "Existing yz-agent binary has no installation record: $target"
+                return 1
+            fi
             if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
                 # 迁移到 /usr/bin 时，只允许替换已经指向原 xbctl 的入口。
                 if [ "$target" = "$CLI_SYMLINK_PATH" ] && [ -L "$target" ] &&
@@ -646,7 +889,7 @@ ensure_dirs() {
         fi
     done
     # 大文件直接暂存在目标分区；配置和凭据仍暂存在系统临时目录。
-    BIN_STAGE_DIR=$(mktemp -d "$BIN_DIR/.xboard-node-install.XXXXXX")
+    BIN_STAGE_DIR=$(mktemp -d "$BIN_DIR/.yz-agent-install.XXXXXX")
 }
 
 validate_positive_int() {
@@ -719,6 +962,14 @@ select_binary_source() {
         echo "$BINARY_SOURCE"
         return
     fi
+    if [ -f "./yz-agent" ]; then
+        echo "./yz-agent"
+        return
+    fi
+    if [ -f "./yz-agent-linux-${ARCH}" ]; then
+        echo "./yz-agent-linux-${ARCH}"
+        return
+    fi
     if [ -f "./xboard-node" ]; then
         echo "./xboard-node"
         return
@@ -739,9 +990,7 @@ resolve_download_url() {
     fi
 }
 
-verify_release_checksum() {
-    local file="$1"
-    local artifact="$2"
+download_release_checksums() {
     local checksums="$TMP_DIR/SHA256SUMS"
     if [ ! -f "$checksums" ]; then
         resolve_download_url "SHA256SUMS"
@@ -751,7 +1000,11 @@ verify_release_checksum() {
             exit 1
         fi
     fi
+}
 
+verify_release_checksum() {
+    local file="$1" artifact="$2" checksums="$TMP_DIR/SHA256SUMS"
+    download_release_checksums
     local expected
     local actual
     expected=$(awk -v name="$artifact" '$2 == name || $2 == "*" name { print $1; exit }' "$checksums")
@@ -773,9 +1026,24 @@ stage_binary() {
     local_src=$(select_binary_source)
     if [ -n "$local_src" ]; then
         log_step "Using local binary: ${local_src}"
-        cp "$local_src" "$staged"
+        if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ]; then
+            ln "$local_src" "$staged"
+        else
+            cp "$local_src" "$staged"
+        fi
     else
-        local artifact="xboard-node-linux-${ARCH}"
+        download_release_checksums
+        local artifact="" name
+        for name in yz-agent agent xboard-node; do
+            if awk -v name="$name-linux-$ARCH" '$2 == name || $2 == "*" name { found=1 } END { exit !found }' "$TMP_DIR/SHA256SUMS"; then
+                artifact="$name-linux-$ARCH"
+                break
+            fi
+        done
+        if [ -z "$artifact" ]; then
+            log_error "Release checksums contain no supported node artifact"
+            return 1
+        fi
         resolve_download_url "$artifact"
         log_step "Downloading binary: ${DOWNLOAD_URL}"
         if ! curl -fsSL "$DOWNLOAD_URL" -o "$staged"; then
@@ -785,14 +1053,22 @@ stage_binary() {
         verify_release_checksum "$staged" "$artifact"
     fi
     chmod 755 "$staged"
-    if ! "$staged" -v >/dev/null 2>&1; then
+    local report
+    if ! report=$("$staged" -v); then
         log_error "Downloaded binary failed version check"
         exit 1
     fi
+    select_target_name "$report"
 }
 
 stage_xbctl() {
     local staged="$BIN_STAGE_DIR/xbctl"
+    if [ "$APP_NAME" != xboard-node ]; then
+        # 统一程序同时提供管理命令，只保留一个文件内容副本。
+        ln "$BIN_STAGE_DIR/xboard-node" "$staged"
+        "$staged" config bin-dir >/dev/null
+        return
+    fi
     local local_src=""
     if [ -n "$CLI_BINARY_SOURCE" ]; then
         if [ ! -f "$CLI_BINARY_SOURCE" ]; then
@@ -807,7 +1083,11 @@ stage_xbctl() {
     fi
     if [ -n "$local_src" ]; then
         log_step "Using local xbctl binary: ${local_src}"
-        cp "$local_src" "$staged"
+        if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ]; then
+            ln "$local_src" "$staged"
+        else
+            cp "$local_src" "$staged"
+        fi
     else
         local artifact="xbctl-linux-${ARCH}"
         resolve_download_url "$artifact"
@@ -840,7 +1120,7 @@ render_config() {
         --output "$TMP_DIR/config.yml"
         --credentials-out "$TMP_DIR/credentials.env"
         --meta "$TMP_DIR/install-meta.json"
-        --install-root "$INSTALL_ROOT"
+        --install-root "${TARGET_INSTALL_ROOT:-$INSTALL_ROOT}"
     )
     # 不把默认值伪装成显式选择，交给 xbctl 区分新绑定与已有实例。
     if [ "$KERNEL_EXPLICIT" -eq 1 ]; then
@@ -878,15 +1158,17 @@ render_config() {
 }
 
 render_service() {
+    local INSTALL_ROOT="${TARGET_INSTALL_ROOT:-$INSTALL_ROOT}"
+    local CONFIG_FILE="$INSTALL_ROOT/config.yml" CREDENTIALS_FILE="$INSTALL_ROOT/credentials.env"
     if [ "$SERVICE_MANAGER" = "openrc" ]; then
         cat >"$TMP_DIR/service" <<EOF_OPENRC
 #!/sbin/openrc-run
 
-name="Xboard Node Backend"
-description="YZboard node backend"
+name="YZ-Agent"
+description="YZ-Agent node backend"
 supervisor=supervise-daemon
 command="${BINARY_PATH}"
-command_args="-c ${CONFIG_FILE}"
+command_args="${RUN_COMMAND}-c ${CONFIG_FILE}"
 directory="${INSTALL_ROOT}"
 pidfile="/run/${SERVICE_NAME}.pid"
 output_log="${OPENRC_LOG_PATH}"
@@ -931,8 +1213,8 @@ EOF_OPENRC
 
     cat >"$TMP_DIR/service" <<EOF_UNIT
 [Unit]
-Description=Xboard Node Backend
-Documentation=https://github.com/P0me1oo/YZboard-Node
+Description=YZ-Agent
+Documentation=https://github.com/P0me1oo/YZ-Agent
 After=network-online.target
 Wants=network-online.target
 RequiresMountsFor=${BIN_DIR:-/usr/local/bin}
@@ -941,7 +1223,7 @@ RequiresMountsFor=${BIN_DIR:-/usr/local/bin}
 Type=simple
 WorkingDirectory=${INSTALL_ROOT}
 EnvironmentFile=-${CREDENTIALS_FILE}
-ExecStart=${BINARY_PATH} -c ${CONFIG_FILE}
+ExecStart=${BINARY_PATH} ${RUN_COMMAND}-c ${CONFIG_FILE}
 Restart=always
 RestartSec=5
 TimeoutStopSec=150s
@@ -959,21 +1241,24 @@ backup_existing_state() {
     local snapshot item source name
     BACKUP_PENDING=$(mktemp -d "$BACKUP_DIR/install-XXXXXX")
     snapshot="$BACKUP_PENDING"
-    for item in config.yml credentials.env install-meta.json bin-dir service; do
+    for item in config.yml credentials.env install-meta.json bin-dir install.sh service; do
         case "$item" in
             config.yml) source="$CONFIG_FILE" ;;
             credentials.env) source="$CREDENTIALS_FILE" ;;
             install-meta.json) source="$INSTALL_META" ;;
             bin-dir) source="$BIN_DIR_FILE" ;;
-            service) source="$SERVICE_PATH" ;;
+            install.sh) source="$INSTALLER_COPY_PATH" ;;
+            service) source="${PREVIOUS_SERVICE_PATH:-$SERVICE_PATH}" ;;
         esac
         if [ -f "$source" ]; then
             cp "$source" "$snapshot/$item"
         fi
     done
-    if [ -f "$SERVICE_PATH" ]; then SERVICE_EXISTED=1; else SERVICE_EXISTED=0; fi
+    if [ -f "${PREVIOUS_SERVICE_PATH:-$SERVICE_PATH}" ]; then SERVICE_EXISTED=1; else SERVICE_EXISTED=0; fi
     if [ "$BIN_DIR" = "$PREVIOUS_BIN_DIR" ]; then
-        for name in xboard-node xbctl; do
+        local names=("$APP_NAME")
+        if [ "$CLI_NAME" != "$APP_NAME" ]; then names+=("$CLI_NAME"); fi
+        for name in "${names[@]}"; do
             source="$BIN_DIR/$name"
             if [ -e "$source" ] || [ -L "$source" ]; then
                 # 硬链接保留原文件，不复制二进制内容；替换时必须使用同分区重命名。
@@ -983,7 +1268,7 @@ backup_existing_state() {
     fi
     if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ] || [ "$CLI_PATH" != "$CLI_SYMLINK_PATH" ]; then
         if [ -e "$CLI_SYMLINK_PATH" ] || [ -L "$CLI_SYMLINK_PATH" ]; then
-            CLI_ENTRY_BACKUP_DIR=$(mktemp -d "$(dirname "$CLI_SYMLINK_PATH")/.xbctl-entry.XXXXXX")
+            CLI_ENTRY_BACKUP_DIR=$(mktemp -d "$(dirname "$CLI_SYMLINK_PATH")/.yz-agent-entry.XXXXXX")
             ln "$CLI_SYMLINK_PATH" "$CLI_ENTRY_BACKUP_DIR/xbctl"
         fi
     fi
@@ -1000,8 +1285,10 @@ replace_binary_files() {
     if [ "$CLI_PATH" = "$CLI_SYMLINK_PATH" ] && [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
         CLI_ENTRY_CHANGED=1
     fi
-    CLI_REPLACE_STARTED=1
-    mv -f "$BIN_STAGE_DIR/xbctl" "$CLI_PATH"
+    if [ "$CLI_PATH" != "$BINARY_PATH" ]; then
+        CLI_REPLACE_STARTED=1
+        mv -f "$BIN_STAGE_DIR/xbctl" "$CLI_PATH"
+    fi
     if [ "$CLI_PATH" != "$CLI_SYMLINK_PATH" ]; then
         CLI_ENTRY_CHANGED=1
         ln -sfn "$CLI_PATH" "$CLI_SYMLINK_PATH"
@@ -1013,13 +1300,41 @@ replace_binary_files() {
 }
 
 finish_install() {
-    # 新服务验证成功后才删除原目录中的两个程序，其他文件全部保留。
-    INSTALL_COMMITTED=1
-    if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
-        if ! rm -f "$PREVIOUS_BINARY_PATH"; then
-            log_warn "New installation is active; could not remove $PREVIOUS_BINARY_PATH"
+    if [ "$NAME_CHANGED" -eq 1 ] && [ -f "$PREVIOUS_SERVICE_PATH" ]; then
+        if [ "$OLD_SERVICE_ENABLED" -eq 1 ]; then
+            OLD_SERVICE_DISABLED=1
+            case "$SERVICE_MANAGER" in
+                systemd) systemctl disable "$PREVIOUS_SERVICE_NAME.service" ;;
+                openrc) rc-update del "$PREVIOUS_SERVICE_NAME" default ;;
+            esac
         fi
-        if [ "$PREVIOUS_CLI_PATH" != "$CLI_SYMLINK_PATH" ]; then
+        rm -f "$PREVIOUS_SERVICE_PATH"
+        service_reload
+    fi
+    if [ "$ROOT_MIGRATION_STARTED" -eq 1 ] && [ -L "$PREVIOUS_INSTALL_ROOT" ] &&
+       [ "$(readlink "$PREVIOUS_INSTALL_ROOT")" = "$TARGET_INSTALL_ROOT" ]; then
+        rm "$PREVIOUS_INSTALL_ROOT"
+    fi
+    # 新服务验证成功后才删除原目录中的程序，其他文件全部保留。
+    INSTALL_COMMITTED=1
+    if [ "$PREVIOUS_CLI_ENTRY_PATH" != "$CLI_SYMLINK_PATH" ] && [ -L "$PREVIOUS_CLI_ENTRY_PATH" ] &&
+       [ "$(readlink "$PREVIOUS_CLI_ENTRY_PATH")" = "$PREVIOUS_CLI_PATH" ]; then
+        rm -f "$PREVIOUS_CLI_ENTRY_PATH" || log_warn "Could not remove old command entry"
+    fi
+    if [ "$PREVIOUS_CLI_PATH" != "$CLI_PATH" ] && [ "$PREVIOUS_CLI_PATH" != "$BINARY_PATH" ] &&
+       [ "$PREVIOUS_CLI_PATH" != "$CLI_SYMLINK_PATH" ]; then
+        rm -f "$PREVIOUS_CLI_PATH" || log_warn "Could not remove old management program"
+    fi
+    if [ "$BINARY_PATH" != "$PREVIOUS_BINARY_PATH" ] && [ "$BIN_DIR" = "$PREVIOUS_BIN_DIR" ]; then
+        rm -f "$PREVIOUS_BINARY_PATH" || log_warn "Could not remove $PREVIOUS_BINARY_PATH"
+    fi
+    if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
+        if [ "$PREVIOUS_BINARY_PATH" != "$CLI_SYMLINK_PATH" ]; then
+            if ! rm -f "$PREVIOUS_BINARY_PATH"; then
+                log_warn "New installation is active; could not remove $PREVIOUS_BINARY_PATH"
+            fi
+        fi
+        if [ "$PREVIOUS_CLI_PATH" != "$CLI_SYMLINK_PATH" ] && [ "$PREVIOUS_CLI_PATH" != "$BINARY_PATH" ]; then
             if ! rm -f "$PREVIOUS_CLI_PATH"; then
                 log_warn "New installation is active; could not remove $PREVIOUS_CLI_PATH"
             fi
@@ -1030,12 +1345,15 @@ finish_install() {
 
 stop_existing_service() {
     if [ -f "$SERVICE_PATH" ] || service_is_active; then
-        service_stop >/dev/null 2>&1 || true
+        service_stop >/dev/null 2>&1
     fi
 }
 
 install_staged_files() {
+    stop_previous_service
     stop_existing_service
+    cleanup_installation_firewall
+    migrate_install_root
     replace_binary_files
     install -m 600 "$TMP_DIR/config.yml" "$CONFIG_FILE"
     install -m 600 "$TMP_DIR/credentials.env" "$CREDENTIALS_FILE"
@@ -1079,6 +1397,7 @@ show_recent_logs() {
 }
 
 start_service() {
+    REPLACEMENT_SERVICE_STARTED=1
     if service_is_active; then
         service_restart
     else
@@ -1099,7 +1418,9 @@ perform_install() {
     ensure_dirs
     stage_binary
     stage_xbctl
+    select_target_root
     render_config
+    prepare_root_config
     render_service
     backup_existing_state
     install_staged_files
@@ -1113,7 +1434,7 @@ perform_install() {
     if [ "$HEALTH_ENABLED" -eq 1 ]; then
         log_info "Health: http://127.0.0.1:${HEALTH_PORT}/healthz"
     fi
-    log_info "CLI: ${CLI_PATH}  (run '${CLI_PATH} list' if xbctl is not in PATH)"
+    log_info "CLI: ${CLI_PATH}  (run '${CLI_PATH} list' if ${CLI_NAME} is not in PATH)"
 }
 
 perform_upgrade() {
@@ -1128,11 +1449,19 @@ perform_upgrade() {
     ensure_dirs
     stage_binary
     stage_xbctl
+    select_target_root
+    prepare_root_config
     render_service
     backup_existing_state
+    stop_previous_service
+    stop_existing_service
+    cleanup_installation_firewall
+    migrate_install_root
     replace_binary_files
     install -m "$(service_file_mode)" "$TMP_DIR/service" "$SERVICE_PATH"
     service_reload
+    if [ "$NAME_CHANGED" -eq 1 ] && [ "$OLD_SERVICE_ENABLED" -eq 1 ]; then service_enable; fi
+    REPLACEMENT_SERVICE_STARTED=1
     service_restart
     if ! wait_for_health; then
         log_error "Upgrade health check failed"
@@ -1184,7 +1513,7 @@ perform_uninstall() {
 perform_status() {
     detect_current_state
     echo
-    echo -e "${BOLD}xboard-node install status${NC}"
+    echo -e "${BOLD}${SERVICE_NAME} install status${NC}"
     echo "  state:   ${CURRENT_STATE}"
     echo "  bin-dir: ${BIN_DIR}"
     if [ -f "$INSTALL_META" ]; then
@@ -1216,6 +1545,7 @@ main() {
             exit 0
             ;;
         status)
+            select_install_root
             load_install_paths
             detect_service_manager
             perform_status
@@ -1224,12 +1554,13 @@ main() {
     esac
 
     check_root
+    select_install_root
     lock_installation
     load_install_paths
     detect_arch
     detect_os
     detect_service_manager
-    install_dependencies
+    if [ "${YZ_INSTALL_PARENT_LOCK:-}" != 1 ]; then install_dependencies; fi
 
     case "$ACTION" in
         install)

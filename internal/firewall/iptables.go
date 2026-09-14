@@ -6,7 +6,12 @@ import (
 	"strings"
 )
 
-func (b *systemBackend) iptablesChain() string { return "YZH_" + b.scope }
+func (b *systemBackend) iptablesChain() string {
+	if b.state.Namespace == "" {
+		return "YZH_" + b.scope
+	}
+	return "YZ_AGENT_" + b.scope
+}
 
 func (b *systemBackend) syncIPTables(ctx context.Context, rules []Rule) error {
 	for _, family := range b.state.RedirectFamilies {

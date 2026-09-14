@@ -200,17 +200,17 @@ def main():
     if os.geteuid() != 0 or os.readlink("/proc/self/ns/net") == os.readlink("/proc/1/ns/net"):
         raise RuntimeError("必须由 root 在 unshare --net 创建的独立网络命名空间中执行")
     artifacts = args.artifacts.resolve(strict=True)
-    for file in ("install.sh", "xboard-node-linux-amd64", "xbctl-linux-amd64", "singbox_isolated_install.sh"):
+    for file in ("install.sh", "yz-agent-linux-amd64", "singbox_isolated_install.sh"):
         if not (artifacts / file).is_file():
             raise RuntimeError(f"缺少测试产物：{file}")
     command("ip", "link", "set", "lo", "up")
     baseline_pid = command("systemctl", "show", args.preserve_service, "-p", "MainPID", "--value").stdout.strip()
     if baseline_pid in ("", "0"):
         raise RuntimeError("需要保留的原服务未运行，停止安装验收")
-    preserved = {path: file_identity(path) for path in ("/usr/local/bin/xboard-node", "/usr/local/bin/xbctl", "/usr/bin/xbctl")}
-    root = Path(tempfile.mkdtemp(prefix="yzboard-singbox-test-", dir="/var/tmp"))
+    preserved = {path: file_identity(path) for path in ("/usr/local/bin/yz-agent", "/usr/bin/yz-agent", "/usr/local/bin/xboard-node", "/usr/local/bin/xbctl", "/usr/bin/xbctl")}
+    root = Path(tempfile.mkdtemp(prefix="yz-agent-singbox-test-", dir="/var/tmp"))
     (root / ".owned-test-instance").touch(mode=0o600)
-    service = "yzboard-singbox-test-" + secrets.token_hex(6)
+    service = "yz-agent-singbox-test-" + secrets.token_hex(6)
     panel = Panel()
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -269,11 +269,10 @@ def main():
                 raise RuntimeError("重复安装产生了额外实例")
             with wait_for(lambda: connect(1), "安装后代理收发"):
                 pass
-            for binary in ("xboard-node", "xbctl"):
-                if file_identity(root / "bin" / binary) != file_identity(artifacts / f"{binary}-linux-amd64"):
+            for version_arg in ("-v", "version"):
+                if file_identity(root / "bin/yz-agent") != file_identity(artifacts / "yz-agent-linux-amd64"):
                     raise RuntimeError("安装产物校验值不一致")
-                version_arg = "-v" if binary == "xboard-node" else "version"
-                version = command(str(root / "bin" / binary), version_arg).stdout
+                version = command(str(root / "bin/yz-agent"), version_arg).stdout
                 if args.version not in version or "requested v1.14.0" not in version:
                     raise RuntimeError("安装后的版本标识不一致")
             print(f"安装及重复安装 {attempt + 1}/2：通过", flush=True)

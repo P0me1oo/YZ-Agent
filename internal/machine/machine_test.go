@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cedar2025/xboard-node/internal/panel"
-	"github.com/cedar2025/xboard-node/internal/service"
+	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/service"
 )
 
 func TestOrchestratorAggregatesFailureRecoveryAndRemoval(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/cedar2025/xboard-node/internal/service"
-	"github.com/cedar2025/xboard-node/internal/timesync"
+	"github.com/P0me1oo/YZ-Agent/internal/service"
+	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 )
 
 type healthTracker struct {
