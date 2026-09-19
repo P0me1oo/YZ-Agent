@@ -212,6 +212,9 @@ type UserSpec struct {
 	UUID        string
 	SpeedLimit  int
 	DeviceLimit int
+	// ConnLimit 是并发连接数上限，ConnRateLimit 是每秒新建连接数上限，0 都表示不限制。
+	ConnLimit     int
+	ConnRateLimit int
 }
 
 func (n *NodeSpec) GetProxyProtocol() bool {

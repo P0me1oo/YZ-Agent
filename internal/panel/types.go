@@ -324,8 +324,23 @@ type User struct {
 	UUID        string `json:"uuid"`
 	SpeedLimit  int    `json:"speed_limit"`  // Mbps, 0 = unlimited
 	DeviceLimit int    `json:"device_limit"` // max devices, 0 = unlimited
+	// ConnLimit 是并发连接数上限，ConnRateLimit 是每秒新建连接数上限，0 都表示不限制。
+	// 面板旧版本不下发这两个字段，缺省解码为 0，等同于保持原有行为。
+	ConnLimit     int `json:"conn_limit"`
+	ConnRateLimit int `json:"conn_rate_limit"`
 }
 
 type UsersResponse struct {
 	Users []User `json:"users"`
+}
+
+// LimitEvent 是一个上报周期内某个用户触发连接限制的汇总。
+// 同一用户在同一周期内可能同时触发并发和速率两种，分成两条上报。
+type LimitEvent struct {
+	UserID int    `json:"user_id"`
+	Kind   string `json:"kind"`  // conn=并发超限，rate=新建速率超限
+	Limit  int    `json:"limit"` // 触发时生效的上限
+	// Observed 是实测值，并发超限时为周期内峰值连接数；速率超限没有可观测值，为 0。
+	Observed int    `json:"observed"`
+	Count    uint64 `json:"count"` // 本周期内被拒次数
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/transport"
 
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
 
@@ -81,6 +82,13 @@ type LimitDispatcher struct {
 	unlimitedIPs sync.Map // email → *ipCounter
 
 	connCount atomic.Int64 // total active connections tracked by dispatcher
+
+	// userConns 按面板 userID 统计活跃连接数，供并发上限判断。
+	// xray 的 email 是 user@<id>，只有装了 connLimiter 才会开始计数。
+	userConns sync.Map // int → *atomic.Int64
+
+	// connLimiter 做连接数和新建速率准入，nil 表示不限制。
+	connLimiter atomic.Pointer[model.ConnLimiter]
 }
 
 // ipCounter tracks IPs for unlimited users without any lock.
@@ -103,7 +111,7 @@ func (ic *ipCounter) aliveIPs() map[string]bool {
 // ─── routing.Dispatcher ──────────────────────────────────────────────────────
 
 func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*transport.Link, error) {
-	email, sourceIP, isTCP, err := d.identifyAndCheck(ctx, dest)
+	email, sourceIP, uid, isTCP, err := d.identifyAndCheck(ctx, dest)
 	if err != nil {
 		return nil, err
 	}
@@ -117,30 +125,31 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	}
 
 	if email != "" {
-		d.trackLink(link, email, sourceIP, isTCP)
+		d.trackLink(link, email, sourceIP, uid, isTCP)
 	}
 	return link, nil
 }
 
 func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination, link *transport.Link) error {
-	email, sourceIP, isTCP, err := d.identifyAndCheck(ctx, dest)
+	email, sourceIP, uid, isTCP, err := d.identifyAndCheck(ctx, dest)
 	if err != nil {
 		return err
 	}
 
 	if email != "" {
-		d.trackLink(link, email, sourceIP, isTCP)
+		d.trackLink(link, email, sourceIP, uid, isTCP)
 	}
 	return d.innerDisp.DispatchLink(ctx, dest, link)
 }
 
 // identifyAndCheck extracts user identity from the session context, enforces
-// device limits, and returns the user's email, source IP, and TCP flag.
+// device and connection limits, and returns the user's email, source IP,
+// panel user ID, and TCP flag.
 // Returns a non-nil error only when the connection should be rejected.
-func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destination) (email, sourceIP string, isTCP bool, err error) {
+func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destination) (email, sourceIP string, uid int, isTCP bool, err error) {
 	si := session.InboundFromContext(ctx)
 	if si == nil || si.User == nil || len(si.User.Email) == 0 {
-		return "", "", false, nil
+		return "", "", 0, false, nil
 	}
 	email = si.User.Email
 	sourceIP = si.Source.Address.IP().String()
@@ -148,20 +157,88 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 
 	if d.checkDeviceLimit(email, sourceIP, isTCP) {
 		nlog.Core().Debug("xray: device limit exceeded", "email", email, "ip", sourceIP)
-		return "", "", false, errors.New("device limit exceeded for " + email)
+		return "", "", 0, false, errors.New("device limit exceeded for " + email)
 	}
-	return email, sourceIP, isTCP, nil
+
+	uid, kind, limit, observed, reject := d.checkConnGate(email)
+	if reject {
+		nlog.Core().Debug("xray: conn limit exceeded",
+			"email", email, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
+		// checkDeviceLimit 已经登记了 TCP 的 IP 引用计数，拒绝前必须回退，否则会泄漏。
+		if isTCP {
+			d.delConn(email, sourceIP)
+		}
+		return "", "", 0, false, errors.New("connection limit exceeded for " + email)
+	}
+	return email, sourceIP, uid, isTCP, nil
+}
+
+// checkConnGate 判断新连接是否超过该用户的并发或新建速率上限，
+// 返回 (userID, 原因, 上限, 实测值, 是否拒绝)。
+//
+// 没装 connLimiter 时走无锁快速路径，不解析 userID 也不计数。
+// 并发检查在速率检查之前，避免并发已超限时还白白消耗一个速率令牌。
+func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bool) {
+	ptr := d.connLimiter.Load()
+	if ptr == nil {
+		return 0, "", 0, 0, false
+	}
+	cl := *ptr
+	if cl == nil {
+		return 0, "", 0, 0, false
+	}
+
+	d.mu.RLock()
+	uid := d.emailToUID[email]
+	d.mu.RUnlock()
+	if uid <= 0 {
+		return 0, "", 0, 0, false
+	}
+
+	if limit, ok := cl.MaxConnByUserID(uid); ok {
+		if current := int(d.userConnCounter(uid).Load()); current >= limit {
+			cl.ReportLimited(uid, model.ConnLimitKindConcurrent, limit, current)
+			return uid, model.ConnLimitKindConcurrent, limit, current, true
+		}
+	}
+
+	if !cl.AllowNewConn(uid) {
+		// 速率上限由 limiter 自己补全，内核不需要知道具体配置。
+		cl.ReportLimited(uid, model.ConnLimitKindRate, 0, 0)
+		return uid, model.ConnLimitKindRate, 0, 0, true
+	}
+
+	return uid, "", 0, 0, false
+}
+
+// userConnCounter 返回该用户的活跃连接计数器，不存在时创建。
+func (d *LimitDispatcher) userConnCounter(uid int) *atomic.Int64 {
+	if v, ok := d.userConns.Load(uid); ok {
+		return v.(*atomic.Int64)
+	}
+	v, _ := d.userConns.LoadOrStore(uid, &atomic.Int64{})
+	return v.(*atomic.Int64)
 }
 
 // trackLink records connection lifecycle without mutating xray-core owned
 // transport primitives. This keeps mux/XUDP compatible while still allowing
 // the dispatcher to release device-limit state when the link closes.
-func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, isTCP bool) {
+func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, uid int, isTCP bool) {
 	d.connCount.Add(1)
+
+	// 计数器在这里取一次，关闭回调直接复用，避免关闭路径再查 sync.Map。
+	var userConns *atomic.Int64
+	if uid > 0 {
+		userConns = d.userConnCounter(uid)
+		userConns.Add(1)
+	}
 
 	onClose := func() {
 		if isTCP {
 			d.delConn(email, sourceIP)
+		}
+		if userConns != nil {
+			userConns.Add(-1)
 		}
 		d.connCount.Add(-1)
 	}
@@ -200,6 +277,15 @@ func (d *LimitDispatcher) UpdateLimits(emailToUID map[string]int, deviceLimits, 
 
 }
 
+// SetConnLimiter 配置连接数与新建速率准入，传 nil 表示关闭。
+func (d *LimitDispatcher) SetConnLimiter(limiter model.ConnLimiter) {
+	if limiter == nil {
+		d.connLimiter.Store(nil)
+		return
+	}
+	d.connLimiter.Store(&limiter)
+}
+
 func (d *LimitDispatcher) ResetConns() {
 	d.mu.Lock()
 	d.limitedIPs = make(map[string]map[string]int)
@@ -208,6 +294,11 @@ func (d *LimitDispatcher) ResetConns() {
 	// Clear unlimited IPs
 	d.unlimitedIPs.Range(func(key, _ interface{}) bool {
 		d.unlimitedIPs.Delete(key)
+		return true
+	})
+
+	d.userConns.Range(func(key, _ interface{}) bool {
+		d.userConns.Delete(key)
 		return true
 	})
 

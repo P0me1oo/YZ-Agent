@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
 
 type EventType string
@@ -71,6 +72,8 @@ type ReportPayload struct {
 	Swap             [2]uint64
 	Disk             [2]uint64
 	Metrics          map[string]interface{}
+	// LimitEvents 是本周期内触发连接数或新建速率上限的用户汇总，无事件时为空。
+	LimitEvents []panel.LimitEvent
 }
 
 type PushClient interface {

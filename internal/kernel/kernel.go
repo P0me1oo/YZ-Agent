@@ -98,6 +98,9 @@ type Kernel interface {
 	// The function resolves a user UUID to (limit, hasLimit).
 	// Kernels that already gate-keep internally (e.g. xray) may no-op.
 	SetDeviceLimitFunc(fn func(uuid string) (int, bool))
+	// SetConnLimiter 配置每用户的连接数与新建速率准入判断。
+	// 传 nil 表示关闭连接限制。超限时内核只拒绝新连接，不影响已有连接。
+	SetConnLimiter(limiter model.ConnLimiter)
 	// UpdateGlobalDevices updates the global device state from panel (for multi-node).
 	UpdateGlobalDevices(users map[int][]string)
 	// ClearGlobalDevices clears the global device state (on WS disconnect).

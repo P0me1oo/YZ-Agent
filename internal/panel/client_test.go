@@ -265,6 +265,7 @@ func TestReportIncludesBatchID(t *testing.T) {
 		[2]uint64{0, 0},
 		[2]uint64{1000, 500},
 		map[string]interface{}{"kernel_status": true},
+		[]LimitEvent{{UserID: 1, Kind: "conn", Limit: 512, Observed: 530, Count: 3}},
 	)
 	if err != nil {
 		t.Fatalf("Report: %v", err)
@@ -290,6 +291,14 @@ func TestReportIncludesBatchID(t *testing.T) {
 	if _, ok := user["7"]; !ok {
 		t.Fatalf("relay_user_traffic missing node 7: %#v", user)
 	}
+	events, ok := received["limit_events"].([]interface{})
+	if !ok || len(events) != 1 {
+		t.Fatalf("limit_events = %#v, want one entry", received["limit_events"])
+	}
+	event, ok := events[0].(map[string]interface{})
+	if !ok || event["kind"] != "conn" {
+		t.Fatalf("limit_events[0] = %#v, want kind=conn", events[0])
+	}
 }
 
 func TestReportIncludesExplicitEmptySnapshots(t *testing.T) {
@@ -314,6 +323,7 @@ func TestReportIncludesExplicitEmptySnapshots(t *testing.T) {
 		[2]uint64{},
 		[2]uint64{},
 		nil,
+		nil,
 	); err != nil {
 		t.Fatalf("Report: %v", err)
 	}
@@ -325,6 +335,9 @@ func TestReportIncludesExplicitEmptySnapshots(t *testing.T) {
 	}
 	if _, ok := received["relay_user_traffic"]; ok {
 		t.Fatalf("relay_user_traffic should be omitted when empty")
+	}
+	if _, ok := received["limit_events"]; ok {
+		t.Fatalf("limit_events should be omitted when empty")
 	}
 }
 

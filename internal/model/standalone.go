@@ -104,7 +104,14 @@ func UserSpecsFromStandalone(cfg *config.Config) []UserSpec {
 	}
 	users := make([]UserSpec, 0, len(cfg.Standalone.Users))
 	for _, user := range cfg.Standalone.Users {
-		users = append(users, UserSpec{ID: user.ID, UUID: user.UUID, SpeedLimit: user.SpeedLimit, DeviceLimit: user.DeviceLimit})
+		users = append(users, UserSpec{
+			ID:            user.ID,
+			UUID:          user.UUID,
+			SpeedLimit:    user.SpeedLimit,
+			DeviceLimit:   user.DeviceLimit,
+			ConnLimit:     user.ConnLimit,
+			ConnRateLimit: user.ConnRateLimit,
+		})
 	}
 	return users
 }

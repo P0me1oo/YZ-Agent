@@ -40,6 +40,7 @@ type fakeKernel struct {
 
 	speedLimitFunc  func(string) *rate.Limiter
 	deviceLimitFunc func(string) (int, bool)
+	connLimiter     model.ConnLimiter
 }
 
 type certRenewalPollSource struct {
@@ -122,6 +123,7 @@ func (f *fakeKernel) CloseUserConnections(ctx context.Context, uuid string) erro
 }
 func (f *fakeKernel) SetSpeedLimitFunc(fn func(uuid string) *rate.Limiter) { f.speedLimitFunc = fn }
 func (f *fakeKernel) SetDeviceLimitFunc(fn func(uuid string) (int, bool))  { f.deviceLimitFunc = fn }
+func (f *fakeKernel) SetConnLimiter(l model.ConnLimiter)                   { f.connLimiter = l }
 func (f *fakeKernel) UpdateGlobalDevices(users map[int][]string)           { _ = users }
 func (f *fakeKernel) ClearGlobalDevices()                                  {}
 

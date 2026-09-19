@@ -102,6 +102,9 @@ type StandaloneUser struct {
 	UUID        string `yaml:"uuid"`
 	SpeedLimit  int    `yaml:"speed_limit,omitempty"`
 	DeviceLimit int    `yaml:"device_limit,omitempty"`
+	// 并发连接数和每秒新建连接数上限，省略或填 0 表示不限制。
+	ConnLimit     int `yaml:"conn_limit,omitempty"`
+	ConnRateLimit int `yaml:"conn_rate_limit,omitempty"`
 }
 
 func (c *Config) IsStandalone() bool {

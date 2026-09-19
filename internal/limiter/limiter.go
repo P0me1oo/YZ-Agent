@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"golang.org/x/time/rate"
+
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 )
 
@@ -16,13 +18,25 @@ type Limiter struct {
 	// kernel gate-keeping hot path (called per new connection).
 	uuidDeviceLimit map[string]int
 
+	// connLimits 和 connRateBuckets 按 userID 索引连接数限制，受 mu 保护。
+	// 内核每建立一条连接都会查一次，hasConnLimits 提供无锁快速路径。
+	connLimits      map[int]connLimitSpec
+	connRateBuckets map[int]*rate.Limiter
+	hasConnLimits   atomic.Bool
+
+	// limitEvents 按 userID 累积超限次数，上报周期结束时快照并归零。
+	limitEvents sync.Map
+
 	deviceLimitEvents atomic.Uint64
+	connLimitEvents   atomic.Uint64
 }
 
 func New() *Limiter {
 	return &Limiter{
 		users:           make(map[int]model.UserSpec),
 		uuidDeviceLimit: make(map[string]int),
+		connLimits:      make(map[int]connLimitSpec),
+		connRateBuckets: make(map[int]*rate.Limiter),
 	}
 }
 
@@ -56,6 +70,8 @@ func (l *Limiter) UpdateUsers(users []model.UserSpec) []int {
 	}
 	l.uuidDeviceLimit = idx
 
+	l.rebuildConnLimitsLocked(newUsers)
+
 	return removed
 }
 
@@ -64,12 +80,15 @@ type LimiterMetrics struct {
 	// DeviceLimitEvents is the total number of times a user exceeded
 	// the configured device limit (since process start).
 	DeviceLimitEvents uint64
+	// ConnLimitEvents 是连接数或新建速率超限被拒的累计次数（进程启动以来）。
+	ConnLimitEvents uint64
 }
 
 // SnapshotMetrics returns a snapshot of limiter metrics.
 func (l *Limiter) SnapshotMetrics() LimiterMetrics {
 	return LimiterMetrics{
 		DeviceLimitEvents: l.deviceLimitEvents.Load(),
+		ConnLimitEvents:   l.connLimitEvents.Load(),
 	}
 }
 

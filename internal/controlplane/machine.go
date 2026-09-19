@@ -142,6 +142,7 @@ func (p *MachinePanelControlPlane) Report(payload ReportPayload) error {
 		payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.Alive, payload.Online,
 		payload.CPU, payload.Mem, payload.Swap, payload.Disk,
 		payload.Metrics,
+		payload.LimitEvents,
 	)
 }
 

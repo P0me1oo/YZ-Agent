@@ -2,6 +2,25 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
+## 连接数限制（v1.15.0，未发布）
+
+| 项目 | 标识 |
+| --- | --- |
+| 程序版本 | `v1.15.0`，本地修改与验证完成，尚未发布；Tag、Release 和 GHCR 镜像留待发布时创建 |
+| 修改基线 | `cf4a51097930b765be3bd64baccec1baa0608c0d` |
+| Go 模块 / 分支 | `github.com/P0me1oo/YZ-Agent` / `dev` |
+| 修改范围 | 新增每用户并发连接数与每秒新建连接数上限的准入判断，并汇总超限事件随状态上报回传面板 |
+| 内核接入 | Xray 和 sing-box 各自在新连接路径上接入；共用 `internal/model` 的 `ConnLimiter` 接口，避免内核包反向依赖 `internal/limiter` |
+| 核心依赖 | 未修改。Xray 与 sing-box 沿用原有固定依赖和兼容副本 |
+| 新增依赖 | 无。令牌桶沿用已有的直接依赖 `golang.org/x/time v0.15.0` |
+| 上报字段 | 状态上报新增可选 `limit_events`，元素为 `{user_id, kind, limit, observed, count}`，`kind` 取 `conn` 或 `rate` |
+| 独立部署配置 | `standalone.users[].conn_limit`、`conn_rate_limit`，省略或填 0 表示不限制 |
+| 新增指标 | `ConnLimitEvents`，进程启动以来连接数或速率超限被拒的累计次数 |
+| 向后兼容 | 面板未下发新字段时用户上限为 0，全部走无锁快速路径，不做计数也不解析用户标识，行为与 `v1.14.0` 一致 |
+| 目标配套面板 | YZboard `1.17.0`，本地同步修改，尚未发布 |
+| 本地验证 | `go test ./...` 全部包通过；覆盖限流器重建与令牌桶调速、内核准入、上报事件快照和面板客户端载荷 |
+| 未在本地验证 | 未与真实面板或真实客户端做端到端联调；未在真实流量下核验并发与速率的限速效果 |
+
 ## 当前正式发布（v1.14.0，2026-09-15）
 
 展示名与 GitHub 仓库统一为 `YZ-Agent`，程序、服务与管理命令使用 `yz-agent`，Go 模块为 `github.com/P0me1oo/YZ-Agent`，GHCR 发布目标为 `ghcr.io/p0me1oo/yz-agent`。旧 `/etc/xboard-node` 安装数据迁到 `/etc/yz-agent`；节点通过 `yz-agent run` 启动。面板通信格式及固定双核心依赖保持原有约定。

@@ -56,6 +56,9 @@ type SingBox struct {
 	// deviceLimitFunc resolves a user UUID to (limit, hasLimit) for gate-keeping.
 	// Set once by SetDeviceLimitFunc and forwarded to every new ConnTracker.
 	deviceLimitFunc func(string) (int, bool)
+
+	// connLimiter 做连接数和新建速率准入，同样转发给每个新建的 ConnTracker。
+	connLimiter model.ConnLimiter
 }
 
 func New(cfg config.KernelConfig) *SingBox {
@@ -146,6 +149,9 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 	}
 	if s.deviceLimitFunc != nil {
 		tracker.SetDeviceLimitFunc(s.deviceLimitFunc)
+	}
+	if s.connLimiter != nil {
+		tracker.SetConnLimiter(s.connLimiter)
 	}
 	instance.Router().AppendTracker(tracker)
 	if s.box != nil {
@@ -319,6 +325,16 @@ func (s *SingBox) SetDeviceLimitFunc(fn func(uuid string) (int, bool)) {
 	s.deviceLimitFunc = fn
 	if s.connTracker != nil {
 		s.connTracker.SetDeviceLimitFunc(fn)
+	}
+}
+
+// SetConnLimiter 配置每用户的连接数与新建速率准入，传 nil 表示关闭。
+func (s *SingBox) SetConnLimiter(limiter model.ConnLimiter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connLimiter = limiter
+	if s.connTracker != nil {
+		s.connTracker.SetConnLimiter(limiter)
 	}
 }
 

@@ -77,6 +77,9 @@ type Xray struct {
 	cumRelayUserTraffic map[int]map[int][2]int64
 	speedLimitFunc      func(string) *rate.Limiter
 
+	// connLimiter 做连接数和新建速率准入，每次重启后转发给新的 LimitDispatcher。
+	connLimiter model.ConnLimiter
+
 	// running is set after a successful Start and cleared before shutdown.
 	// Atomic so IsRunning / GetConnections never block.
 	running atomic.Bool
@@ -180,6 +183,9 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	x.instance = inst
 	x.cancel = cancel
 	x.limitDispatcher = ld
+	if ld != nil {
+		ld.SetConnLimiter(x.connLimiter)
+	}
 	x.users = users
 	x.nodeConfig = nodeConfig
 	x.tls = tls
@@ -313,6 +319,17 @@ func (x *Xray) SetSpeedLimitFunc(fn func(string) *rate.Limiter) {
 // SetDeviceLimitFunc is a no-op for xray — device limits are already
 // gate-kept by LimitDispatcher.checkDeviceLimit at Dispatch time.
 func (x *Xray) SetDeviceLimitFunc(_ func(string) (int, bool)) {}
+
+// SetConnLimiter 配置每用户的连接数与新建速率准入，传 nil 表示关闭。
+func (x *Xray) SetConnLimiter(limiter model.ConnLimiter) {
+	x.mu.Lock()
+	x.connLimiter = limiter
+	ld := x.limitDispatcher
+	x.mu.Unlock()
+	if ld != nil {
+		ld.SetConnLimiter(limiter)
+	}
+}
 
 // UpdateGlobalDevices is a no-op for xray — xray handles device limits differently.
 func (x *Xray) UpdateGlobalDevices(_ map[int][]string) {}

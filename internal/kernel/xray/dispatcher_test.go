@@ -195,7 +195,7 @@ func TestLimitDispatcher_TrackLinkPreservesReader(t *testing.T) {
 	origWriter := &closeTrackingWriter{Writer: buf.Discard, onClose: func() {}}
 	link := &transport.Link{Reader: origReader, Writer: origWriter}
 
-	ld.trackLink(link, email, "1.1.1.1", true)
+	ld.trackLink(link, email, "1.1.1.1", 1, true)
 
 	if link.Reader != origReader {
 		t.Fatal("trackLink must not replace link.Reader")
@@ -214,7 +214,7 @@ func TestLimitDispatcher_CloseTrackingWriterReleasesConn(t *testing.T) {
 	}
 
 	link := &transport.Link{Reader: nopReader{}, Writer: buf.Discard}
-	ld.trackLink(link, email, "1.1.1.1", true)
+	ld.trackLink(link, email, "1.1.1.1", 1, true)
 
 	if got := ld.connCount.Load(); got != 1 {
 		t.Fatalf("expected connCount=1 after tracking, got %d", got)
@@ -231,5 +231,106 @@ func TestLimitDispatcher_CloseTrackingWriterReleasesConn(t *testing.T) {
 	}
 	if ld.checkDeviceLimit(email, "2.2.2.2", true) {
 		t.Fatal("device slot should be released after writer close")
+	}
+}
+
+// stubConnLimiter 用固定配置模拟 limiter，记录被拒次数供断言。
+type stubConnLimiter struct {
+	maxConn   int
+	allowRate bool
+	reports   []string
+}
+
+func (s *stubConnLimiter) MaxConnByUserID(int) (int, bool) {
+	if s.maxConn <= 0 {
+		return 0, false
+	}
+	return s.maxConn, true
+}
+
+func (s *stubConnLimiter) AllowNewConn(int) bool { return s.allowRate }
+
+func (s *stubConnLimiter) ReportLimited(_ int, kind string, _, _ int) {
+	s.reports = append(s.reports, kind)
+}
+
+func TestLimitDispatcher_ConnGateRejectsOverConcurrency(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(1)
+	ld.UpdateLimits(map[string]int{email: 1}, nil, nil)
+
+	stub := &stubConnLimiter{maxConn: 2, allowRate: true}
+	ld.SetConnLimiter(stub)
+
+	// 两条连接占满并发上限。
+	for i := 0; i < 2; i++ {
+		uid, _, _, _, reject := ld.checkConnGate(email)
+		if reject {
+			t.Fatalf("第 %d 条连接应在并发上限内", i+1)
+		}
+		link := &transport.Link{Reader: nopReader{}, Writer: buf.Discard}
+		ld.trackLink(link, email, "1.1.1.1", uid, true)
+	}
+
+	_, kind, limit, observed, reject := ld.checkConnGate(email)
+	if !reject || kind != model.ConnLimitKindConcurrent {
+		t.Fatalf("第 3 条连接应因并发超限被拒，实际 reject=%v kind=%q", reject, kind)
+	}
+	if limit != 2 || observed != 2 {
+		t.Fatalf("上报值 = (limit=%d, observed=%d)，期望 (2, 2)", limit, observed)
+	}
+	if len(stub.reports) != 1 || stub.reports[0] != model.ConnLimitKindConcurrent {
+		t.Fatalf("超限上报 = %#v，期望一条并发超限", stub.reports)
+	}
+}
+
+func TestLimitDispatcher_ConnGateReleasesOnClose(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(1)
+	ld.UpdateLimits(map[string]int{email: 1}, nil, nil)
+	ld.SetConnLimiter(&stubConnLimiter{maxConn: 1, allowRate: true})
+
+	uid, _, _, _, reject := ld.checkConnGate(email)
+	if reject {
+		t.Fatal("第一条连接应被放行")
+	}
+	link := &transport.Link{Reader: nopReader{}, Writer: buf.Discard}
+	ld.trackLink(link, email, "1.1.1.1", uid, true)
+
+	if _, _, _, _, reject := ld.checkConnGate(email); !reject {
+		t.Fatal("并发已占满，第二条应被拒")
+	}
+
+	if err := link.Writer.(*closeTrackingWriter).Close(); err != nil {
+		t.Fatalf("closeTrackingWriter.Close() error = %v", err)
+	}
+	if _, _, _, _, reject := ld.checkConnGate(email); reject {
+		t.Fatal("连接关闭后并发名额应释放")
+	}
+}
+
+func TestLimitDispatcher_ConnGateRejectsOverRate(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(1)
+	ld.UpdateLimits(map[string]int{email: 1}, nil, nil)
+	ld.SetConnLimiter(&stubConnLimiter{allowRate: false})
+
+	_, kind, _, _, reject := ld.checkConnGate(email)
+	if !reject || kind != model.ConnLimitKindRate {
+		t.Fatalf("速率超限应被拒，实际 reject=%v kind=%q", reject, kind)
+	}
+}
+
+func TestLimitDispatcher_ConnGateSkippedWithoutLimiter(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(1)
+	ld.UpdateLimits(map[string]int{email: 1}, nil, nil)
+
+	uid, _, _, _, reject := ld.checkConnGate(email)
+	if reject {
+		t.Fatal("没装 connLimiter 时不应拒绝连接")
+	}
+	if uid != 0 {
+		t.Fatalf("没装 connLimiter 时不应解析 userID，实际 %d", uid)
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/monitor"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 	"github.com/P0me1oo/YZ-Agent/internal/tracker"
 )
@@ -324,6 +325,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	// Register speed limit lookup with kernel unconditionally (before push/poll branch).
 	s.kernel.SetSpeedLimitFunc(s.speedTracker.GetLimiter)
 	s.kernel.SetDeviceLimitFunc(s.limiter.GetDeviceLimitByUUID)
+	s.kernel.SetConnLimiter(s.limiter)
 
 	bootstrap, err := s.source.Initial(ctx, s.wsMetrics, s.wsEvents, s.wsStatusCh)
 	if err != nil {
@@ -1158,6 +1160,7 @@ func (s *Service) takeReportBatch() *reportBatch {
 	status := monitor.Collect()
 	metrics := s.buildMetrics(status)
 	metrics["kernel_status"] = s.kernel.IsRunning()
+	limitEvents := s.collectLimitEvents()
 	reportID := s.nextReportID()
 
 	return &reportBatch{
@@ -1174,8 +1177,47 @@ func (s *Service) takeReportBatch() *reportBatch {
 			Swap:             [2]uint64{status.SwapTotal, status.SwapUsed},
 			Disk:             [2]uint64{status.DiskTotal, status.DiskUsed},
 			Metrics:          metrics,
+			LimitEvents:      limitEvents,
 		},
 	}
+}
+
+// collectLimitEvents 取出本周期的连接超限统计并转成上报格式。
+// 快照即清零，所以只能在组装批次时调用一次；上报失败时批次会整体重试，
+// 事件跟着批次走，不会丢。
+func (s *Service) collectLimitEvents() []panel.LimitEvent {
+	stats := s.limiter.SnapshotLimitEvents()
+	if len(stats) == 0 {
+		return nil
+	}
+	events := make([]panel.LimitEvent, 0, len(stats))
+	for userID, stat := range stats {
+		if stat.ConnHits > 0 {
+			events = append(events, panel.LimitEvent{
+				UserID:   userID,
+				Kind:     model.ConnLimitKindConcurrent,
+				Limit:    stat.ConnLimit,
+				Observed: stat.PeakConn,
+				Count:    stat.ConnHits,
+			})
+		}
+		if stat.RateHits > 0 {
+			events = append(events, panel.LimitEvent{
+				UserID: userID,
+				Kind:   model.ConnLimitKindRate,
+				Limit:  stat.RateLimit,
+				Count:  stat.RateHits,
+			})
+		}
+	}
+	// 用户 ID 顺序固定，便于面板日志和重试比对。
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].UserID != events[j].UserID {
+			return events[i].UserID < events[j].UserID
+		}
+		return events[i].Kind < events[j].Kind
+	})
+	return events
 }
 
 // trackRelayTraffic 从入口内部出站采集按逻辑节点统计的中转流量；不支持该能力的内核跳过。
@@ -1335,6 +1377,7 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	lm := s.limiter.SnapshotMetrics()
 	m["limits"] = map[string]interface{}{
 		"device_limit_events": lm.DeviceLimitEvents,
+		"conn_limit_events":   lm.ConnLimitEvents,
 		"speed_limited_users": s.speedTracker.LimitedUserCount(),
 	}
 

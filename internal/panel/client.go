@@ -132,6 +132,7 @@ func (c *Client) Report(reportID string, traffic map[int][2]int64, relayTraffic 
 	alive map[int][]string, online map[int]int,
 	cpu float64, mem, swap, disk [2]uint64,
 	metrics map[string]interface{},
+	limitEvents []LimitEvent,
 ) error {
 	payload := make(map[string]interface{})
 	if reportID != "" {
@@ -217,6 +218,10 @@ func (c *Client) Report(reportID string, traffic map[int][2]int64, relayTraffic 
 
 	if len(metrics) > 0 {
 		payload["metrics"] = metrics
+	}
+
+	if len(limitEvents) > 0 {
+		payload["limit_events"] = limitEvents
 	}
 
 	return c.postJSON("/api/v2/server/report", payload)
