@@ -2,11 +2,16 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
-## 连接数限制（v1.15.0，未发布）
+## 连接数限制（v1.15.0，已发布）
 
 | 项目 | 标识 |
 | --- | --- |
-| 程序版本 | `v1.15.0`，本地修改与验证完成，尚未发布；Tag、Release 和 GHCR 镜像留待发布时创建 |
+| 正式来源 Tag / commit | `v1.15.0` / `fd3fadf55df303afcff043c3ff25bdebda9ccc14` |
+| 正式 Release | [v1.15.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.15.0)，2026-09-19 发布，已核对为最新正式 Release；12 个附件：两个架构的 `yz-agent`、同内容的 `xboard-node` 兼容附件、`xbctl` 迁移附件、安装器、四份构建信息和 `SHA256SUMS` |
+| 发布 CI | [35446867828](https://github.com/P0me1oo/YZ-Agent/actions/runs/35446867828)：测试、双架构构建、镜像版本校验和 Release 全部通过 |
+| 不可变镜像标签 | `ghcr.io/p0me1oo/yz-agent:fd3fadf55df303afcff043c3ff25bdebda9ccc14`；`v1.15.0` 与 `latest` 已核对指向同一镜像，可匿名获取 |
+| 镜像索引 | `sha256:22f525717a5afd00e8be87a43e897e5b0682cb31463e07061b4fcff17e4c2f9f` |
+| 平台与 OCI 标识 | `linux/amd64`、`linux/arm64`；两架构均为 `revision=fd3fadf55df303afcff043c3ff25bdebda9ccc14`、`version=v1.15.0` |
 | 修改基线 | `cf4a51097930b765be3bd64baccec1baa0608c0d` |
 | Go 模块 / 分支 | `github.com/P0me1oo/YZ-Agent` / `dev` |
 | 修改范围 | 新增每用户并发连接数与每秒新建连接数上限的准入判断，并汇总超限事件随状态上报回传面板 |
@@ -17,9 +22,11 @@
 | 独立部署配置 | `standalone.users[].conn_limit`、`conn_rate_limit`，省略或填 0 表示不限制 |
 | 新增指标 | `ConnLimitEvents`，进程启动以来连接数或速率超限被拒的累计次数 |
 | 向后兼容 | 面板未下发新字段时用户上限为 0，全部走无锁快速路径，不做计数也不解析用户标识，行为与 `v1.14.0` 一致 |
-| 目标配套面板 | YZboard `1.17.0`，本地同步修改，尚未发布 |
+| 目标配套面板 | YZboard `1.18.0`，已发布。连接数限制与权限组排序同版发布，面板侧的连接数限制记录见该版本条目 |
 | 本地验证 | `go test ./...` 全部包通过；覆盖限流器重建与令牌桶调速、内核准入、上报事件快照和面板客户端载荷 |
 | 未在本地验证 | 未与真实面板或真实客户端做端到端联调；未在真实流量下核验并发与速率的限速效果 |
+
+本次同时推送了 `dev` 分支和 `v1.15.0` 标签，两次工作流并发运行且都写入 `ghcr.io/p0me1oo/yz-agent:<完整 commit>`，分支那次覆盖了标签那次，使该标签一度指向 `version` 为 commit 字符串的分支构建。`v1.15.0` 与 `latest` 未受影响，重跑标签工作流后三个引用已指向同一镜像。后续发布应先推标签、确认完成后再推分支。
 
 ## 当前正式发布（v1.14.0，2026-09-15）
 
