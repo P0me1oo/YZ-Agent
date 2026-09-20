@@ -1,6 +1,6 @@
 # YZ-Agent
 
-当前源码版本为 `v1.14.0`：程序、进程、管理命令和系统服务统一为 `yz-agent`，配置目录为 `/etc/yz-agent`，仓库和 Go 模块使用 `P0me1oo/YZ-Agent`。已发布版本与下载来源见 [兼容矩阵](YZ_COMPATIBILITY.md)，旧安装迁移和版本回退见 [改名说明](docs/agent-name-migration.md)。
+当前源码版本为 `v1.15.1`：程序、进程、管理命令和系统服务统一为 `yz-agent`，配置目录为 `/etc/yz-agent`，仓库和 Go 模块使用 `P0me1oo/YZ-Agent`。已发布版本与下载来源见 [兼容矩阵](YZ_COMPATIBILITY.md)，更新命令见下方“升级”。
 
 [YZboard](https://github.com/P0me1oo/YZboard) 的节点程序，支持 `sing-box` / `xray-core` 双核心。
 
@@ -27,7 +27,7 @@
 
 ## 安装
 
-以下说明适用于 `v1.14.0`。安装包、镜像及固定来源以 GitHub Release 和 [兼容矩阵](YZ_COMPATIBILITY.md) 中的正式发布记录为准。
+以下说明适用于 `v1.15.1`。安装包、镜像及固定来源以 GitHub Release 和 [兼容矩阵](YZ_COMPATIBILITY.md) 中的正式发布记录为准。
 
 ### Docker
 
@@ -68,7 +68,7 @@ curl -fsSL https://github.com/P0me1oo/YZ-Agent/releases/latest/download/install.
   sudo bash -s -- upgrade --version latest
 ```
 
-完成命令迁移后，统一使用：
+日常升级与检查统一使用：
 
 ```bash
 yz-agent upgrade
@@ -76,7 +76,7 @@ yz-agent version
 yz-agent service status
 ```
 
-旧版 `xbctl` 的迁移步骤见 [命令迁移说明](docs/agent-name-migration.md)。新安装不再单独安装 `xbctl`。
+尚未提供 `yz-agent` 命令的旧安装，使用上面的安装器升级命令。新安装不再单独安装 `xbctl`。
 
 `latest` 只解析 GitHub 最新正式 Release。需要回滚时显式传入旧 Tag，例如
 `yz-agent upgrade --version v1.13.1`。回退后会恢复该版本的程序、服务、管理命令与配置目录。

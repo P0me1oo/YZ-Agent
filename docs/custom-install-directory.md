@@ -4,7 +4,7 @@
 
 ## 安装位置与兼容行为
 
-`install.sh install` 和 `install.sh upgrade` 接受 `--bin-dir`。该目录存放统一的 `yz-agent` 程序及本次升级的大文件，历史版本分别使用 `xboard-node` 和 `xbctl`。改名迁移后，配置、凭据和实例数据位于 `/etc/yz-agent`，OpenRC 日志为 `/var/log/yz-agent.log`，旧日志保留。目录记录文件为 `/etc/yz-agent/bin-dir`，内容是一行绝对路径。名称迁移见 [改名说明](agent-name-migration.md)。
+`install.sh install` 和 `install.sh upgrade` 接受 `--bin-dir`。该目录存放统一的 `yz-agent` 程序及本次升级的大文件，历史版本分别使用 `xboard-node` 和 `xbctl`。改名迁移后，配置、凭据和实例数据位于 `/etc/yz-agent`，OpenRC 日志为 `/var/log/yz-agent.log`，旧日志保留。目录记录文件为 `/etc/yz-agent/bin-dir`，内容是一行绝对路径。安装和更新命令见 [README](../README.md#升级)。
 
 无记录的旧安装继续使用 `/usr/local/bin`。已有记录但内容无效时停止操作，不能退回默认目录后误改其他文件。状态查询、绑定变更后的服务文件生成、升级及卸载均沿用同一目录；卸载不递归删除用户指定的程序目录。
 
@@ -22,7 +22,7 @@
 
 自定义目录下的新版安装器和升级器会探测目标管理入口是否支持目录查询。若目标旧版本不支持，则在替换前拒绝；需要回退旧版时，应先通过新安装器迁回 `/usr/local/bin`。
 
-当前统一命令的测试与构建结果见 [改名说明](agent-name-migration.md)。以下保留 `v1.13-yz.23` 的原始验证记录。
+当前版本的测试与构建结果见 [兼容矩阵](../YZ_COMPATIBILITY.md)。以下保留 `v1.13-yz.23` 的原始验证记录。
 
 ## 本地验证
 

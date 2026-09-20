@@ -51,7 +51,7 @@
 
 展示名与 GitHub 仓库统一为 `YZ-Agent`，程序、服务与管理命令使用 `yz-agent`，Go 模块为 `github.com/P0me1oo/YZ-Agent`，GHCR 发布目标为 `ghcr.io/p0me1oo/yz-agent`。旧 `/etc/xboard-node` 安装数据迁到 `/etc/yz-agent`；节点通过 `yz-agent run` 启动。面板通信格式及固定双核心依赖保持原有约定。
 
-本次仅发布 Node 仓库的改名与迁移变更；名称迁移、旧升级器的两阶段限制和回退方式见 [改名说明](docs/agent-name-migration.md)。
+本次仅发布 Node 仓库的改名与迁移变更；当前安装、升级和回退命令见 [README](README.md#升级)。
 
 | 项目 | 标识 |
 | --- | --- |
