@@ -195,7 +195,7 @@ func TestLimitDispatcher_TrackLinkPreservesReader(t *testing.T) {
 	origWriter := &closeTrackingWriter{Writer: buf.Discard, onClose: func() {}}
 	link := &transport.Link{Reader: origReader, Writer: origWriter}
 
-	ld.trackLink(link, email, "1.1.1.1", 1, true)
+	ld.trackLink(link, email, "1.1.1.1", 0, true)
 
 	if link.Reader != origReader {
 		t.Fatal("trackLink must not replace link.Reader")
@@ -214,7 +214,7 @@ func TestLimitDispatcher_CloseTrackingWriterReleasesConn(t *testing.T) {
 	}
 
 	link := &transport.Link{Reader: nopReader{}, Writer: buf.Discard}
-	ld.trackLink(link, email, "1.1.1.1", 1, true)
+	ld.trackLink(link, email, "1.1.1.1", 0, true)
 
 	if got := ld.connCount.Load(); got != 1 {
 		t.Fatalf("expected connCount=1 after tracking, got %d", got)
@@ -318,6 +318,9 @@ func TestLimitDispatcher_ConnGateRejectsOverRate(t *testing.T) {
 	_, kind, _, _, reject := ld.checkConnGate(email)
 	if !reject || kind != model.ConnLimitKindRate {
 		t.Fatalf("速率超限应被拒，实际 reject=%v kind=%q", reject, kind)
+	}
+	if got := ld.userConnCounter(1).Load(); got != 0 {
+		t.Fatalf("速率拒绝后仍占用 %d 个名额", got)
 	}
 }
 

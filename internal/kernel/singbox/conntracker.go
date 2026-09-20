@@ -263,16 +263,11 @@ func (t *ConnTracker) RoutedConnection(
 	}
 
 	// 连接数 / 新建速率准入，超限只拒绝这一条新连接。
-	if kind, limit, observed, reject := t.checkConnGate(us, uid); reject {
+	if kind, limit, observed, reject := t.checkConnGate(us, uid, sourceIP); reject {
 		nlog.Core().Info("singbox: conn limit gate-keep, rejecting connection",
 			"user_id", uid, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
 		conn.Close()
 		return conn
-	}
-
-	// Register connection
-	if us != nil {
-		us.addConn(sourceIP)
 	}
 
 	connID := t.nextID()
@@ -329,15 +324,11 @@ func (t *ConnTracker) RoutedPacketConnection(
 	}
 
 	// 连接数 / 新建速率准入，超限只拒绝这一条新连接。
-	if kind, limit, observed, reject := t.checkConnGate(us, uid); reject {
+	if kind, limit, observed, reject := t.checkConnGate(us, uid, sourceIP); reject {
 		nlog.Core().Info("singbox: conn limit gate-keep, rejecting UDP connection",
 			"user_id", uid, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
 		conn.Close()
 		return conn
-	}
-
-	if us != nil {
-		us.addConn(sourceIP)
 	}
 
 	connID := t.nextID()
@@ -365,21 +356,26 @@ func (t *ConnTracker) RoutedPacketConnection(
 //
 // 并发检查放在速率检查之前：并发已经超限时直接拒绝，
 // 不再白白消耗一个速率令牌，否则用户恢复后还要额外等待桶回填。
-func (t *ConnTracker) checkConnGate(us *userStats, userID int) (string, int, int, bool) {
-	if userID <= 0 {
-		return "", 0, 0, false
+// 检查与登记共用用户锁，放行后调用方不得再次登记。
+func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) (string, int, int, bool) {
+	if us != nil {
+		us.mu.Lock()
+		defer us.mu.Unlock()
 	}
-	ptr := t.connLimiter.Load()
-	if ptr == nil {
-		return "", 0, 0, false
+	var cl model.ConnLimiter
+	if ptr := t.connLimiter.Load(); ptr != nil && userID > 0 {
+		cl = *ptr
 	}
-	cl := *ptr
 	if cl == nil {
+		if us != nil {
+			us.connCount++
+			us.ips[sourceIP]++
+		}
 		return "", 0, 0, false
 	}
 
 	if limit, ok := cl.MaxConnByUserID(userID); ok && us != nil {
-		if current := us.currentConns(); current >= limit {
+		if current := us.connCount; current >= limit {
 			cl.ReportLimited(userID, model.ConnLimitKindConcurrent, limit, current)
 			return model.ConnLimitKindConcurrent, limit, current, true
 		}
@@ -391,6 +387,10 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int) (string, int, int
 		return model.ConnLimitKindRate, 0, 0, true
 	}
 
+	if us != nil {
+		us.connCount++
+		us.ips[sourceIP]++
+	}
 	return "", 0, 0, false
 }
 

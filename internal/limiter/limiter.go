@@ -24,8 +24,10 @@ type Limiter struct {
 	connRateBuckets map[int]*rate.Limiter
 	hasConnLimits   atomic.Bool
 
-	// limitEvents 按 userID 累积超限次数，上报周期结束时快照并归零。
-	limitEvents sync.Map
+	// limitEvents 按 userID 累积超限次数，快照后释放整个周期的记录。
+	// 需要同时获取配置锁时，先锁 mu，再锁 limitEventsMu。
+	limitEventsMu sync.Mutex
+	limitEvents   map[int]LimitEventStat
 
 	deviceLimitEvents atomic.Uint64
 	connLimitEvents   atomic.Uint64
@@ -37,6 +39,7 @@ func New() *Limiter {
 		uuidDeviceLimit: make(map[string]int),
 		connLimits:      make(map[int]connLimitSpec),
 		connRateBuckets: make(map[int]*rate.Limiter),
+		limitEvents:     make(map[int]LimitEventStat),
 	}
 }
 

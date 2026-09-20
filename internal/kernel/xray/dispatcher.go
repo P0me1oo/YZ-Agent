@@ -118,6 +118,9 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 
 	link, err := d.innerDisp.Dispatch(ctx, dest)
 	if err != nil {
+		if uid > 0 {
+			d.userConnCounter(uid).Add(-1)
+		}
 		if email != "" && isTCP {
 			d.delConn(email, sourceIP)
 		}
@@ -136,10 +139,16 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 		return err
 	}
 
+	var release func()
 	if email != "" {
-		d.trackLink(link, email, sourceIP, uid, isTCP)
+		release = d.trackLink(link, email, sourceIP, uid, isTCP)
 	}
-	return d.innerDisp.DispatchLink(ctx, dest, link)
+	err = d.innerDisp.DispatchLink(ctx, dest, link)
+	if err != nil && release != nil {
+		// 内层可能已经关闭 writer；与关闭回调共用一次性回收，避免重复扣减。
+		release()
+	}
+	return err
 }
 
 // identifyAndCheck extracts user identity from the session context, enforces
@@ -155,14 +164,16 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 	sourceIP = si.Source.Address.IP().String()
 	isTCP = dest.Network == net.Network_TCP
 
+	// 超限拒绝属于运营需要看到的事件，用 Info 级别，与 sing-box 侧保持一致；
+	// 默认日志级别是 Info，用 Debug 会导致节点上完全看不到超限记录。
 	if d.checkDeviceLimit(email, sourceIP, isTCP) {
-		nlog.Core().Debug("xray: device limit exceeded", "email", email, "ip", sourceIP)
+		nlog.Core().Info("xray: device limit exceeded", "email", email, "ip", sourceIP)
 		return "", "", 0, false, errors.New("device limit exceeded for " + email)
 	}
 
 	uid, kind, limit, observed, reject := d.checkConnGate(email)
 	if reject {
-		nlog.Core().Debug("xray: conn limit exceeded",
+		nlog.Core().Info("xray: conn limit exceeded",
 			"email", email, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
 		// checkDeviceLimit 已经登记了 TCP 的 IP 引用计数，拒绝前必须回退，否则会泄漏。
 		if isTCP {
@@ -178,6 +189,7 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 //
 // 没装 connLimiter 时走无锁快速路径，不解析 userID 也不计数。
 // 并发检查在速率检查之前，避免并发已超限时还白白消耗一个速率令牌。
+// 放行时已占用并发名额，由调度失败分支或连接关闭回调归还。
 func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bool) {
 	ptr := d.connLimiter.Load()
 	if ptr == nil {
@@ -195,14 +207,21 @@ func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bo
 		return 0, "", 0, 0, false
 	}
 
-	if limit, ok := cl.MaxConnByUserID(uid); ok {
-		if current := int(d.userConnCounter(uid).Load()); current >= limit {
-			cl.ReportLimited(uid, model.ConnLimitKindConcurrent, limit, current)
-			return uid, model.ConnLimitKindConcurrent, limit, current, true
+	counter := d.userConnCounter(uid)
+	limit, limited := cl.MaxConnByUserID(uid)
+	for {
+		current := counter.Load()
+		if limited && current >= int64(limit) {
+			cl.ReportLimited(uid, model.ConnLimitKindConcurrent, limit, int(current))
+			return uid, model.ConnLimitKindConcurrent, limit, int(current), true
+		}
+		if counter.CompareAndSwap(current, current+1) {
+			break
 		}
 	}
 
 	if !cl.AllowNewConn(uid) {
+		counter.Add(-1)
 		// 速率上限由 limiter 自己补全，内核不需要知道具体配置。
 		cl.ReportLimited(uid, model.ConnLimitKindRate, 0, 0)
 		return uid, model.ConnLimitKindRate, 0, 0, true
@@ -223,14 +242,13 @@ func (d *LimitDispatcher) userConnCounter(uid int) *atomic.Int64 {
 // trackLink records connection lifecycle without mutating xray-core owned
 // transport primitives. This keeps mux/XUDP compatible while still allowing
 // the dispatcher to release device-limit state when the link closes.
-func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, uid int, isTCP bool) {
+func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, uid int, isTCP bool) func() {
 	d.connCount.Add(1)
 
 	// 计数器在这里取一次，关闭回调直接复用，避免关闭路径再查 sync.Map。
 	var userConns *atomic.Int64
 	if uid > 0 {
 		userConns = d.userConnCounter(uid)
-		userConns.Add(1)
 	}
 
 	onClose := func() {
@@ -243,10 +261,12 @@ func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string
 		d.connCount.Add(-1)
 	}
 
-	link.Writer = &closeTrackingWriter{
+	writer := &closeTrackingWriter{
 		Writer:  link.Writer,
 		onClose: onClose,
 	}
+	link.Writer = writer
+	return writer.release
 }
 
 // ─── features.Feature (delegated) ───────────────────────────────────────────
@@ -483,16 +503,18 @@ type closeTrackingWriter struct {
 	closed  atomic.Bool
 }
 
-func (w *closeTrackingWriter) Close() error {
+func (w *closeTrackingWriter) release() {
 	if w.closed.CompareAndSwap(false, true) {
 		w.onClose()
 	}
+}
+
+func (w *closeTrackingWriter) Close() error {
+	w.release()
 	return common.Close(w.Writer)
 }
 
 func (w *closeTrackingWriter) Interrupt() {
-	if w.closed.CompareAndSwap(false, true) {
-		w.onClose()
-	}
+	w.release()
 	common.Interrupt(w.Writer)
 }

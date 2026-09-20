@@ -2,12 +2,76 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/P0me1oo/YZ-Agent/internal/tracker"
 )
+
+// 全量、增量和轮询都不能修改内部入站；即使旧面板误推了用户也应保持运行。
+func TestLandingIgnoresPanelUserEvents(t *testing.T) {
+	ctx := context.Background()
+	for _, running := range []bool{true, false} {
+		k := &fakeKernel{running: running, protocols: []string{"shadowsocks"},
+			updateErr: errors.New("不支持更新"), addErr: errors.New("不支持新增"), removeErr: errors.New("不支持删除")}
+		s := newTestService(k)
+		s.lastConfig = landingConfig()
+		users := []model.UserSpec{{ID: 9, UUID: "test-only-user"}}
+		s.lastUsers = users // 模拟旧版本留下的错误状态。
+		for range 2 {
+			for _, event := range []controlplane.Event{
+				{Type: controlplane.EventSyncUsers, Users: users},
+				{Type: controlplane.EventSyncUserDelta, DeltaAction: "add", DeltaUsers: users},
+				{Type: controlplane.EventSyncUserDelta, DeltaAction: "remove", DeltaUsers: users},
+				{Type: controlplane.EventSyncUsers, Users: []model.UserSpec{}},
+			} {
+				s.handleWSEvent(ctx, event)
+				if !k.running || s.runtimeError != nil || len(s.lastUsers) != 0 || len(s.appliedState.Users) != 0 {
+					t.Fatal("用户事件停止了落地或污染了用户状态")
+				}
+			}
+			s.applyPullResult(ctx, pullResult{users: users, userHash: computeUserHash(users)})
+			s.applyPullResult(ctx, pullResult{config: landingConfig(), users: users, userHash: computeUserHash(users)})
+			if !k.running || len(s.lastUsers) != 0 || s.lastUserHash != computeUserHash(nil) {
+				t.Fatal("轮询或配置重载污染了落地用户状态")
+			}
+		}
+		if k.addCalls+k.removeCalls+k.updateCalls != 0 || len(k.startUsers) != 0 {
+			t.Fatal("落地调用了普通用户更新接口")
+		}
+	}
+}
+
+func TestLandingUserEventDoesNotBypassFailedConfig(t *testing.T) {
+	k := &fakeKernel{protocols: []string{"shadowsocks"}, startErr: errors.New("启动失败")}
+	s := newTestService(k)
+	s.lastConfig = landingConfig()
+	for range 2 {
+		if s.applyUserUpdate(context.Background(), []model.UserSpec{{ID: 9}}, "ignored") {
+			t.Fatal("配置失败被用户事件掩盖")
+		}
+	}
+	if k.running || k.startCalls != 1 || s.runtimeError == nil {
+		t.Fatal("失败配置被重复启动或未保留错误")
+	}
+}
+
+func TestLandingCanReturnToPlainNodeWithPolledUsers(t *testing.T) {
+	k := &fakeKernel{running: true, protocols: []string{"shadowsocks"}}
+	s := newTestService(k)
+	s.lastConfig = landingConfig()
+	nc := *landingConfig()
+	nc.Relay = nil
+	nc.Cipher = "aes-128-gcm"
+	users := []model.UserSpec{{ID: 9, UUID: "test-only-user"}}
+	s.applyPullResult(context.Background(), pullResult{config: &nc, users: users, userHash: computeUserHash(users)})
+	if len(s.lastUsers) != 1 || !k.running || k.reloadCalls != 1 {
+		t.Fatal("切回普通节点时丢失同批用户")
+	}
+}
 
 func landingConfig() *model.NodeSpec {
 	return &model.NodeSpec{

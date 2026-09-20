@@ -1,6 +1,7 @@
 package limiter
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -18,6 +19,81 @@ func TestConnLimiterNoLimitsFastPath(t *testing.T) {
 	}
 	if !l.AllowNewConn(1) {
 		t.Fatal("未配置速率上限的用户必须恒放行")
+	}
+}
+
+func TestConnLimiterSnapshotReclaimsRecords(t *testing.T) {
+	l := New()
+	l.UpdateUsers([]model.UserSpec{{ID: 1, ConnLimit: 2}})
+	for i := 0; i < 3; i++ {
+		l.ReportLimited(1, model.ConnLimitKindConcurrent, 2, 2)
+		if stat := l.SnapshotLimitEvents()[1]; stat.ConnHits != 1 || stat.PeakConn != 2 {
+			t.Fatalf("周期统计错误：%+v", stat)
+		}
+		if len(l.limitEvents) != 0 {
+			t.Fatal("快照后仍保留空记录")
+		}
+	}
+	l.UpdateUsers(nil)
+	l.ReportLimited(1, model.ConnLimitKindConcurrent, 2, 2)
+	if len(l.SnapshotLimitEvents()) != 0 {
+		t.Fatal("删号后的迟到事件重建了记录")
+	}
+}
+
+func TestConnLimiterConcurrentSnapshotsPreserveEvents(t *testing.T) {
+	l := New()
+	users := []model.UserSpec{{ID: 1, ConnLimit: 7, ConnRateLimit: 3}}
+	l.UpdateUsers(users)
+	const writers = 8
+	const events = 500
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < events; j++ {
+				l.ReportLimited(1, model.ConnLimitKindConcurrent, 7, 7)
+				l.ReportLimited(1, model.ConnLimitKindRate, 0, 0)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < events; i++ {
+			l.UpdateUsers(users)
+		}
+	}()
+	go func() { wg.Wait(); close(done) }()
+	var connHits, rateHits uint64
+	collect := func() {
+		for _, stat := range l.SnapshotLimitEvents() {
+			connHits += stat.ConnHits
+			rateHits += stat.RateHits
+			if stat.ConnHits > 0 && (stat.ConnLimit != 7 || stat.PeakConn != 7) {
+				t.Fatalf("并发统计被拆散：%+v", stat)
+			}
+			if stat.RateHits > 0 && stat.RateLimit != 3 {
+				t.Fatalf("速率统计被拆散：%+v", stat)
+			}
+		}
+	}
+	for {
+		select {
+		case <-done:
+			collect()
+			if connHits != writers*events || rateHits != writers*events {
+				t.Fatalf("事件丢失或重复：%d %d", connHits, rateHits)
+			}
+			if len(l.limitEvents) != 0 {
+				t.Fatal("快照后记录未清理")
+			}
+			return
+		default:
+			collect()
+		}
 	}
 }
 

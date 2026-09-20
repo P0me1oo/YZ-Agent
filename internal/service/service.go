@@ -738,7 +738,7 @@ func (s *Service) applyPullResult(ctx context.Context, result pullResult) {
 		s.resetPollingState()
 		return
 	}
-	if usersChanged {
+	if usersChanged && !s.lastConfig.IsRelayLanding() {
 		s.lastUserHash = result.userHash
 	}
 }
@@ -746,6 +746,9 @@ func (s *Service) applyPullResult(ctx context.Context, result pullResult) {
 // ─── User state helpers ─────────────────────────────────────────────────────
 
 func (s *Service) updateUserState(users []model.UserSpec) {
+	if s.lastConfig.IsRelayLanding() {
+		users = nil
+	}
 	if users == nil {
 		users = []model.UserSpec{}
 	}
@@ -841,6 +844,9 @@ func (s *Service) ensureRunning(ctx context.Context) bool {
 // applyUserUpdate replaces the full user set and hot-swaps the kernel.
 // Called from WS sync.users and REST polling.
 func (s *Service) applyUserUpdate(ctx context.Context, users []model.UserSpec, newHash string) bool {
+	if s.lastConfig.IsRelayLanding() {
+		return s.syncLandingUserState(ctx)
+	}
 	// 先保存最新用户状态，再尝试启动内核。否则内核停止时
 	// ensureRunning 只能看到旧的空用户列表，会把首个用户更新丢掉。
 	wasRunning := s.kernel.IsRunning()
@@ -875,6 +881,9 @@ func (s *Service) applyUserUpdate(ctx context.Context, users []model.UserSpec, n
 // via the kernel's atomic user API. The latest state is prepared first so a
 // stopped kernel can start as soon as the first user arrives.
 func (s *Service) applyUserDelta(ctx context.Context, action string, deltaUsers []model.UserSpec) bool {
+	if s.lastConfig.IsRelayLanding() && (action == "add" || action == "remove") {
+		return s.syncLandingUserState(ctx)
+	}
 	switch action {
 	case "add":
 		// Defensive check for empty or nil deltaUsers
@@ -935,6 +944,16 @@ func (s *Service) applyUserDelta(ctx context.Context, action string, deltaUsers 
 
 	default:
 		nlog.Core().Warn(fmt.Sprintf("unknown user delta action: %s", action))
+		return false
+	}
+	s.appliedState.Users = s.lastUsers
+	return true
+}
+
+// 落地的用户消息只清理普通用户状态；恢复已停止的内核仍须通过原有配置校验。
+func (s *Service) syncLandingUserState(ctx context.Context) bool {
+	s.prepareUserState(nil)
+	if !s.ensureRunning(ctx) {
 		return false
 	}
 	s.appliedState.Users = s.lastUsers
@@ -1011,6 +1030,10 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 	// A landing node serves only the internal transit inbound, so an empty user
 	// set is its normal state and must not shut the kernel down.
 	isLanding := s.lastConfig.IsRelayLanding()
+	if isLanding {
+		// 配置与用户同批到达、证书重载时也不能把普通用户带入落地。
+		s.prepareUserState(nil)
+	}
 
 	if !s.kernel.IsRunning() && (len(s.lastUsers) > 0 || isLanding) {
 		return s.startKernel(ctx, s.lastConfig, s.lastUsers)

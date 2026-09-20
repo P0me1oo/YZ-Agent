@@ -340,7 +340,7 @@ type LimitEvent struct {
 	UserID int    `json:"user_id"`
 	Kind   string `json:"kind"`  // conn=并发超限，rate=新建速率超限
 	Limit  int    `json:"limit"` // 触发时生效的上限
-	// Observed 是实测值，并发超限时为周期内峰值连接数；速率超限没有可观测值，为 0。
+	// Observed 是本周期触发并发拒绝时已占用名额的最大值（含正在调度的连接），不是全周期峰值；速率超限为 0。
 	Observed int    `json:"observed"`
 	Count    uint64 `json:"count"` // 本周期内被拒次数
 }
