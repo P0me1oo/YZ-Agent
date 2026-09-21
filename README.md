@@ -1,6 +1,6 @@
 # YZ-Agent
 
-当前源码版本为 `v1.16.0`（未发布）：程序、进程、管理命令和系统服务统一为 `yz-agent`，配置目录为 `/etc/yz-agent`，仓库和 Go 模块使用 `P0me1oo/YZ-Agent`。新增配套面板 `1.19.0` 的运行版本上报及远程更新、重启；已发布版本与下载来源见 [兼容矩阵](YZ_COMPATIBILITY.md)。
+当前正式版本为 `v1.16.0`：程序、进程、管理命令和系统服务统一为 `yz-agent`，配置目录为 `/etc/yz-agent`，仓库和 Go 模块使用 `P0me1oo/YZ-Agent`。新增配套面板 `1.19.0` 的运行版本上报及远程更新、重启；下载来源、镜像 digest 和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
 [YZboard](https://github.com/P0me1oo/YZboard) 的节点程序，支持 `sing-box` / `xray-core` 双核心。
 
