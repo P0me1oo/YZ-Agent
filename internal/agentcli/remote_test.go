@@ -112,23 +112,34 @@ func TestRemoteUnsupportedAndInterruptedWorker(t *testing.T) {
 func TestLatestReleaseIsResolvedOnceAndRejectsPrerelease(t *testing.T) {
 	old := downloadBase
 	t.Cleanup(func() { downloadBase = old })
-	for _, version := range []string{"v1.16.0", "v1.16.0-beta.1"} {
-		t.Run(version, func(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		status  int
+		valid   bool
+	}{
+		{"v1.16.0", http.StatusOK, true},
+		{"v1.13-yz.24", http.StatusOK, true},
+		{"v0.1.0-yz.1", http.StatusOK, true},
+		{"v1.16.0-beta.1", http.StatusOK, false},
+		{"unknown", http.StatusOK, false},
+		{"v1.16.0", http.StatusServiceUnavailable, false},
+	} {
+		t.Run(fmt.Sprintf("%s/%d", tc.version, tc.status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/latest" {
-					http.Redirect(w, r, "/tag/"+version, http.StatusFound)
+					http.Redirect(w, r, "/tag/"+tc.version, http.StatusFound)
 					return
 				}
-				w.WriteHeader(http.StatusOK)
+				w.WriteHeader(tc.status)
 			}))
 			defer server.Close()
 			downloadBase = server.URL
 			got, err := latestStableRelease(context.Background())
-			if version == "v1.16.0" && (err != nil || got != version) {
+			if tc.valid && (err != nil || got != tc.version) {
 				t.Fatalf("resolve: %s %v", got, err)
 			}
-			if version != "v1.16.0" && err == nil {
-				t.Fatal("prerelease accepted")
+			if !tc.valid && err == nil {
+				t.Fatal("invalid release accepted")
 			}
 		})
 	}
@@ -148,18 +159,24 @@ func TestRemoteWorkerExecutionAndFailure(t *testing.T) {
 					lock:             func() (func(), error) { locked = true; return func() { locked = false }, nil },
 					installationLock: func() (func(), error) { installationLocked = true; return func() { installationLocked = false }, nil },
 					executable:       func() (string, error) { return "installed-agent", nil },
-					latest:           func(context.Context) (string, error) { return "v1.16.0", nil },
+					upgrade: func() (string, error) {
+						calls++
+						if !locked {
+							t.Fatal("upgrade ran without execution lock")
+						}
+						if fail {
+							return "", errors.New("private execution detail")
+						}
+						return "updated", nil
+					},
 					run: func(name string, args ...string) error {
 						calls++
 						if !locked || name != "installed-agent" {
 							t.Fatal("worker ran without lock or wrong executable")
 						}
-						want := []string{"upgrade", "--version", "v1.16.0"}
-						if action == "restart" {
-							want = []string{"service", "restart"}
-							if !installationLocked {
-								t.Fatal("restart did not lock installation")
-							}
+						want := []string{"service", "restart"}
+						if action != "restart" || !installationLocked {
+							t.Fatal("unexpected service operation")
 						}
 						if !reflect.DeepEqual(args, want) {
 							t.Fatalf("args: %v", args)
@@ -188,5 +205,43 @@ func TestRemoteWorkerExecutionAndFailure(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRemoteUpgradeNoRestartAndFailureReasons(t *testing.T) {
+	for _, code := range []string{"up_to_date", "current_newer", "release_query_failed", "current_version_failed", "current_version_invalid", "latest_version_invalid"} {
+		t.Run(code, func(t *testing.T) {
+			key, operation := remoteFixture(t)
+			operation.Action, operation.Status = "upgrade", "running"
+			if err := activateRemote(&remoteRecord{Key: key, Operation: operation}); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			ops := remoteExecution{
+				lock: func() (func(), error) { return func() {}, nil },
+				upgrade: func() (string, error) {
+					calls++
+					if code == "up_to_date" || code == "current_newer" {
+						return code, nil
+					}
+					return "", upgradeCheckFailure(code, errors.New("private local detail"))
+				},
+				run: func(string, ...string) error { t.Fatal("no-op upgrade restarted service"); return nil },
+			}
+			if err := runRemoteWith([]string{key, operation.ID}, ops); err != nil {
+				t.Fatal(err)
+			}
+			got := RemoteResult(key)
+			if code == "up_to_date" || code == "current_newer" {
+				if got.Status != "succeeded" || got.Result != code || got.Error != "" {
+					t.Fatalf("result: %+v", got)
+				}
+			} else if got.Status != "failed" || got.Error != code || got.Result != "" {
+				t.Fatalf("result: %+v", got)
+			}
+			if err := runRemoteWith([]string{key, operation.ID}, ops); err == nil || calls != 1 {
+				t.Fatal("completed operation replayed")
+			}
+		})
 	}
 }

@@ -2,6 +2,15 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
+## 升级版本检查（v1.16.1，开发中，未发布）
+
+- Node 修改升级命令、安装器及机器操作结果上报；配套面板 `1.20.3`、前端 `0.4.3`。核心依赖、节点配置和服务手动重启入口未变。
+- 默认升级固定最新正式 Tag，比较当前版本后决定是否进入原有校验及安装事务；显式 `--version` 保留历史回滚行为。
+- 控制回报新增可选 `operation.result`：`updated`、`up_to_date`、`current_newer`。面板仅对升级的后两种成功结果允许不换进程完成；实际更新和手动重启仍要求新进程回报。错误码新增 `release_query_failed`、`current_version_failed`、`current_version_invalid`、`latest_version_invalid`。
+- 旧面板不能完整处理新结果，后续发布部署应先更新面板及前端，再更新 Node。新面板兼容 Node `v1.16.0` 不带结果字段的旧回报；旧 Node 的升级策略不会因更新面板而改变。三端均为本地未发布修改。
+- 本地 `go test ./internal/agentcli` 通过，覆盖版本判断、正式版查询、远程执行去重及原有下载校验、回滚；`tests/upgrade_version_test.sh`、服务管理和默认内核脚本测试通过。
+- Windows Git Bash 将 `ln -s` 生成为文件副本，目录迁移和名称迁移测试分别在管理入口及 `readlink` 断言失败；未跳过或弱化这些断言，仍需 Linux 环境复验。
+
 ## 服务器远程管理（v1.16.0，已发布）
 
 - 发布核对（2026-09-21）：固定 Tag `v1.16.0`，来源 `541cc67c1f886225c944f5c2d38091de8df5d872`，CI `35590758071` 全部成功。

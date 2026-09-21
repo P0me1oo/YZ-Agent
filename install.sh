@@ -1025,7 +1025,10 @@ verify_release_checksum() {
 stage_binary() {
     local staged="$BIN_STAGE_DIR/xboard-node"
     local local_src
-    local_src=$(select_binary_source)
+    local_src=""
+    if [ "${UPGRADE_FROM_RELEASE:-0}" -ne 1 ]; then
+        local_src=$(select_binary_source)
+    fi
     if [ -n "$local_src" ]; then
         log_step "Using local binary: ${local_src}"
         if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ]; then
@@ -1072,7 +1075,9 @@ stage_xbctl() {
         return
     fi
     local local_src=""
-    if [ -n "$CLI_BINARY_SOURCE" ]; then
+    if [ "${UPGRADE_FROM_RELEASE:-0}" -eq 1 ]; then
+        local_src=""
+    elif [ -n "$CLI_BINARY_SOURCE" ]; then
         if [ ! -f "$CLI_BINARY_SOURCE" ]; then
             log_error "xbctl binary source not found: $CLI_BINARY_SOURCE"
             exit 1
@@ -1439,13 +1444,68 @@ perform_install() {
     log_info "CLI: ${CLI_PATH}  (run '${CLI_PATH} list' if ${CLI_NAME} is not in PATH)"
 }
 
+# 与 Go 升级入口保持一致：历史两段版本补零，yz 修订按数字排序。
+upgrade_version_key() {
+    local value="$1" part
+    if ! [[ "$value" =~ ^v?([0-9]+)\.([0-9]+)(\.([0-9]+))?(-yz\.([0-9]+))?$ ]]; then
+        return 1
+    fi
+    local major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}"
+    local patch="${BASH_REMATCH[4]:-0}" revision="${BASH_REMATCH[6]}" stable=1
+    for part in "$major" "$minor" "$patch" "${revision:-0}"; do
+        [[ "$part" = 0 || "$part" != 0* ]] || return 1
+    done
+    [ -z "$revision" ] || stable=0
+    printf '%s.%s.%s.%s.%s\n' "$major" "$minor" "$patch" "$stable" "${revision:-0}"
+}
+
+check_latest_upgrade() {
+    UPGRADE_SKIPPED=0
+    UPGRADE_FROM_RELEASE=0
+    [ "$RELEASE_VERSION" = latest ] || return 0
+    local report current current_key target target_key url first
+    if ! report=$("${PREVIOUS_BINARY_PATH:-$BINARY_PATH}" -v); then
+        log_error "读取当前版本失败，已停止升级"
+        return 1
+    fi
+    read -r _ current _ <<< "$report"
+    if ! current_key=$(upgrade_version_key "$current"); then
+        log_error "无法识别当前版本：$current，已停止升级"
+        return 1
+    fi
+    if ! url=$(curl -fsSL --connect-timeout 10 --max-time 30 -o /dev/null -w '%{url_effective}' "${DEFAULT_DOWNLOAD_BASE}/latest"); then
+        log_error "查询最新正式版失败，已停止升级"
+        return 1
+    fi
+    target="${url##*/}"
+    if [[ "$url" != */tag/* ]] || ! target_key=$(upgrade_version_key "$target"); then
+        log_error "无法识别最新正式版：$target，已停止升级"
+        return 1
+    fi
+    if [ "$current_key" = "$target_key" ]; then
+        log_info "已是最新版本"
+        UPGRADE_SKIPPED=1
+        return 0
+    fi
+    first=$(printf '%s\n%s\n' "$current_key" "$target_key" | LC_ALL=C sort -V | head -n 1)
+    if [ "$first" = "$target_key" ]; then
+        log_info "当前版本 $current 高于最新正式版 $target，不自动降级"
+        UPGRADE_SKIPPED=1
+        return 0
+    fi
+    RELEASE_VERSION="$target"
+    UPGRADE_FROM_RELEASE=1
+}
+
 perform_upgrade() {
     detect_current_state
     if [ "$CURRENT_STATE" = "fresh" ]; then
-        log_warn "No existing install found; falling back to install"
-        perform_install
-        return
+        log_error "未找到已安装程序，无法读取当前版本，已停止升级；首次安装请使用 install"
+        return 1
     fi
+    check_latest_upgrade || return 1
+    [ "$UPGRADE_SKIPPED" -eq 0 ] || return 0
+    if [ "$UPGRADE_FROM_RELEASE" -eq 1 ] && [ "${YZ_INSTALL_PARENT_LOCK:-}" != 1 ]; then install_dependencies; fi
     load_health_port_from_config "$CONFIG_FILE"
     TMP_DIR=$(mktemp -d)
     ensure_dirs
@@ -1562,7 +1622,7 @@ main() {
     detect_arch
     detect_os
     detect_service_manager
-    if [ "${YZ_INSTALL_PARENT_LOCK:-}" != 1 ]; then install_dependencies; fi
+    if [ "${YZ_INSTALL_PARENT_LOCK:-}" != 1 ] && { [ "$ACTION" != upgrade ] || [ "$RELEASE_VERSION" != latest ]; }; then install_dependencies; fi
 
     case "$ACTION" in
         install)

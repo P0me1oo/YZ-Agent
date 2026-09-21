@@ -21,7 +21,6 @@ import (
 
 var remoteMu sync.Mutex
 var remoteIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-var stableVersionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
 
 type remoteRecord struct {
 	Key       string                 `json:"key"`
@@ -210,8 +209,8 @@ type remoteExecution struct {
 	lock             func() (func(), error)
 	installationLock func() (func(), error)
 	executable       func() (string, error)
-	latest           func(context.Context) (string, error)
 	run              func(string, ...string) error
+	upgrade          func() (string, error)
 }
 
 func runRemote(args []string) error {
@@ -219,8 +218,12 @@ func runRemote(args []string) error {
 		lock:             lockRemoteExecution,
 		installationLock: func() (func(), error) { return lockInstallation(defaultInstallRoot) },
 		executable:       os.Executable,
-		latest:           latestStableRelease,
 		run:              func(name string, args ...string) error { return exec.Command(name, args...).Run() },
+		upgrade: func() (string, error) {
+			var result string
+			err := runUpgradeWithResult(nil, func(value string) { result = value })
+			return result, err
+		},
 	})
 }
 
@@ -240,6 +243,7 @@ func runRemoteWith(args []string, ops remoteExecution) error {
 		record.Operation.Status, record.Operation.Error = "succeeded", ""
 		if code != "" {
 			record.Operation.Status, record.Operation.Error = "failed", code
+			record.Operation.Result = ""
 		}
 		return saveRemote(record)
 	}
@@ -256,19 +260,24 @@ func runRemoteWith(args []string, ops remoteExecution) error {
 	if time.Now().Unix() >= record.Operation.ExpiresAt {
 		return finish("timeout")
 	}
-	ctx := context.Background()
+	if record.Operation.Action == "upgrade" {
+		// 执行器已脱离服务进程组，直接复用安装锁内的版本检查及安装事务。
+		result, err := ops.upgrade()
+		if err != nil {
+			return finish(upgradeErrorCode(err))
+		}
+		if result != "updated" && result != "up_to_date" && result != "current_newer" {
+			return finish("execution_failed")
+		}
+		record.Operation.Result = result
+		return finish("")
+	}
 	executable, err := ops.executable()
 	if err != nil {
 		return finish("execution_failed")
 	}
 	commandArgs := []string{"service", "restart"}
-	if record.Operation.Action == "upgrade" {
-		target, err := ops.latest(ctx)
-		if err != nil {
-			return finish("execution_failed")
-		}
-		commandArgs = []string{"upgrade", "--version", target}
-	} else if record.Operation.Action != "restart" {
+	if record.Operation.Action != "restart" {
 		return finish("unsupported")
 	} else {
 		// 重启也与本机手动升级互斥，避免打断已有安装事务。
@@ -278,9 +287,7 @@ func runRemoteWith(args []string, ops remoteExecution) error {
 		}
 		defer unlockInstallation()
 	}
-	// 子进程复用既有安装事务；执行器不属于 yz-agent 服务的进程组。
-	// 面板超时只表示未确认，不强杀正在替换文件或回滚的安装事务。
-	// 即使超过面板等待期限，也持有执行锁直到安装子进程结束。
+	// 独立执行器等待服务重启完成；面板超时不强杀子进程，仍持有执行锁。
 	if err := ops.run(executable, commandArgs...); err != nil {
 		return finish("execution_failed")
 	}
@@ -299,8 +306,11 @@ func latestStableRelease(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 	target := filepath.Base(resp.Request.URL.Path)
-	if resp.StatusCode != http.StatusOK || !stableVersionPattern.MatchString(target) {
-		return "", errors.New("latest release is not a stable semantic version")
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("正式版查询返回 HTTP %d", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Request.URL.Path, "/tag/") || !releaseVersionPattern.MatchString(target) {
+		return "", upgradeCheckFailure("latest_version_invalid", fmt.Errorf("无法识别最新正式版 %q，已停止升级", target))
 	}
 	return target, nil
 }

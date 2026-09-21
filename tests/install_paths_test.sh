@@ -53,6 +53,7 @@ HEALTH_ENABLED=0
 ARCH=amd64
 YES=1
 ACTION=upgrade
+RELEASE_VERSION=v1.13-yz.23
 RESTARTS=0
 mkdir -p "$INSTALL_ROOT" "$DEFAULT_BIN_DIR" "$CASE_ROOT/entry" "$CASE_ROOT/package" "$BIN_DIR"
 printf 'keep\n' >"$BIN_DIR/unrelated"

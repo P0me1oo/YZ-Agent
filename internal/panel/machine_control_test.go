@@ -46,3 +46,29 @@ func TestMachineControlOldPanelAndErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestMachineControlReportsUpgradeResultWithoutChangingProcess(t *testing.T) {
+	for _, result := range []string{"updated", "up_to_date", "current_newer"} {
+		t.Run(result, func(t *testing.T) {
+			server, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					BootID    string           `json:"boot_id"`
+					Operation MachineOperation `json:"operation"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body.BootID != "same-process" || body.Operation.Status != "succeeded" || body.Operation.Result != result {
+					t.Errorf("unexpected report: %+v", body)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"command": nil})
+			})
+			defer server.Close()
+			id, _ := uuid.NewV4()
+			command, err := client.ExchangeMachineControl("v1.16.1", "same-process", true, &MachineOperation{ID: id.String(), Action: "upgrade", Status: "succeeded", Result: result})
+			if err != nil || command != nil {
+				t.Fatalf("command=%+v err=%v", command, err)
+			}
+		})
+	}
+}

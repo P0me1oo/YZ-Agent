@@ -1,4 +1,4 @@
-VERSION ?= v1.16.0
+VERSION ?= v1.16.1
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.commit=$(COMMIT)
@@ -28,6 +28,7 @@ build-all: build-linux build-linux-arm64
 
 # Run tests
 test:
+	bash tests/upgrade_version_test.sh
 	bash tests/install_service_manager_test.sh
 	bash tests/install_kernel_defaults_test.sh
 	bash tests/install_paths_test.sh

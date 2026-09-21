@@ -11,6 +11,7 @@ type MachineOperation struct {
 	Action    string `json:"action,omitempty"`
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
+	Result    string `json:"result,omitempty"`
 	ExpiresAt int64  `json:"expires_at,omitempty"`
 }
 

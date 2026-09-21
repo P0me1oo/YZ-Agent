@@ -37,7 +37,7 @@ var (
 )
 
 var (
-	version   = "v1.16.0"
+	version   = "v1.16.1"
 	buildTime = "unknown"
 	commit    = "unknown"
 )
@@ -518,6 +518,10 @@ func runBindAdd(mode string, args []string) error {
 }
 
 func runUpgrade(args []string) error {
+	return runUpgradeWithResult(args, func(string) {})
+}
+
+func runUpgradeWithResult(args []string, result func(string)) error {
 	if err := ensureRoot("upgrade"); err != nil {
 		return err
 	}
@@ -543,6 +547,26 @@ func runUpgrade(args []string) error {
 	paths, err := loadInstallPaths(defaultBinDirFile)
 	if err != nil {
 		return err
+	}
+	if release == "latest" {
+		report, err := exec.Command(paths.installedBinary(), "-v").Output()
+		if err != nil {
+			return upgradeCheckFailure("current_version_failed", fmt.Errorf("读取当前版本失败，已停止升级：%w", err))
+		}
+		var message string
+		release, message, err = planLatestUpgrade(context.Background(), installedVersion("", report), latestStableRelease)
+		if err != nil {
+			return err
+		}
+		if message != "" {
+			if message == "up_to_date" {
+				fmt.Println("已是最新版本")
+			} else {
+				fmt.Println("当前版本高于最新正式版，不自动降级")
+			}
+			result(message)
+			return nil
+		}
 	}
 	manager, err := detectServiceManager()
 	if err != nil {
@@ -584,6 +608,7 @@ func runUpgrade(args []string) error {
 		}
 	}
 	fmt.Printf("Upgrade complete (version: %s)\n", newVer)
+	result("updated")
 	return nil
 }
 func runUninstall(args []string) error {
