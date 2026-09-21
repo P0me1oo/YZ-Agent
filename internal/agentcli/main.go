@@ -37,7 +37,7 @@ var (
 )
 
 var (
-	version   = "v1.15.1"
+	version   = "v1.16.0"
 	buildTime = "unknown"
 	commit    = "unknown"
 )
@@ -163,6 +163,8 @@ func run(args []string) error {
 		return nil
 	}
 	switch args[0] {
+	case "internal-machine-operation":
+		return runRemote(args[1:])
 	case "status":
 		return runStatus()
 	case "list":

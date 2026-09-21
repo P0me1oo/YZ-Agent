@@ -2,6 +2,18 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
+## 服务器远程管理（v1.16.0，未发布）
+
+- 修改基线：`38f71ceae5a08f3282c8cc8be9b13ec140a1ad0b`，分支 `dev`；实际 origin 为 `P0me1oo/YZ-Agent`。
+- 新功能配套面板 `1.19.0` 和管理前端 `0.4.0`。旧面板返回 404 时原有服务不受影响；旧 Node 需先完成一次常规升级。
+- `go.mod`、`go.sum` 和两个核心仓库未改动；双核心共用机器控制通道。
+- 当前进程版本和进程标识用于上报，配置重载保留标识，服务重启产生新标识；执行器完成且新进程回报后面板才确认成功。
+- 远程操作要求 Linux root 安装，以及 systemd（含 systemd-run）或 OpenRC（含 setsid）。复用已有 CLI 校验和回滚事务，本机全局执行锁避免同机实例并发操作。
+- 安装目录 `remote-operations` 只保存任务及固定结果码，不含凭据；15 分钟超时只表示未确认，不强杀安装或回滚事务，执行锁一直保留到子进程结束。解析最新正式版的请求限时 30 秒。
+- 未发布，未连接真实服务器。
+- 本地 `go test ./...` 通过，包括两个核心、配置、控制通道及服务回归；后续执行器去重、迟到结果隔离及安装锁补充通过 `go test ./internal/agentcli ./internal/panel`。实际 systemd/OpenRC 服务操作尚未在真实服务器验证。
+- Linux `amd64`、`arm64` 均以 `-mod=readonly -trimpath -buildvcs=true` 和 `with_quic with_utls with_wireguard with_acme with_clash_api` 构建通过。模块信息核对两个固定核心依赖未变，VCS revision 为上述基线，`vcs.modified=true`（本地未提交验证产物，不是 Release）。
+
 ## 连接限制与超限日志修复（v1.15.1，已发布）
 
 - 发布核对（2026-09-21）：固定 Tag `v1.15.1`，来源 `14450d777c35417645c51a48b28f2ea3b49aa0c0`，CI `35525200829` 全部成功。

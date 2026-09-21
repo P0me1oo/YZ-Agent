@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/agentcli"
 	"strings"
 	"sync"
 	"time"
@@ -35,9 +36,11 @@ type nodeHandle struct {
 //   - maintains a shared WS connection that demuxes events by node_id
 //   - reports machine-level load via POST /machine/status
 type Orchestrator struct {
-	cfg      *config.Config
-	firewall firewall.Controller
-	client   *panel.Client // machine-level client (no node_id)
+	agentVersion string
+	bootID       string
+	cfg          *config.Config
+	firewall     firewall.Controller
+	client       *panel.Client // machine-level client (no node_id)
 
 	mu    sync.Mutex
 	nodes map[int]*nodeHandle // node_id → handle
@@ -87,6 +90,39 @@ func (o *Orchestrator) SetStatusHandler(handler func(service.RuntimeStatus)) {
 }
 
 func (o *Orchestrator) SetFirewallController(controller firewall.Controller) { o.firewall = controller }
+
+func (o *Orchestrator) SetAgentRuntime(version, bootID string) {
+	o.agentVersion, o.bootID = version, bootID
+}
+
+func (o *Orchestrator) controlLoop(ctx context.Context) {
+	key := agentcli.RemoteKey(o.cfg.Panel.URL, o.cfg.Machine.MachineID)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		command, err := o.client.ExchangeMachineControl(o.agentVersion, o.bootID, agentcli.RemoteAvailable(), agentcli.RemoteResult(key))
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if err == nil && command != nil {
+			if err := agentcli.StartRemote(key, *command); err != nil {
+				nlog.Core().Warn("machine operation could not start")
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
 
 func (o *Orchestrator) notifyStatus(status service.RuntimeStatus) {
 	if o.statusHandler != nil {
@@ -144,6 +180,9 @@ func (o *Orchestrator) aggregateNodeStatusLocked() service.RuntimeStatus {
 func (o *Orchestrator) Run(ctx context.Context) error {
 	o.notifyStatus(service.RuntimeStarting)
 	o.runCtx = ctx
+	if o.agentVersion != "" {
+		go o.controlLoop(ctx)
+	}
 	nodesResp, err := o.client.GetMachineNodes()
 	if err != nil {
 		o.notifyStatus(service.RuntimeFailed)

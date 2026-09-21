@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"net"
@@ -25,10 +26,19 @@ import (
 )
 
 var (
-	version   = "v1.15.1"
-	buildTime = "unknown"
-	commit    = "unknown"
+	version       = "v1.16.0"
+	buildTime     = "unknown"
+	commit        = "unknown"
+	processBootID = fmt.Sprintf("%x", randomBootID())
 )
+
+func randomBootID() []byte {
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		panic(err)
+	}
+	return id
+}
 
 // 退出最多需要等待在途报告、失败重试和最终报告各 30 秒，以及内核排空。
 const shutdownGracePeriod = 2 * time.Minute
@@ -186,6 +196,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string) {
 				if instanceCfg.IsMachineMode() {
 					nlog.Core().Info("starting machine instance", "instance", instanceCfg.InstanceID, "machine_id", instanceCfg.Machine.MachineID, "panel_url", instanceCfg.Panel.URL)
 					orch := machine.New(instanceCfg)
+					orch.SetAgentRuntime(version, processBootID)
 					orch.SetFirewallController(firewallManager)
 					orch.SetStatusHandler(func(status service.RuntimeStatus) {
 						health.set(healthIDs[0], status)
