@@ -2,7 +2,7 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
-## Xray 内核同步至 v26.9.9（v1.17.0，待发布）
+## Xray 内核同步至 v26.9.9（v1.17.0，已发布）
 
 - Node 修改起点：`74a066c3a5ec42417f99a4acfc6ad808f5dfdcc3`；原 Xray 依赖为 `b4caa82d6414196565599c19ebc1b53e331349b6`，基于官方 `v26.7.11`。
 - 新核心：`YZ-Xray-core v26.8.0` / `9fcf874e21147978c5117e4832c78b4adadd4320`，上游基线为官方 `v26.9.9` / `52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`。核心侧合并已推送；产品版本改用独立三段语义版本，不再使用 `-yz.N` 后缀。
@@ -12,6 +12,11 @@
 - 本地验证（Windows/amd64、Go 1.27.1）：正式依赖下 `go test ./...` 的 20 个包全部通过，含双核心中转、配置、控制通道与服务回归；`sing-anytls`、`sing-shadowsocks`、`singbridge`、`hysteria`、`v2raygrpclite` 等依赖包测试通过；`tests/upgrade_version_test.sh`、服务管理和默认内核脚本测试通过；`linux/amd64`、`linux/arm64`、`windows/amd64` 以正式构建参数编译通过。
 - 未在本机覆盖：`-race` 需要 CGO；`install_paths` 与 `install_name_migration` 在 Windows Git Bash 下因 `ln -s` 退化为文件复制而断言失败，与 `v1.16.1` 记录一致，本次未改动安装脚本。两项均由 Ubuntu CI 覆盖，发布前以 CI 结果为准。
 - 核心侧的补丁清单与验证记录见 YZ-Xray-core 的 `YZ_FORK.md`。
+- CI 核验（2026-09-22）：Node 运行 `35720158391`（Tag `v1.17.0`）的测试、双架构构建、镜像和发布作业全部成功，Ubuntu 上的 `-race` 全量测试与安装脚本测试通过，补齐了本机未覆盖的两项。核心 fork 提交 `9fcf874e` 的三平台「Tests and Checkings」及两个构建工作流同样全部成功。
+- 发布核对：Tag `v1.17.0`，来源 `806a3db3911fc22967f37ce86c85d866c02ab31d`，Release <https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.17.0> 已标记为 latest。12 个附件已下载，`SHA256SUMS` 的 11 项全部匹配。
+- 四个程序均为 Go `1.27.1`、对应 Linux 架构、`CGO_ENABLED=0`、五个功能标签，模块版本 `v1.17.0`，`vcs.revision` 为上述来源且 `vcs.modified=false`；附带的 buildinfo 确认 Xray 固定为 `github.com/P0me1oo/YZ-Xray-core v0.0.0-20260922055117-9fcf874e2114`，sing-box 仍为 `v1.14.0-yz.2`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v1.17.0` 与 `latest` 指向同一 manifest `sha256:f424d767b24a5b3c56ce586790fc7401b428d3f6aed5347d9918cceed035885b`，包含 `linux/amd64`、`linux/arm64`；OCI 标签的 version 为 `v1.17.0`、revision 为上述来源。
+- 回滚基线为 Node `v1.16.1`（核心 `v26.7.11-yz.6` / `b4caa82d6414196565599c19ebc1b53e331349b6`）。配套面板无需同步升级。尚未在真实服务器执行线上更新。
 
 ## 升级版本检查（v1.16.1，已发布）
 
