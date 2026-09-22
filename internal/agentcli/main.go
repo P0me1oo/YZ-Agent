@@ -37,7 +37,7 @@ var (
 )
 
 var (
-	version   = "v1.17.0"
+	version   = "v1.17.1"
 	buildTime = "unknown"
 	commit    = "unknown"
 )
