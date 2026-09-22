@@ -1,5 +1,5 @@
 # 构建工具链、功能标签和来源提交与 Release 保持一致。
-FROM --platform=$BUILDPLATFORM golang:1.26.4-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
