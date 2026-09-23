@@ -1,6 +1,6 @@
 # YZ-Agent
 
-当前代码版本为 `v1.17.3`，尚未发布；设备数限制只统计公网来源 IP，配套面板 `1.21.2` 和管理端工程 `0.4.7`。已发布版本、固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
+当前已发布版本为 `v1.17.3`；设备数限制只统计公网来源 IP，配套面板 `1.21.2` 和管理端工程 `0.4.7`。固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
 [YZboard](https://github.com/P0me1oo/YZboard) 的节点程序，支持 `sing-box` / `xray-core` 双核心。
 
