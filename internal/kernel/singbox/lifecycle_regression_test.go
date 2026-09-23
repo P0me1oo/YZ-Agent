@@ -174,14 +174,20 @@ func TestSingBoxRestartPreservesGlobalDeviceLimits(t *testing.T) {
 	if err := s.Start(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
 		t.Fatal(err)
 	}
-	s.UpdateGlobalDevices(map[int][]string{user.ID: {"0.0.0.1"}})
+	s.UpdateGlobalDevices(map[int][]string{user.ID: {"8.8.8.8"}})
 	if err := s.Start(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
 		t.Fatal(err)
 	}
 	echo := runtimeEcho(t)
-	runtimeReject(t, runtimeClient(t, node, user), echo)
-	s.ClearGlobalDevices()
+	if !s.connTracker.checkDeviceGate(s.connTracker.users[user.ID], user.ID, "1.1.1.1", 1) {
+		t.Fatal("重启后应继续拒绝新的公网来源")
+	}
+	// 本地联调客户端从回环进入，不应被公网设备名额拒绝。
 	runtimeExchange(t, runtimeDial(t, runtimeClient(t, node, user), echo))
+	s.ClearGlobalDevices()
+	if s.connTracker.checkDeviceGate(s.connTracker.users[user.ID], user.ID, "1.1.1.1", 1) {
+		t.Fatal("清除全局快照后应允许新的公网来源")
+	}
 }
 
 func TestXrayFailedRestartStopsKernelAndClosesPreviousListener(t *testing.T) {

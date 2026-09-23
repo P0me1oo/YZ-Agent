@@ -82,7 +82,12 @@ func TestLimitDispatcherUsesFreshGlobalDevices(t *testing.T) {
 	ld := newTestDispatcher()
 	email := userEmail(15)
 	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 2}, nil)
-	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1", "192.0.2.1"}}, time.Now())
+	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1", "8.8.8.8"}}, time.Now())
+	if ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("private global source must not occupy a slot")
+	}
+	ld.delConn(email, "1.1.1.1")
+	ld.UpdateGlobalDevices(map[int][]string{15: {"8.8.8.8", "9.9.9.9"}}, time.Now())
 	if !ld.checkDeviceLimit(email, "1.1.1.1", true) {
 		t.Fatal("new source should be rejected when global slots are full")
 	}
@@ -90,16 +95,34 @@ func TestLimitDispatcherUsesFreshGlobalDevices(t *testing.T) {
 		t.Fatal("existing private source should remain allowed")
 	}
 	ld.delConn(email, "10.0.0.1")
-	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1"}}, time.Now())
+	ld.UpdateGlobalDevices(map[int][]string{15: {"8.8.8.8"}}, time.Now())
 	if ld.checkDeviceLimit(email, "1.1.1.1", true) {
 		t.Fatal("new source should be allowed after a slot is released")
 	}
 	ld.delConn(email, "1.1.1.1")
-	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1", "192.0.2.1"}}, time.Now().Add(-3*time.Minute))
+	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1", "8.8.8.8"}}, time.Now().Add(-3*time.Minute))
 	if ld.checkDeviceLimit(email, "1.1.1.1", true) {
 		t.Fatal("stale global snapshot should fall back to local state")
 	}
 	ld.delConn(email, "1.1.1.1")
+}
+
+func TestLimitDispatcherPrivateRelaySourceDoesNotUseDeviceSlot(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(15)
+	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 1}, nil)
+	ld.UpdateGlobalDevices(map[int][]string{15: {"8.8.8.8"}}, time.Now())
+	if ld.checkDeviceLimit(email, "10.0.0.2", true) {
+		t.Fatal("内网出口不应被设备上限拒绝")
+	}
+	ld.delConn(email, "10.0.0.2")
+	ips, _ := ld.GetConnectionState()
+	if len(ips) != 0 {
+		t.Fatalf("内网出口不应上报为设备: %v", ips)
+	}
+	if !ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("不同公网来源仍应受上限约束")
+	}
 }
 
 func TestXrayForwardsAndClearsGlobalDevices(t *testing.T) {
@@ -108,32 +131,32 @@ func TestXrayForwardsAndClearsGlobalDevices(t *testing.T) {
 	email := userEmail(15)
 	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 1}, nil)
 	x.limitDispatcher = ld
-	x.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1"}})
-	if !ld.checkDeviceLimit(email, "192.0.2.1", true) {
+	x.UpdateGlobalDevices(map[int][]string{15: {"8.8.8.8"}})
+	if !ld.checkDeviceLimit(email, "1.1.1.1", true) {
 		t.Fatal("global state was not forwarded")
 	}
 	x.ClearGlobalDevices()
-	if ld.checkDeviceLimit(email, "192.0.2.1", true) {
+	if ld.checkDeviceLimit(email, "1.1.1.1", true) {
 		t.Fatal("disconnected panel state should not keep rejecting new sources")
 	}
-	ld.delConn(email, "192.0.2.1")
+	ld.delConn(email, "1.1.1.1")
 }
 
 func TestLimitDispatcherCountsUDPSources(t *testing.T) {
 	ld := newTestDispatcher()
 	email := userEmail(15)
 	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 1}, nil)
-	if ld.checkDeviceLimit(email, "192.0.2.1", false) {
+	if ld.checkDeviceLimit(email, "8.8.8.8", false) {
 		t.Fatal("first UDP source should be allowed")
 	}
-	if !ld.checkDeviceLimit(email, "192.0.2.2", false) {
+	if !ld.checkDeviceLimit(email, "8.8.8.9", false) {
 		t.Fatal("second UDP source should be rejected")
 	}
-	ld.delConn(email, "192.0.2.1")
-	if ld.checkDeviceLimit(email, "192.0.2.2", false) {
+	ld.delConn(email, "8.8.8.8")
+	if ld.checkDeviceLimit(email, "8.8.8.9", false) {
 		t.Fatal("released UDP source should free its slot")
 	}
-	ld.delConn(email, "192.0.2.2")
+	ld.delConn(email, "8.8.8.9")
 }
 
 func TestLimitDispatcherConcurrentAdmissionRespectsDeviceLimit(t *testing.T) {
@@ -147,7 +170,7 @@ func TestLimitDispatcherConcurrentAdmissionRespectsDeviceLimit(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			ip := fmt.Sprintf("192.0.2.%d", i)
+			ip := fmt.Sprintf("8.8.8.%d", i)
 			if !ld.checkDeviceLimit(email, ip, true) {
 				mu.Lock()
 				accepted = append(accepted, ip)
@@ -257,7 +280,7 @@ func TestLimitDispatcher_UnlimitedUserFastPath(t *testing.T) {
 
 	// Should use fast path (sync.Map), no lock needed
 	for i := 0; i < 100; i++ {
-		ip := "10.0.0." + string(rune('0'+i%10))
+		ip := "8.8.8." + string(rune('0'+i%10))
 		if ld.checkDeviceLimit(email, ip, true) {
 			t.Errorf("unlimited user should always be allowed (ip=%s)", ip)
 		}

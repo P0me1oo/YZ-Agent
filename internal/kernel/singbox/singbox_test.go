@@ -142,6 +142,25 @@ func TestConnTrackerRoutedConnectionRejectsWhenDeviceLimitExceeded(t *testing.T)
 	}
 }
 
+func TestConnTrackerPrivateRelaySourceDoesNotUseDeviceSlot(t *testing.T) {
+	tracker := NewConnTracker(0)
+	tracker.SetUserMap(map[string]int{"uuid-1": 1})
+	tracker.SetDeviceLimitFunc(func(string) (int, bool) { return 1, true })
+	tracker.UpdateGlobalDevices(map[int][]string{1: {"8.8.8.8"}})
+
+	private := &testConn{}
+	wrapped := tracker.RoutedConnection(context.Background(), private,
+		testInboundContext("uuid-1", "10.0.0.2"), nil, nil)
+	if wrapped == private || private.closed {
+		t.Fatal("内网中转来源不应占用设备名额或被设备上限拒绝")
+	}
+	_, ips, connections := tracker.GetUserTraffic()
+	if len(ips) != 0 || connections != 1 {
+		t.Fatalf("内网连接应只计连接数，设备快照=%v，连接数=%d", ips, connections)
+	}
+	_ = wrapped.Close()
+}
+
 func TestConnTrackerCheckDeviceGateMergesFreshGlobalDevices(t *testing.T) {
 	tracker := NewConnTracker(0)
 	tracker.SetUserMap(map[string]int{"uuid-1": 1})
@@ -176,7 +195,7 @@ func TestConnTrackerConcurrentAdmissionRespectsDeviceLimit(t *testing.T) {
 			defer wg.Done()
 			base := &testConn{}
 			conn := tracker.RoutedConnection(context.Background(), base,
-				testInboundContext("uuid-1", fmt.Sprintf("192.0.2.%d", i)), nil, nil)
+				testInboundContext("uuid-1", fmt.Sprintf("8.8.8.%d", i)), nil, nil)
 			if conn != base {
 				mu.Lock()
 				accepted = append(accepted, conn)

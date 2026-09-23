@@ -17,6 +17,7 @@ import (
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/transport"
 
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
@@ -300,7 +301,9 @@ func (d *LimitDispatcher) UpdateGlobalDevices(users map[int][]string, updatedAt 
 	for uid, ips := range users {
 		set := make(map[string]bool, len(ips))
 		for _, ip := range ips {
-			set[ip] = true
+			if public := deviceip.Normalize(ip); public != "" {
+				set[public] = true
+			}
 		}
 		devices[uid] = set
 	}
@@ -394,6 +397,9 @@ func (d *LimitDispatcher) GetConnectionState() (aliveIPs map[int]map[string]bool
 // Fast path: unlimited users use lock-free sync.Map.
 // 有上限的用户在同一把锁内完成检查和登记。
 func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool {
+	if !deviceip.Public(sourceIP) {
+		return false
+	}
 	d.mu.RLock()
 	limit, hasLimit := d.deviceLimits[email]
 	d.mu.RUnlock()
@@ -442,6 +448,9 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 
 // delConn decrements the IP refcount when a connection closes.
 func (d *LimitDispatcher) delConn(email, sourceIP string) {
+	if !deviceip.Public(sourceIP) {
+		return
+	}
 	// Check if this is an unlimited user first (lock-free).
 	if v, ok := d.unlimitedIPs.Load(email); ok {
 		ic := v.(*ipCounter)

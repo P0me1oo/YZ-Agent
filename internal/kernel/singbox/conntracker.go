@@ -15,6 +15,7 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"golang.org/x/time/rate"
 
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
@@ -44,7 +45,9 @@ type userStats struct {
 func (u *userStats) addConn(sourceIP string) {
 	u.mu.Lock()
 	u.connCount++
-	u.ips[sourceIP]++
+	if deviceip.Public(sourceIP) {
+		u.ips[sourceIP]++
+	}
 	u.mu.Unlock()
 }
 
@@ -52,9 +55,11 @@ func (u *userStats) addConn(sourceIP string) {
 func (u *userStats) removeConn(sourceIP string) {
 	u.mu.Lock()
 	u.connCount--
-	u.ips[sourceIP]--
-	if u.ips[sourceIP] <= 0 {
-		delete(u.ips, sourceIP)
+	if deviceip.Public(sourceIP) {
+		u.ips[sourceIP]--
+		if u.ips[sourceIP] <= 0 {
+			delete(u.ips, sourceIP)
+		}
 	}
 	u.mu.Unlock()
 }
@@ -210,7 +215,9 @@ func (t *ConnTracker) UpdateGlobalDevices(users map[int][]string) {
 	for uid, ips := range users {
 		m := make(map[string]bool, len(ips))
 		for _, ip := range ips {
-			m[ip] = true
+			if public := deviceip.Normalize(ip); public != "" {
+				m[public] = true
+			}
 		}
 		t.globalDevices[uid] = m
 	}
@@ -248,7 +255,7 @@ func (t *ConnTracker) RoutedConnection(
 		_ = conn.Close()
 		return conn
 	}
-	sourceIP := metadata.Source.Addr.String()
+	sourceIP := metadata.Source.Addr.Unmap().String()
 	if us != nil {
 		us.admissionMu.Lock()
 	}
@@ -321,7 +328,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 		_ = conn.Close()
 		return conn
 	}
-	sourceIP := metadata.Source.Addr.String()
+	sourceIP := metadata.Source.Addr.Unmap().String()
 	if us != nil {
 		us.admissionMu.Lock()
 	}
@@ -393,7 +400,9 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 	if cl == nil {
 		if us != nil {
 			us.connCount++
-			us.ips[sourceIP]++
+			if deviceip.Public(sourceIP) {
+				us.ips[sourceIP]++
+			}
 		}
 		return "", 0, 0, false
 	}
@@ -413,7 +422,9 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 
 	if us != nil {
 		us.connCount++
-		us.ips[sourceIP]++
+		if deviceip.Public(sourceIP) {
+			us.ips[sourceIP]++
+		}
 	}
 	return "", 0, 0, false
 }
@@ -421,7 +432,7 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 // checkDeviceGate rejects connections exceeding device limit.
 // Strategy: merge local + global state when fresh; local-only when stale.
 func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string, limit int) bool {
-	if us == nil || limit <= 0 {
+	if us == nil || limit <= 0 || !deviceip.Public(sourceIP) {
 		return false
 	}
 
