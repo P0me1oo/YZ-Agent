@@ -429,7 +429,7 @@ func TestToMemoryUser_ExistingXrayProtocols(t *testing.T) {
 }
 
 func TestBuildRouting_Default(t *testing.T) {
-	routing := buildRouting(nil, nil, nil, nil)
+	routing := buildRouting(nil, nil, nil, nil, nil)
 	rules := routing["rules"].([]M)
 
 	if len(rules) != 1 {
@@ -459,7 +459,7 @@ func TestBuildRouting_WithRules(t *testing.T) {
 		},
 	}
 
-	routing := buildRouting(testRouteRules(rules), nil, nil, nil)
+	routing := buildRouting(testRouteRules(rules), nil, nil, nil, nil)
 	xrayRules := routing["rules"].([]M)
 
 	// 1 default + 2 domain rules + 1 IP rule = 4
@@ -510,7 +510,7 @@ func TestBuildRouting_WithCustomRouteRules(t *testing.T) {
 		},
 	}
 
-	routing := buildRouting(nil, customRules, nil, nil)
+	routing := buildRouting(nil, customRules, nil, nil, nil)
 	xrayRules := routing["rules"].([]M)
 	if len(xrayRules) != 6 {
 		t.Fatalf("expected 6 rules, got %d", len(xrayRules))
@@ -541,7 +541,7 @@ func TestBuildRouting_StructuredCustomRulesRemainFirst(t *testing.T) {
 		Match:  model.RouteMatch{DomainSuffixes: []string{"structured.example"}},
 		Action: model.RouteAction{Type: "direct"},
 	}}
-	routing := buildRouting(nil, custom, raw, nil)
+	routing := buildRouting(nil, custom, raw, nil, nil)
 	xrayRules := routing["rules"].([]M)
 	if xrayRules[0]["outboundTag"] != "direct" {
 		t.Fatalf("expected structured rule first, got %v", xrayRules[0]["outboundTag"])

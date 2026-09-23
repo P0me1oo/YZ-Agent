@@ -1,6 +1,8 @@
 # YZ-Agent
 
-当前正式版本为 `v1.16.1`：默认升级先比较版本，相同版本提示“已是最新版本”，当前版本更高不自动降级；查询失败或版本无法识别时停止升级。
+待发布版本 `v1.18.0`：Xray REALITY 节点新增防盗用模式，伪装回源改走只监听本机的专用入口，只放行伪装域名的 TLS 流量，其余直接阻断，避免节点被当成通用 TLS 转发入口。开关由面板下发，默认关闭，配套面板 `1.22.0`、前端 `0.5.0`；详见 [docs-reality-anti-abuse.md](docs-reality-anti-abuse.md)。
+
+`v1.16.1` 引入默认升级前的版本比较：相同版本提示“已是最新版本”，当前版本更高不自动降级；查询失败或版本无法识别时停止升级。
 
 远程升级结果配套面板 `1.20.3`、前端 `0.4.3`，无需升级时直接结束任务。将来发布部署时先更新面板，再更新 Node；旧面板无法完整处理新的结果和失败原因。
 
@@ -140,6 +142,7 @@ systemd 日志由 journal 提供；OpenRC 的 `yz-agent` 日志写入 `/var/log/
 
 - 自动防火墙和 HY2 端口跳跃：[docs/firewall-port-hopping.md](docs/firewall-port-hopping.md)
 - Xray REALITY 最低客户端版本: [docs-xray-reality.md](docs-xray-reality.md)
+- Xray REALITY 防盗用模式：[docs-reality-anti-abuse.md](docs-reality-anti-abuse.md)
 - VLESS/HY2 前置入口与中转落地：[docs-relay.md](docs-relay.md)
 - HY2 ECH 握手、中转与构建验证：[docs/hy2-ech-validation.md](docs/hy2-ech-validation.md)
 - 自定义路由：[docs-custom-routes.md](docs-custom-routes.md)
