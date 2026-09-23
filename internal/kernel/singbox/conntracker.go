@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,9 +34,10 @@ var ipPool = sync.Pool{
 type userStats struct {
 	*userTraffic
 
-	mu        sync.RWMutex   // RWMutex for concurrent reads
-	ips       map[string]int // sourceIP → refcount (number of active conns from that IP)
-	connCount int            // total active connections
+	admissionMu sync.Mutex     // 同一用户的设备检查和连接登记必须连续完成。
+	mu          sync.RWMutex   // RWMutex for concurrent reads
+	ips         map[string]int // sourceIP → refcount (number of active conns from that IP)
+	connCount   int            // total active connections
 }
 
 // addConn registers a new connection from sourceIP.
@@ -249,11 +249,17 @@ func (t *ConnTracker) RoutedConnection(
 		return conn
 	}
 	sourceIP := metadata.Source.Addr.String()
+	if us != nil {
+		us.admissionMu.Lock()
+	}
 
 	// Device limit gate-keeping
 	if dlf := t.deviceLimitFunc.Load(); dlf != nil {
 		if limit, hasLimit := (*dlf)(uuid); hasLimit {
 			if t.checkDeviceGate(us, uid, sourceIP, limit) {
+				if us != nil {
+					us.admissionMu.Unlock()
+				}
 				nlog.Core().Info("singbox: device limit gate-keep, rejecting connection",
 					"user_id", uid, "ip", sourceIP, "limit", limit)
 				conn.Close()
@@ -264,10 +270,16 @@ func (t *ConnTracker) RoutedConnection(
 
 	// 连接数 / 新建速率准入，超限只拒绝这一条新连接。
 	if kind, limit, observed, reject := t.checkConnGate(us, uid, sourceIP); reject {
+		if us != nil {
+			us.admissionMu.Unlock()
+		}
 		nlog.Core().Info("singbox: conn limit gate-keep, rejecting connection",
 			"user_id", uid, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
 		conn.Close()
 		return conn
+	}
+	if us != nil {
+		us.admissionMu.Unlock()
 	}
 
 	connID := t.nextID()
@@ -310,11 +322,17 @@ func (t *ConnTracker) RoutedPacketConnection(
 		return conn
 	}
 	sourceIP := metadata.Source.Addr.String()
+	if us != nil {
+		us.admissionMu.Lock()
+	}
 
 	// Device limit gate-keeping
 	if dlf := t.deviceLimitFunc.Load(); dlf != nil {
 		if limit, hasLimit := (*dlf)(uuid); hasLimit {
 			if t.checkDeviceGate(us, uid, sourceIP, limit) {
+				if us != nil {
+					us.admissionMu.Unlock()
+				}
 				nlog.Core().Info("singbox: device limit gate-keep, rejecting UDP connection",
 					"user_id", uid, "ip", sourceIP, "limit", limit)
 				conn.Close()
@@ -325,10 +343,16 @@ func (t *ConnTracker) RoutedPacketConnection(
 
 	// 连接数 / 新建速率准入，超限只拒绝这一条新连接。
 	if kind, limit, observed, reject := t.checkConnGate(us, uid, sourceIP); reject {
+		if us != nil {
+			us.admissionMu.Unlock()
+		}
 		nlog.Core().Info("singbox: conn limit gate-keep, rejecting UDP connection",
 			"user_id", uid, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
 		conn.Close()
 		return conn
+	}
+	if us != nil {
+		us.admissionMu.Unlock()
 	}
 
 	connID := t.nextID()
@@ -420,21 +444,10 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 	globalIPs := t.globalDevices[userID]
 	t.globalMu.RUnlock()
 
-	// Stale or missing global state → local-only check
+	// 全局快照过期时只检查本节点；已有来源保留连接资格。
 	if globalStale || globalIPs == nil {
 		if localCount < limit {
 			return false
-		}
-		ipList := make([]string, 0, localCount+1)
-		for ip := range localIPs {
-			ipList = append(ipList, ip)
-		}
-		ipList = append(ipList, sourceIP)
-		sort.Strings(ipList)
-		for i := 0; i < limit && i < len(ipList); i++ {
-			if ipList[i] == sourceIP {
-				return false
-			}
 		}
 		nlog.Core().Debug("device limit: local over limit, rejecting",
 			"userID", userID, "ip", sourceIP, "localIPs", localCount, "limit", limit)
@@ -459,19 +472,7 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 		return false
 	}
 
-	// Over limit → lexicographic selection
-	ipList := make([]string, 0, len(allIPs)+1)
-	for ip := range allIPs {
-		ipList = append(ipList, ip)
-	}
-	ipList = append(ipList, sourceIP)
-	sort.Strings(ipList)
-
-	for i := 0; i < limit && i < len(ipList); i++ {
-		if ipList[i] == sourceIP {
-			return false
-		}
-	}
+	// 名额已满时只拒绝新来源，不按地址排序抢占已有来源。
 	nlog.Core().Debug("device limit: total over limit, rejecting",
 		"userID", userID, "ip", sourceIP, "totalIPs", len(allIPs), "limit", limit)
 	return true

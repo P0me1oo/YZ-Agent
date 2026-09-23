@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 	_ "unsafe"
 
 	xrayDispatcher "github.com/xtls/xray-core/app/dispatcher"
@@ -70,12 +70,13 @@ type LimitDispatcher struct {
 	inner     interface{}        // original DefaultDispatcher (Feature + Dispatcher)
 	innerDisp routing.Dispatcher // same object, typed as Dispatcher
 
-	// limitedUsers: users with device limit > 0, protected by mu.
-	// Needs deterministic IP ordering for kick decisions.
-	mu           sync.RWMutex
-	limitedIPs   map[string]map[string]int // email → sourceIP → refcount
-	deviceLimits map[string]int            // email → max devices
-	emailToUID   map[string]int            // email → panel user ID
+	// 有设备上限的用户由同一把锁保护，检查和登记在锁内完成。
+	mu               sync.RWMutex
+	limitedIPs       map[string]map[string]int // email → sourceIP → refcount
+	deviceLimits     map[string]int            // email → max devices
+	emailToUID       map[string]int            // email → panel user ID
+	globalDevices    map[int]map[string]bool   // 面板汇总的来源 IP 快照
+	globalLastUpdate time.Time
 
 	// unlimitedIPs: users without device limit — sync.Map for lock-free access.
 	// Each entry is *ipCounter{ips sync.Map}.
@@ -121,7 +122,7 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 		if uid > 0 {
 			d.userConnCounter(uid).Add(-1)
 		}
-		if email != "" && isTCP {
+		if email != "" {
 			d.delConn(email, sourceIP)
 		}
 		return nil, err
@@ -175,10 +176,8 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 	if reject {
 		nlog.Core().Info("xray: conn limit exceeded",
 			"email", email, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
-		// checkDeviceLimit 已经登记了 TCP 的 IP 引用计数，拒绝前必须回退，否则会泄漏。
-		if isTCP {
-			d.delConn(email, sourceIP)
-		}
+		// 设备检查已经登记了来源，拒绝前必须回退。
+		d.delConn(email, sourceIP)
 		return "", "", 0, false, errors.New("connection limit exceeded for " + email)
 	}
 	return email, sourceIP, uid, isTCP, nil
@@ -252,9 +251,7 @@ func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string
 	}
 
 	onClose := func() {
-		if isTCP {
-			d.delConn(email, sourceIP)
-		}
+		d.delConn(email, sourceIP)
 		if userConns != nil {
 			userConns.Add(-1)
 		}
@@ -295,6 +292,22 @@ func (d *LimitDispatcher) UpdateLimits(emailToUID map[string]int, deviceLimits, 
 	d.deviceLimits = deviceLimits
 	d.mu.Unlock()
 
+}
+
+// UpdateGlobalDevices 用面板的全量快照更新跨节点设备状态。
+func (d *LimitDispatcher) UpdateGlobalDevices(users map[int][]string, updatedAt time.Time) {
+	devices := make(map[int]map[string]bool, len(users))
+	for uid, ips := range users {
+		set := make(map[string]bool, len(ips))
+		for _, ip := range ips {
+			set[ip] = true
+		}
+		devices[uid] = set
+	}
+	d.mu.Lock()
+	d.globalDevices = devices
+	d.globalLastUpdate = updatedAt
+	d.mu.Unlock()
 }
 
 // SetConnLimiter 配置连接数与新建速率准入，传 nil 表示关闭。
@@ -379,94 +392,52 @@ func (d *LimitDispatcher) GetConnectionState() (aliveIPs map[int]map[string]bool
 
 // checkDeviceLimit enforces per-user device limits.
 // Fast path: unlimited users use lock-free sync.Map.
-// Slow path: limited users use RWMutex with deterministic IP ordering.
-func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, isTCP bool) bool {
+// 有上限的用户在同一把锁内完成检查和登记。
+func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool {
 	d.mu.RLock()
 	limit, hasLimit := d.deviceLimits[email]
 	d.mu.RUnlock()
 
 	// Fast path: no device limit — use lock-free sync.Map.
 	if !hasLimit || limit <= 0 {
-		if isTCP {
-			v, _ := d.unlimitedIPs.LoadOrStore(email, &ipCounter{})
-			ic := v.(*ipCounter)
-
-			// Increment IP refcount atomically.
-			rv, _ := ic.ips.LoadOrStore(sourceIP, &atomic.Int64{})
-			rv.(*atomic.Int64).Add(1)
-		}
+		v, _ := d.unlimitedIPs.LoadOrStore(email, &ipCounter{})
+		ic := v.(*ipCounter)
+		rv, _ := ic.ips.LoadOrStore(sourceIP, &atomic.Int64{})
+		rv.(*atomic.Int64).Add(1)
 		return false
 	}
 
-	// Slow path: user has device limit — need deterministic ordering.
-	d.mu.RLock()
-	ips := d.limitedIPs[email]
-	if ips != nil && ips[sourceIP] > 0 {
-		d.mu.RUnlock()
-		if isTCP {
-			d.mu.Lock()
-			d.limitedIPs[email][sourceIP]++
-			d.mu.Unlock()
-		}
-		return false
-	}
-
-	if ips != nil && len(ips) < limit {
-		d.mu.RUnlock()
-		if isTCP {
-			d.mu.Lock()
-			if d.limitedIPs[email] == nil {
-				d.limitedIPs[email] = make(map[string]int)
-			}
-			d.limitedIPs[email][sourceIP]++
-			d.mu.Unlock()
-		}
-		return false
-	}
-	d.mu.RUnlock()
-
-	// Over limit — need write lock for deterministic check.
 	d.mu.Lock()
 	defer d.mu.Unlock()
-
-	// Re-check under write lock.
-	ips = d.limitedIPs[email]
+	ips := d.limitedIPs[email]
 	if ips == nil {
 		ips = make(map[string]int)
 		d.limitedIPs[email] = ips
 	}
-
 	if ips[sourceIP] > 0 {
-		if isTCP {
-			ips[sourceIP]++
-		}
+		ips[sourceIP]++
 		return false
 	}
-
-	if len(ips) < limit {
-		if isTCP {
-			ips[sourceIP]++
-		}
+	uid := d.emailToUID[email]
+	fresh := !d.globalLastUpdate.IsZero() && time.Since(d.globalLastUpdate) <= 2*time.Minute
+	if fresh && d.globalDevices[uid][sourceIP] {
+		ips[sourceIP]++
 		return false
 	}
-
-	// Over limit — deterministic: allow lowest IPs lexicographically.
-	ipList := make([]string, 0, len(ips)+1)
+	seen := make(map[string]bool, len(ips))
 	for ip := range ips {
-		ipList = append(ipList, ip)
+		seen[ip] = true
 	}
-	ipList = append(ipList, sourceIP)
-	sort.Strings(ipList)
-
-	for i := 0; i < limit && i < len(ipList); i++ {
-		if ipList[i] == sourceIP {
-			if isTCP {
-				ips[sourceIP]++
-			}
-			return false
+	if fresh {
+		for ip := range d.globalDevices[uid] {
+			seen[ip] = true
 		}
 	}
-	return true
+	if len(seen) >= limit {
+		return true
+	}
+	ips[sourceIP]++
+	return false
 }
 
 // delConn decrements the IP refcount when a connection closes.

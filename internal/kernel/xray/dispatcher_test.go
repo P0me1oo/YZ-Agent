@@ -1,9 +1,13 @@
 package xray
 
 import (
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/transport"
@@ -71,6 +75,92 @@ func TestLimitDispatcher_DeviceLimitCheck(t *testing.T) {
 		if ld.checkDeviceLimit(email2, ip, true) {
 			t.Errorf("user with no device limit should always be allowed (ip=%s)", ip)
 		}
+	}
+}
+
+func TestLimitDispatcherUsesFreshGlobalDevices(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(15)
+	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 2}, nil)
+	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1", "192.0.2.1"}}, time.Now())
+	if !ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("new source should be rejected when global slots are full")
+	}
+	if ld.checkDeviceLimit(email, "10.0.0.1", true) {
+		t.Fatal("existing private source should remain allowed")
+	}
+	ld.delConn(email, "10.0.0.1")
+	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1"}}, time.Now())
+	if ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("new source should be allowed after a slot is released")
+	}
+	ld.delConn(email, "1.1.1.1")
+	ld.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1", "192.0.2.1"}}, time.Now().Add(-3*time.Minute))
+	if ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("stale global snapshot should fall back to local state")
+	}
+	ld.delConn(email, "1.1.1.1")
+}
+
+func TestXrayForwardsAndClearsGlobalDevices(t *testing.T) {
+	x := New(config.KernelConfig{Type: "xray"})
+	ld := newTestDispatcher()
+	email := userEmail(15)
+	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 1}, nil)
+	x.limitDispatcher = ld
+	x.UpdateGlobalDevices(map[int][]string{15: {"10.0.0.1"}})
+	if !ld.checkDeviceLimit(email, "192.0.2.1", true) {
+		t.Fatal("global state was not forwarded")
+	}
+	x.ClearGlobalDevices()
+	if ld.checkDeviceLimit(email, "192.0.2.1", true) {
+		t.Fatal("disconnected panel state should not keep rejecting new sources")
+	}
+	ld.delConn(email, "192.0.2.1")
+}
+
+func TestLimitDispatcherCountsUDPSources(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(15)
+	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 1}, nil)
+	if ld.checkDeviceLimit(email, "192.0.2.1", false) {
+		t.Fatal("first UDP source should be allowed")
+	}
+	if !ld.checkDeviceLimit(email, "192.0.2.2", false) {
+		t.Fatal("second UDP source should be rejected")
+	}
+	ld.delConn(email, "192.0.2.1")
+	if ld.checkDeviceLimit(email, "192.0.2.2", false) {
+		t.Fatal("released UDP source should free its slot")
+	}
+	ld.delConn(email, "192.0.2.2")
+}
+
+func TestLimitDispatcherConcurrentAdmissionRespectsDeviceLimit(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(15)
+	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 3}, nil)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	accepted := make([]string, 0, 3)
+	for i := 1; i <= 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ip := fmt.Sprintf("192.0.2.%d", i)
+			if !ld.checkDeviceLimit(email, ip, true) {
+				mu.Lock()
+				accepted = append(accepted, ip)
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if len(accepted) != 3 {
+		t.Fatalf("accepted %d distinct sources, want 3", len(accepted))
+	}
+	for _, ip := range accepted {
+		ld.delConn(email, ip)
 	}
 }
 
@@ -184,7 +274,6 @@ func TestLimitDispatcher_UnlimitedUserFastPath(t *testing.T) {
 		t.Error("should have tracked some IPs")
 	}
 }
-
 
 func TestLimitDispatcher_TrackLinkPreservesReader(t *testing.T) {
 	ld := newTestDispatcher()

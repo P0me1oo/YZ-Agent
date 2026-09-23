@@ -78,7 +78,9 @@ type Xray struct {
 	speedLimitFunc      func(string) *rate.Limiter
 
 	// connLimiter 做连接数和新建速率准入，每次重启后转发给新的 LimitDispatcher。
-	connLimiter model.ConnLimiter
+	connLimiter        model.ConnLimiter
+	globalDevices      map[int][]string
+	globalDeviceUpdate time.Time
 
 	// running is set after a successful Start and cleared before shutdown.
 	// Atomic so IsRunning / GetConnections never block.
@@ -185,6 +187,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	x.limitDispatcher = ld
 	if ld != nil {
 		ld.SetConnLimiter(x.connLimiter)
+		ld.UpdateGlobalDevices(x.globalDevices, x.globalDeviceUpdate)
 	}
 	x.users = users
 	x.nodeConfig = nodeConfig
@@ -331,11 +334,30 @@ func (x *Xray) SetConnLimiter(limiter model.ConnLimiter) {
 	}
 }
 
-// UpdateGlobalDevices is a no-op for xray — xray handles device limits differently.
-func (x *Xray) UpdateGlobalDevices(_ map[int][]string) {}
+// UpdateGlobalDevices 将面板的跨节点快照交给当前调度器，并保留到内核重载后。
+func (x *Xray) UpdateGlobalDevices(users map[int][]string) {
+	copyUsers := make(map[int][]string, len(users))
+	for uid, ips := range users {
+		copyUsers[uid] = append([]string(nil), ips...)
+	}
+	x.mu.Lock()
+	x.globalDevices = copyUsers
+	x.globalDeviceUpdate = time.Now()
+	if x.limitDispatcher != nil {
+		x.limitDispatcher.UpdateGlobalDevices(copyUsers, x.globalDeviceUpdate)
+	}
+	x.mu.Unlock()
+}
 
-// ClearGlobalDevices is a no-op for xray.
-func (x *Xray) ClearGlobalDevices() {}
+func (x *Xray) ClearGlobalDevices() {
+	x.mu.Lock()
+	x.globalDevices = nil
+	x.globalDeviceUpdate = time.Time{}
+	if x.limitDispatcher != nil {
+		x.limitDispatcher.UpdateGlobalDevices(nil, time.Time{})
+	}
+	x.mu.Unlock()
+}
 
 // ─── User management (non-disruptive where possible) ────────────────────────
 
