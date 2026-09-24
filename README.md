@@ -2,6 +2,8 @@
 
 当前已发布版本为 `v1.17.4`；设备数限制只统计公网来源 IP，配套面板 `1.21.2` 和管理端工程 `0.4.7`。固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
+待发布版本 `v1.19.0`：分别经 IPv4、IPv6 向面板回报公网地址，双栈服务器可同时显示两个地址；并包含 `v1.18.0` 的 Xray REALITY 防盗用模式（见 [docs-reality-anti-abuse.md](docs-reality-anti-abuse.md)）。配套面板 `1.23.0`、管理端工程 `0.6.0`。
+
 [YZboard](https://github.com/P0me1oo/YZboard) 的节点程序，支持 `sing-box` / `xray-core` 双核心。
 
 正式版从 `v1.13.1` 起采用 `v主版本.次版本.修订号`，不再添加 fork 后缀；上游基线与固定核心依赖单独记录在 [兼容矩阵](YZ_COMPATIBILITY.md)。历史版本继续用于升级和回滚。
@@ -136,6 +138,7 @@ systemd 日志由 journal 提供；OpenRC 的 `yz-agent` 日志写入 `/var/log/
 
 - 自动防火墙和 HY2 端口跳跃：[docs/firewall-port-hopping.md](docs/firewall-port-hopping.md)
 - Xray REALITY 最低客户端版本: [docs-xray-reality.md](docs-xray-reality.md)
+- Xray REALITY 防盗用模式：[docs-reality-anti-abuse.md](docs-reality-anti-abuse.md)
 - VLESS/HY2 前置入口与中转落地：[docs-relay.md](docs-relay.md)
 - HY2 ECH 握手、中转与构建验证：[docs/hy2-ech-validation.md](docs/hy2-ech-validation.md)
 - 自定义路由：[docs-custom-routes.md](docs-custom-routes.md)

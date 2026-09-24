@@ -78,8 +78,15 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	}
 
 	inbound := buildInbound(kcfg, nc, users, tc)
+	var guardRules []M
 	if inbound != nil {
-		cfg["inbounds"] = []M{inbound}
+		inbounds := []M{inbound}
+		// REALITY 防盗用：把回源改接到只监听本机的专用入口，由它按白名单放行。
+		if guard := applyRealityGuard(nc, inbound); guard != nil {
+			inbounds = append(inbounds, guard.inbound)
+			guardRules = guard.rules
+		}
+		cfg["inbounds"] = inbounds
 	} else {
 		nlog.Core().Warn("xray: unsupported protocol, no inbound configured — node will not accept connections",
 			"protocol", nc.Protocol,
@@ -87,7 +94,7 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	}
 
 	// Merge panel routes and static config routes
-	cfg["routing"] = buildRouting(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute), buildRelayRoutingRules(nc))
+	cfg["routing"] = buildRouting(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute), buildRelayRoutingRules(nc), guardRules)
 
 	mergeCustomXray(cfg, kcfg)
 	return cfg
@@ -637,13 +644,17 @@ func buildRealitySettings(kcfg config.KernelConfig, nc *model.NodeSpec) M {
 }
 
 // buildRouting assembles the rule list in priority order:
+//  0. REALITY 防盗用规则 — 安全边界，不允许被面板路由覆盖或绕开
 //  1. structured custom route rules (explicit panel overrides)
 //  2. raw custom routes (native escape hatch)
 //  3. built-in private/loopback blocklist
 //  4. relay rules — a logical node's exit must not be overridden by generic panel routes
 //  5. panel routes
-func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteRule, customRules []map[string]any, relayRules []M) M {
+func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteRule, customRules []map[string]any, relayRules []M, guardRules []M) M {
 	var xrayRules []M
+
+	// 防盗用规则必须排在所有面板规则之前，否则管理员的通用规则会放行或阻断伪装回源。
+	xrayRules = append(xrayRules, guardRules...)
 
 	// Structured custom routes now take the highest priority for panel-managed overrides.
 	for _, rule := range customRouteRules {
