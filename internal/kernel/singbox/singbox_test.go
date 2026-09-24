@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/sagernet/sing-box/adapter"
 	singM "github.com/sagernet/sing/common/metadata"
 	"golang.org/x/time/rate"
@@ -154,11 +155,48 @@ func TestConnTrackerPrivateRelaySourceDoesNotUseDeviceSlot(t *testing.T) {
 	if wrapped == private || private.closed {
 		t.Fatal("内网中转来源不应占用设备名额或被设备上限拒绝")
 	}
+	// 内核仍登记该来源供在线人数统计，设备上报由 tracker 按计数规则过滤。
 	_, ips, connections := tracker.GetUserTraffic()
-	if len(ips) != 0 || connections != 1 {
-		t.Fatalf("内网连接应只计连接数，设备快照=%v，连接数=%d", ips, connections)
+	if !ips[1]["10.0.0.2"] || connections != 1 {
+		t.Fatalf("内网连接应登记来源和连接数，来源=%v，连接数=%d", ips, connections)
 	}
 	_ = wrapped.Close()
+}
+
+func TestConnTrackerExcludedSourceDoesNotUseDeviceSlot(t *testing.T) {
+	deviceip.SetExcluded([]string{"203.0.114.0/24"})
+	t.Cleanup(func() { deviceip.SetExcluded(nil) })
+
+	tracker := NewConnTracker(0)
+	tracker.SetUserMap(map[string]int{"uuid-1": 1})
+	tracker.SetDeviceLimitFunc(func(string) (int, bool) { return 1, true })
+	tracker.UpdateGlobalDevices(map[int][]string{1: {"8.8.8.8"}})
+
+	relay := &testConn{}
+	wrapped := tracker.RoutedConnection(context.Background(), relay,
+		testInboundContext("uuid-1", "203.0.114.7"), nil, nil)
+	if wrapped == relay || relay.closed {
+		t.Fatal("名单内的转发来源不应被设备上限拒绝")
+	}
+	blocked := &testConn{}
+	if tracker.RoutedConnection(context.Background(), blocked,
+		testInboundContext("uuid-1", "1.1.1.1"), nil, nil) != blocked || !blocked.closed {
+		t.Fatal("名额已满时新的公网来源仍应被拒绝")
+	}
+
+	// 连接存续期间移出名单，该来源立即按公网来源计数。
+	deviceip.SetExcluded(nil)
+	tracker.UpdateGlobalDevices(nil)
+	late := &testConn{}
+	if tracker.RoutedConnection(context.Background(), late,
+		testInboundContext("uuid-1", "1.1.1.1"), nil, nil) != late || !late.closed {
+		t.Fatal("移出名单后原转发来源应占用名额")
+	}
+	_ = wrapped.Close()
+	_, ips, connections := tracker.GetUserTraffic()
+	if len(ips) != 0 || connections != 0 {
+		t.Fatalf("关闭后应清理登记，来源=%v，连接数=%d", ips, connections)
+	}
 }
 
 func TestConnTrackerCheckDeviceGateMergesFreshGlobalDevices(t *testing.T) {

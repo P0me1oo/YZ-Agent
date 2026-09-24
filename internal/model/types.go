@@ -53,6 +53,9 @@ type NodeSpec struct {
 	AcceptProxyProtocol bool
 
 	Relay *RelayConfig
+
+	// DeviceIPExclude 只影响设备计数，不参与配置哈希，改名单时不重载内核。
+	DeviceIPExclude []string `json:"-"`
 }
 
 const (

@@ -154,6 +154,7 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 		Multiplex:           multiplex,
 		AcceptProxyProtocol: nc.AcceptProxyProtocol,
 		Relay:               relay,
+		DeviceIPExclude:     append([]string(nil), nc.DeviceIPExclude...),
 	}
 }
 
@@ -332,6 +333,7 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 		Multiplex:           multiplex,
 		AcceptProxyProtocol: n.AcceptProxyProtocol,
 		Relay:               relay,
+		DeviceIPExclude:     append([]string(nil), n.DeviceIPExclude...),
 	}
 }
 

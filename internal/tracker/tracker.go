@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
 
@@ -11,8 +12,8 @@ import (
 // It is swapped atomically so readers never block writers.
 type snapshot struct {
 	traffic   map[int][2]int64        // userID → [upload, download] delta
-	aliveIPs  map[int]map[string]bool // userID → set of source IPs
-	online    map[int]int             // userID → distinct IP count
+	aliveIPs  map[int]map[string]bool // userID → set of source IPs（含不计入设备数的来源）
+	online    map[int]int             // userID → distinct IP count（含不计入设备数的来源）
 	connCount int
 	inSpeed   int64
 	outSpeed  int64
@@ -165,15 +166,22 @@ func (t *Tracker) HasTraffic() bool {
 
 // FlushAliveIPs 返回当前权威设备快照。每次都返回完整副本，包括空快照，
 // 让面板能够续期稳定在线设备并清理已经离线的用户。
+// 只包含占用设备名额的来源：公网且不在名单内，地址已规范化。
 func (t *Tracker) FlushAliveIPs() map[int][]string {
 	s := t.live.Load()
 	devices := make(map[int][]string, len(s.aliveIPs))
 	for uid, ips := range s.aliveIPs {
 		buf := make([]string, 0, len(ips))
+		seen := make(map[string]bool, len(ips))
 		for ip := range ips {
-			buf = append(buf, ip)
+			if key := deviceip.CountKey(ip); key != "" && !seen[key] {
+				seen[key] = true
+				buf = append(buf, key)
+			}
 		}
-		devices[uid] = buf
+		if len(buf) > 0 {
+			devices[uid] = buf
+		}
 	}
 	return devices
 }

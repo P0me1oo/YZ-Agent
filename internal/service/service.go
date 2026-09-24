@@ -20,6 +20,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel/singbox"
@@ -369,6 +370,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	s.metricsMu.Lock()
 	s.lastConfig = bootstrap.Config
 	s.metricsMu.Unlock()
+	applyDeviceIPExclude(bootstrap.Config)
 	s.lastConfigHash = computeConfigHash(bootstrap.Config)
 	s.updateUserState(bootstrap.Users)
 
@@ -606,6 +608,7 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		if event.Config == nil {
 			return
 		}
+		applyDeviceIPExclude(event.Config)
 		newConfigHash := computeConfigHash(event.Config)
 		if newConfigHash == s.lastConfigHash {
 			return
@@ -687,6 +690,8 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 		}
 		result := pullResult{certChanged: takeCertRenewal()}
 		if snapshot.Config != nil {
+			// 名单不参与配置哈希；配置未变时 result.config 会被丢弃，所以在这里先应用。
+			applyDeviceIPExclude(snapshot.Config)
 			result.config = snapshot.Config
 			result.configHash = computeConfigHash(snapshot.Config)
 			if result.configHash == currentConfigHash && !result.certChanged {
@@ -1415,6 +1420,17 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	}
 
 	return m
+}
+
+// applyDeviceIPExclude 更新不计入设备数的来源名单，只影响后续计数和上报，不重载内核。
+func applyDeviceIPExclude(cfg *model.NodeSpec) {
+	invalid, changed := deviceip.SetExcluded(cfg.DeviceIPExclude)
+	if len(invalid) > 0 {
+		nlog.Core().Warn("device ip exclude list has invalid entries, skipped", "entries", invalid)
+	}
+	if changed {
+		nlog.Core().Info("device ip exclude list updated", "entries", len(cfg.DeviceIPExclude)-len(invalid))
+	}
 }
 
 // computeConfigHash returns a deterministic hash of the node config.

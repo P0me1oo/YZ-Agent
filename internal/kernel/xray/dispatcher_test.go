@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/transport"
@@ -447,5 +448,40 @@ func TestLimitDispatcher_ConnGateSkippedWithoutLimiter(t *testing.T) {
 	}
 	if uid != 0 {
 		t.Fatalf("没装 connLimiter 时不应解析 userID，实际 %d", uid)
+	}
+}
+
+func TestLimitDispatcherExcludedSourceDoesNotUseDeviceSlot(t *testing.T) {
+	deviceip.SetExcluded([]string{"203.0.114.7"})
+	t.Cleanup(func() { deviceip.SetExcluded(nil) })
+
+	ld := newTestDispatcher()
+	email := userEmail(15)
+	ld.UpdateLimits(map[string]int{email: 15}, map[string]int{email: 1}, nil)
+	ld.UpdateGlobalDevices(map[int][]string{15: {"8.8.8.8", "203.0.114.7"}}, time.Now())
+	if ld.checkDeviceLimit(email, "203.0.114.7", true) {
+		t.Fatal("名单内的转发来源不应被设备上限拒绝")
+	}
+	ips, _ := ld.GetConnectionState()
+	if !ips[15]["203.0.114.7"] {
+		t.Fatalf("名单内来源仍应登记，供在线人数统计: %v", ips)
+	}
+	if !ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("全局快照已占满名额时新的公网来源应被拒绝")
+	}
+
+	// 连接存续期间移出名单，原转发来源立即参与计数。
+	deviceip.SetExcluded(nil)
+	ld.UpdateGlobalDevices(map[int][]string{15: {}}, time.Now())
+	if !ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("移出名单后原转发来源应占用名额")
+	}
+	ld.delConn(email, "203.0.114.7")
+	if ld.checkDeviceLimit(email, "1.1.1.1", true) {
+		t.Fatal("转发连接关闭后应释放名额")
+	}
+	ld.delConn(email, "1.1.1.1")
+	if ips, _ := ld.GetConnectionState(); len(ips) != 0 {
+		t.Fatalf("连接全部关闭后不应残留登记: %v", ips)
 	}
 }

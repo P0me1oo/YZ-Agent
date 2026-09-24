@@ -148,6 +148,9 @@ type NodeConfig struct {
 
 	// Relay describes the transit topology (Xboard extension). Nil for plain nodes.
 	Relay *RelayConfig `json:"relay,omitempty"`
+
+	// DeviceIPExclude 是不计入设备数的来源 IP 或网段，对所有节点相同；缺失表示空名单。
+	DeviceIPExclude []string `json:"device_ip_exclude,omitempty"`
 }
 
 // Relay modes.

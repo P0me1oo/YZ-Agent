@@ -45,9 +45,7 @@ type userStats struct {
 func (u *userStats) addConn(sourceIP string) {
 	u.mu.Lock()
 	u.connCount++
-	if deviceip.Public(sourceIP) {
-		u.ips[sourceIP]++
-	}
+	u.ips[sourceIP]++
 	u.mu.Unlock()
 }
 
@@ -55,11 +53,9 @@ func (u *userStats) addConn(sourceIP string) {
 func (u *userStats) removeConn(sourceIP string) {
 	u.mu.Lock()
 	u.connCount--
-	if deviceip.Public(sourceIP) {
-		u.ips[sourceIP]--
-		if u.ips[sourceIP] <= 0 {
-			delete(u.ips, sourceIP)
-		}
+	u.ips[sourceIP]--
+	if u.ips[sourceIP] <= 0 {
+		delete(u.ips, sourceIP)
 	}
 	u.mu.Unlock()
 }
@@ -400,9 +396,7 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 	if cl == nil {
 		if us != nil {
 			us.connCount++
-			if deviceip.Public(sourceIP) {
-				us.ips[sourceIP]++
-			}
+			us.ips[sourceIP]++
 		}
 		return "", 0, 0, false
 	}
@@ -422,30 +416,32 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 
 	if us != nil {
 		us.connCount++
-		if deviceip.Public(sourceIP) {
-			us.ips[sourceIP]++
-		}
+		us.ips[sourceIP]++
 	}
 	return "", 0, 0, false
 }
 
 // checkDeviceGate rejects connections exceeding device limit.
 // Strategy: merge local + global state when fresh; local-only when stale.
+// 本地登记包含所有来源；非公网或名单内的来源不占名额，按当前名单现场筛选。
 func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string, limit int) bool {
-	if us == nil || limit <= 0 || !deviceip.Public(sourceIP) {
+	if us == nil || limit <= 0 || !deviceip.Counts(sourceIP) {
 		return false
 	}
 
 	us.mu.RLock()
+	known := us.ips[sourceIP] > 0
 	localIPs := make(map[string]bool, len(us.ips))
 	for ip := range us.ips {
-		localIPs[ip] = true
+		if key := deviceip.CountKey(ip); key != "" {
+			localIPs[key] = true
+		}
 	}
-	localCount := len(us.ips)
 	us.mu.RUnlock()
+	localCount := len(localIPs)
 
 	// Already known locally
-	if localIPs[sourceIP] {
+	if known {
 		return false
 	}
 
@@ -477,7 +473,9 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 		allIPs[ip] = true
 	}
 	for ip := range globalIPs {
-		allIPs[ip] = true
+		if deviceip.Counts(ip) {
+			allIPs[ip] = true
+		}
 	}
 
 	if len(allIPs) < limit {

@@ -1,7 +1,10 @@
 package tracker
 
 import (
+	"slices"
 	"testing"
+
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 )
 
 func TestProcess_InitialTraffic(t *testing.T) {
@@ -238,5 +241,27 @@ func TestTrafficAccumulation(t *testing.T) {
 	// Total: 100+200+50 = 350 upload, 200+300+100 = 600 download
 	if flushed[1] != [2]int64{350, 600} {
 		t.Errorf("accumulated: got %v, want [350,600]", flushed[1])
+	}
+}
+
+func TestFlushAliveIPsReportsOnlyCountedSources(t *testing.T) {
+	deviceip.SetExcluded([]string{"203.0.114.0/24"})
+	t.Cleanup(func() { deviceip.SetExcluded(nil) })
+
+	tr := New()
+	tr.Process(map[int][2]int64{}, map[int]map[string]bool{
+		1: {"203.0.114.7": true, "::ffff:1.1.1.1": true, "1.1.1.1": true, "10.0.0.2": true},
+		2: {"203.0.114.8": true},
+		3: {"127.0.0.1": true},
+	}, 4)
+
+	flushed := tr.FlushAliveIPs()
+	if !slices.Equal(flushed[1], []string{"1.1.1.1"}) || len(flushed) != 1 {
+		t.Fatalf("设备上报只应包含规范化后的计数来源，得到 %v", flushed)
+	}
+	// 在线人数按全部来源统计，只走转发的用户也算在线。
+	online := tr.CurrentOnline()
+	if online[1] != 4 || online[2] != 1 || online[3] != 1 {
+		t.Fatalf("在线人数应包含不计入设备数的来源，得到 %v", online)
 	}
 }

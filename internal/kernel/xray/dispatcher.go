@@ -411,10 +411,8 @@ func (d *LimitDispatcher) GetConnectionState() (aliveIPs map[int]map[string]bool
 // checkDeviceLimit enforces per-user device limits.
 // Fast path: unlimited users use lock-free sync.Map.
 // 有上限的用户在同一把锁内完成检查和登记。
+// 所有来源都登记，供在线人数统计；非公网或名单内的来源不占名额，也不参与计数。
 func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool {
-	if !deviceip.Public(sourceIP) {
-		return false
-	}
 	d.mu.RLock()
 	limit, hasLimit := d.deviceLimits[email]
 	d.mu.RUnlock()
@@ -435,7 +433,7 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 		ips = make(map[string]int)
 		d.limitedIPs[email] = ips
 	}
-	if ips[sourceIP] > 0 {
+	if ips[sourceIP] > 0 || !deviceip.Counts(sourceIP) {
 		ips[sourceIP]++
 		return false
 	}
@@ -445,13 +443,18 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 		ips[sourceIP]++
 		return false
 	}
+	// 名单可能在连接存续期间变化，已登记的来源按当前名单重新判断。
 	seen := make(map[string]bool, len(ips))
 	for ip := range ips {
-		seen[ip] = true
+		if key := deviceip.CountKey(ip); key != "" {
+			seen[key] = true
+		}
 	}
 	if fresh {
 		for ip := range d.globalDevices[uid] {
-			seen[ip] = true
+			if deviceip.Counts(ip) {
+				seen[ip] = true
+			}
 		}
 	}
 	if len(seen) >= limit {
@@ -464,9 +467,6 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 
 // delConn decrements the IP refcount when a connection closes.
 func (d *LimitDispatcher) delConn(email, sourceIP string) {
-	if !deviceip.Public(sourceIP) {
-		return
-	}
 	// Check if this is an unlimited user first (lock-free).
 	if v, ok := d.unlimitedIPs.Load(email); ok {
 		ic := v.(*ipCounter)
