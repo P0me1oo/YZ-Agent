@@ -2,7 +2,7 @@
 
 当前已发布版本为 `v1.17.4`；设备数限制只统计公网来源 IP，配套面板 `1.21.2` 和管理端工程 `0.4.7`。固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
-待发布版本 `v1.19.0`：分别经 IPv4、IPv6 向面板回报公网地址，双栈服务器可同时显示两个地址；并包含 `v1.18.0` 的 Xray REALITY 防盗用模式（见 [docs-reality-anti-abuse.md](docs-reality-anti-abuse.md)）。配套面板 `1.23.0`、管理端工程 `0.6.0`。
+待发布版本 `v1.19.0`：分别经 IPv4、IPv6 向面板回报公网地址，双栈服务器可同时显示两个地址；设备数超限时上报拒绝事件；并包含 `v1.18.0` 的 Xray REALITY 防盗用模式（见 [docs-reality-anti-abuse.md](docs-reality-anti-abuse.md)）。配套面板 `1.23.0`、管理端工程 `0.6.0`。
 
 [YZboard](https://github.com/P0me1oo/YZboard) 的节点程序，支持 `sing-box` / `xray-core` 双核心。
 
@@ -14,7 +14,7 @@
 
 - 协议：V2Ray 系列、Trojan、Shadowsocks、Hysteria2、TUIC、AnyTLS
 - 同步：WebSocket 推送与 REST 轮询
-- 用户管理：限速、设备数限制、在线 IP 跟踪与热更新
+- 用户管理：限速、设备数与连接数限制、超限事件上报、在线 IP 跟踪与热更新
 - 部署模式：节点、机器与独立运行
 - 多实例：一个进程绑定多个面板或节点
 - 自动防火墙：Linux 上按节点运行状态管理 UFW/firewalld 端口，保留手工规则和共享端口引用

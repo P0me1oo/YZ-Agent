@@ -230,6 +230,21 @@ func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bo
 	return uid, "", 0, 0, false
 }
 
+// reportDeviceLimited 把设备数超限记入本周期统计，随状态上报面板。
+// 调用方持有 d.mu；limiter 不会回调 dispatcher，不存在锁顺序问题。
+func (d *LimitDispatcher) reportDeviceLimited(uid, limit, observed int, sourceIP string) {
+	if uid <= 0 {
+		return
+	}
+	ptr := d.connLimiter.Load()
+	if ptr == nil {
+		return
+	}
+	if reporter, ok := (*ptr).(model.DeviceLimitReporter); ok {
+		reporter.ReportDeviceLimited(uid, limit, observed, sourceIP)
+	}
+}
+
 // userConnCounter 返回该用户的活跃连接计数器，不存在时创建。
 func (d *LimitDispatcher) userConnCounter(uid int) *atomic.Int64 {
 	if v, ok := d.userConns.Load(uid); ok {
@@ -440,6 +455,7 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 		}
 	}
 	if len(seen) >= limit {
+		d.reportDeviceLimited(uid, limit, len(seen), sourceIP)
 		return true
 	}
 	ips[sourceIP]++
