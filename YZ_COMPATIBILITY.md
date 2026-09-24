@@ -2,8 +2,9 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
-## 双栈公网地址回报（v1.19.0，未发布）
+## 双栈公网地址回报（v1.19.0，已发布）
 
+- 发布来源：Node `v1.19.0` / `e642f5966d74adeab6dd59db91d120e1530fdb18`，配套面板 `v1.23.0` / `85b1441a23a1fad8a195acb367ed4bb9a56725c2`。Node Release 包含 `linux/amd64`、`linux/arm64` 程序和 `SHA256SUMS`；镜像 `ghcr.io/p0me1oo/yz-agent:v1.19.0` 的 manifest 为 `sha256:6e5f72f97fbf417f406bd25e6f03bcbb9db3dbcb9d9d226622e2b361cd455291`，与 `latest` 一致，包含两个目标架构。面板镜像 `ghcr.io/p0me1oo/yzboard:1.23.0-85b1441` 为 `sha256:757369e5f6c1202c7d92520da087859773bd9ce26d2e36644154a1af4987873f`，同样包含两个目标架构。
 - 本版一并合入设备数超限上报：Xray 与 sing-box 两种核心在拒绝新公网来源时记录事件，随原有状态上报发送给面板 `1.23.0` 的插件钩子；并发和速率事件格式不变。旧面板忽略新类型事件，核心固定依赖及节点配置不变。
 - 修改起点为已发布的 `v1.17.4`（提交 `022aa4c2070d806b1a87503acd4c82cd9b2b7e41`），并合入尚未发布的 `feat/reality-anti-abuse`（`v1.18.0`，提交 `0d2a344588303bc0fc606fa3fbb9ef6223ed3035`）。下节 REALITY 防盗用模式记录的基线、配套和回滚版本以本节为准。核心依赖未改动：Xray 仍固定为 `github.com/P0me1oo/YZ-Xray-core v0.0.0-20260922231406-f242ad693152`，sing-box 仍为 `github.com/P0me1oo/YZ-sing-box v1.14.0-yz.2`。
 - 新增 `internal/panel/machine_address.go`：只经指定地址族（`tcp4` 或 `tcp6`）调用面板 `POST /api/v2/server/machine/address`，沿用已有机器鉴权；与原有面板连接一样不走系统代理、校验证书，单次最长 15 秒，不保留空闲连接。`internal/machine/machine.go` 在启用远程控制时启动回报循环：启动时回报一次，之后每 5 分钟一次，面板返回 404 时降为每小时一次。
