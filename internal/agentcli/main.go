@@ -37,7 +37,7 @@ var (
 )
 
 var (
-	version   = "v1.19.0"
+	version   = "v1.19.1"
 	buildTime = "unknown"
 	commit    = "unknown"
 )
@@ -582,6 +582,10 @@ func runUpgradeWithResult(args []string, result func(string)) error {
 			fmt.Printf("Downloading %s...\n", url)
 			return downloadFile(url, destination)
 		},
+		downloadChecksums: func(url, destination string) error {
+			fmt.Printf("Downloading %s...\n", url)
+			return downloadChecksumFile(url, destination)
+		},
 		run: func(file string, args ...string) ([]byte, error) {
 			return exec.Command(file, args...).CombinedOutput()
 		},
@@ -721,8 +725,29 @@ func resolveDownloadURL(artifact, version string) string {
 	return downloadBase + "/download/" + version + "/" + artifact
 }
 
+// downloadFile 下载程序附件：GitHub 直连超时后改用 gh-proxy.org 重试，下载后仍按 GitHub 上的校验文件核对。
 func downloadFile(url, dest string) error {
 	client := &http.Client{Timeout: 120 * time.Second}
+	return downloadFileWithFallback(client, url, dest)
+}
+
+// downloadChecksumFile 只从 GitHub 直连下载校验文件。
+// 校验值不能来自镜像，否则镜像同时提供程序和校验值时，核对无法发现被改过的程序。
+func downloadChecksumFile(url, dest string) error {
+	client := &http.Client{Timeout: 120 * time.Second}
+	return downloadFileWithClient(client, url, dest)
+}
+
+func downloadFileWithFallback(client *http.Client, url, dest string) error {
+	err := downloadFileWithClient(client, url, dest)
+	if err == nil || !(errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err)) {
+		return err
+	}
+	fmt.Println("GitHub 下载超时，改用 gh-proxy.org 重试...")
+	return downloadFileWithClient(client, "https://gh-proxy.org/"+url, dest)
+}
+
+func downloadFileWithClient(client *http.Client, url, dest string) error {
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
@@ -731,15 +756,19 @@ func downloadFile(url, dest string) error {
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
-	f, err := os.Create(dest)
+	f, err := os.Create(dest + ".part")
 	if err != nil {
 		return err
 	}
+	defer os.Remove(dest + ".part")
 	if _, err := io.Copy(f, resp.Body); err != nil {
 		_ = f.Close()
 		return err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(dest+".part", dest)
 }
 
 func verifyReleaseChecksum(path, artifact string, checksums []byte) error {

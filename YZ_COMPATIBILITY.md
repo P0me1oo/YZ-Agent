@@ -2,6 +2,13 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
+## Release 下载超时切换（v1.19.1，未发布）
+
+- `yz-agent upgrade` 仍先查询并固定最新正式版本；下载该版本的程序附件时，GitHub 直连单次 2 分钟超时后，按 `https://gh-proxy.org/` 加原始链接重试一次。镜像请求同样限时 2 分钟；HTTP 错误及文件校验失败不触发切换。校验文件 `SHA256SUMS` 只从 GitHub 直连下载，避免镜像同时提供程序和校验值，直连超时即停止升级。
+- 保留同一 Release 的 SHA256 校验和现有安装事务。直连超时的部分文件在镜像重试前删除；两次失败时原程序不被替换。
+- 配套面板 `1.23.1` 的远程任务有效期为 10 分钟；旧面板仍采用原有 15 分钟有效期，两边无协议或核心依赖变化，可分别升级。
+- 当前仅为本地修改，尚未发布或进行真实服务器验证。回滚基线为 Node `v1.19.0`。
+
 ## 双栈公网地址回报（v1.19.0，已发布）
 
 - 发布来源：Node `v1.19.0` / `e642f5966d74adeab6dd59db91d120e1530fdb18`，配套面板 `v1.23.0` / `85b1441a23a1fad8a195acb367ed4bb9a56725c2`。Node Release 包含 `linux/amd64`、`linux/arm64` 程序和 `SHA256SUMS`；镜像 `ghcr.io/p0me1oo/yz-agent:v1.19.0` 的 manifest 为 `sha256:6e5f72f97fbf417f406bd25e6f03bcbb9db3dbcb9d9d226622e2b361cd455291`，与 `latest` 一致，包含两个目标架构。面板镜像 `ghcr.io/p0me1oo/yzboard:1.23.0-85b1441` 为 `sha256:757369e5f6c1202c7d92520da087859773bd9ce26d2e36644154a1af4987873f`，同样包含两个目标架构。
