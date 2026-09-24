@@ -39,8 +39,8 @@ func TestAgentCommandEntrypoint(t *testing.T) {
 	}{
 		{"default", nil, "yz-agent commands:", false},
 		{"help", []string{"help"}, "yz-agent run [-c PATH]", false},
-		{"version", []string{"version"}, "yz-agent v1.18.0", false},
-		{"short-version", []string{"-v"}, "yz-agent v1.18.0", false},
+		{"version", []string{"version"}, "yz-agent v1.19.0", false},
+		{"short-version", []string{"-v"}, "yz-agent v1.19.0", false},
 		{"config", []string{"config", "bin-dir", "--path-file", pathFile}, "/opt/agent-test", false},
 		{"run", []string{"run", "-c", missing}, "failed to load config:", true},
 		{"legacy-start", []string{"-c", missing}, "failed to load config:", true},
