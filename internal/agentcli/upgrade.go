@@ -11,10 +11,12 @@ import (
 
 type upgradeOperations struct {
 	download func(string, string) error
-	run      func(string, ...string) ([]byte, error)
-	restart  func() error
-	rename   func(string, string) error
-	migrate  func(string, string) error
+	// downloadChecksums 下载校验文件；为空时使用 download。
+	downloadChecksums func(string, string) error
+	run               func(string, ...string) ([]byte, error)
+	restart           func() error
+	rename            func(string, string) error
+	migrate           func(string, string) error
 }
 
 type upgradeFile struct {
@@ -40,7 +42,11 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 	}()
 
 	checksumsPath := filepath.Join(stage, "SHA256SUMS")
-	if err := ops.download(resolveDownloadURL("SHA256SUMS", release), checksumsPath); err != nil {
+	downloadChecksums := ops.downloadChecksums
+	if downloadChecksums == nil {
+		downloadChecksums = ops.download
+	}
+	if err := downloadChecksums(resolveDownloadURL("SHA256SUMS", release), checksumsPath); err != nil {
 		return "", fmt.Errorf("download release checksums: %w", err)
 	}
 	checksums, err := os.ReadFile(checksumsPath)

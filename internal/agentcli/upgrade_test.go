@@ -329,3 +329,27 @@ func TestUpgradePreservesBackupWhenRollbackFails(t *testing.T) {
 	requireFileContents(t, filepath.Join(stages[0], "previous-xboard-node"), "old-xboard-node")
 	requireFileContents(t, paths.cli(), "old-xbctl")
 }
+
+// 校验文件只走直连下载，程序文件才允许镜像重试，校验值始终来自 GitHub。
+func TestUpgradeDownloadsChecksumsWithoutMirror(t *testing.T) {
+	paths, ops := upgradeFixture(t)
+	mirrored := ops.download
+	var direct, fallback []string
+	ops.downloadChecksums = func(url, destination string) error {
+		direct = append(direct, path.Base(url))
+		return mirrored(url, destination)
+	}
+	ops.download = func(url, destination string) error {
+		if path.Base(url) == "SHA256SUMS" {
+			t.Fatal("校验文件不应使用带镜像重试的下载")
+		}
+		fallback = append(fallback, path.Base(url))
+		return mirrored(url, destination)
+	}
+	if _, err := upgradeBinaries(paths, "v1.20.0", ops); err != nil {
+		t.Fatal(err)
+	}
+	if len(direct) != 1 || direct[0] != "SHA256SUMS" || len(fallback) != 2 {
+		t.Fatalf("直连=%v，允许镜像=%v", direct, fallback)
+	}
+}
