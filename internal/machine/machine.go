@@ -5,6 +5,7 @@ package machine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/agentcli"
 	"strings"
@@ -95,6 +96,39 @@ func (o *Orchestrator) SetAgentRuntime(version, bootID string) {
 	o.agentVersion, o.bootID = version, bootID
 }
 
+const (
+	machineAddressInterval    = 5 * time.Minute
+	machineAddressLegacyRetry = time.Hour
+)
+
+// addressLoop 定期分别经 IPv4、IPv6 连接面板。控制请求只走系统默认的地址族，
+// 双栈服务器上面板只能看到其中一个公网地址，另一个靠这里补报。
+func (o *Orchestrator) addressLoop(ctx context.Context) {
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		next := machineAddressInterval
+		for _, network := range []string{"tcp4", "tcp6"} {
+			_, err := o.client.ReportMachineAddress(ctx, network)
+			if errors.Is(err, panel.ErrMachineAddressUnsupported) {
+				// 旧面板没有该接口；降低频率而不是停止，面板升级后无需重启 agent。
+				next = machineAddressLegacyRetry
+				break
+			}
+			if err != nil && ctx.Err() == nil {
+				// 服务器没有某一种地址族的公网出口时，这一路每次都会失败，只在调试日志里记录。
+				nlog.Core().Debug("machine address report failed", "network", network, "error", err)
+			}
+		}
+		timer.Reset(next)
+	}
+}
+
 func (o *Orchestrator) controlLoop(ctx context.Context) {
 	key := agentcli.RemoteKey(o.cfg.Panel.URL, o.cfg.Machine.MachineID)
 	ticker := time.NewTicker(5 * time.Second)
@@ -182,6 +216,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	o.runCtx = ctx
 	if o.agentVersion != "" {
 		go o.controlLoop(ctx)
+		go o.addressLoop(ctx)
 	}
 	nodesResp, err := o.client.GetMachineNodes()
 	if err != nil {
