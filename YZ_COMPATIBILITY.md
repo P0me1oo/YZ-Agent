@@ -2,8 +2,9 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
-## 不计入设备数的来源名单（v1.20.0，未发布）
+## 不计入设备数的来源名单（v1.20.0，已发布）
 
+- 发布来源：Node `v1.20.0` / `2ea9ece0b1ce9e0da044273b487c9d07e27ebf9a`，配套面板 `v1.24.0` / `26c545e34de1f5ae45f487cf1b95ed67b6829351`。Release <https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.20.0> 的 12 个附件已下载，`SHA256SUMS` 全部匹配；`yz-agent` 两个架构的构建信息为上述提交、`vcs.modified=false`，核心依赖为 YZ-Xray-core `v0.0.0-20260922231406-f242ad693152`、YZ-sing-box `v1.14.0-yz.2`。镜像 `ghcr.io/p0me1oo/yz-agent:v1.20.0` 与 `latest` 为 `sha256:5fc352f414f522d01b4f8f90a4d88587e5dc031b89520c98114c97868e46d18f`，`linux/amd64`、`linux/arm64` 的 OCI 来源提交一致。标签工作流的测试、构建、镜像和 Release 均通过。
 - 修改起点为已发布的 `v1.19.0`（`e642f5966d74adeab6dd59db91d120e1530fdb18`，发布记录提交 `757350f98afea91e53be4788d9109176c997020c`）。核心固定依赖不变：YZ-Xray-core `v0.0.0-20260922231406-f242ad693152`，YZ-sing-box `v1.14.0-yz.2`。配套面板 `1.24.0`、管理端工程 `0.7.0`。
 - 节点配置新增可选字段 `device_ip_exclude`（IP 或网段列表，对所有节点相同）。该字段不参与配置变化判断，只改名单时不重载内核；WebSocket 推送、定时拉取和启动时都先应用名单。字段缺失按空名单处理，旧面板下行为与 `v1.19.0` 相同。
 - 两种核心登记所有来源地址，设备准入和设备上报只计“公网且不在名单内”的来源，名单变化对已有连接立即生效。设备超限事件的已计入来源数按同一口径统计。
