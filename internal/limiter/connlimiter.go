@@ -22,6 +22,11 @@ type LimitEventStat struct {
 	ConnLimit int    // 触发时生效的并发上限
 	RateLimit int    // 触发时生效的速率上限
 	PeakConn  int    // 本周期触发并发拒绝时，已占用连接名额的最大值
+
+	DeviceHits  uint64   // 设备数超限被拒次数
+	DeviceLimit int      // 触发时生效的设备上限
+	PeakDevices int      // 本周期拒绝新来源时，已计入来源数的最大值
+	DeviceIPs   []string // 本周期被拒的来源地址，去重后最多 MaxDeviceEventIPs 个
 }
 
 // rebuildConnLimitsLocked 依据最新用户列表重建限制索引和令牌桶。

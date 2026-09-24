@@ -6,7 +6,19 @@ const (
 	ConnLimitKindConcurrent = "conn"
 	// ConnLimitKindRate 表示超过每秒新建连接数上限。
 	ConnLimitKindRate = "rate"
+	// ConnLimitKindDevice 表示设备名额已满，新的公网来源被拒绝。
+	ConnLimitKindDevice = "device"
 )
+
+// DeviceLimitReporter 记录设备数超限，随状态上报面板。
+//
+// 由 limiter 包实现，内核从已配置的 ConnLimiter 上断言获取。
+// 单独成接口是为了不改动连接准入接口；只在拒绝新来源时调用，放行路径没有额外开销。
+type DeviceLimitReporter interface {
+	// ReportDeviceLimited 记录一次设备数超限拒绝。
+	// limit 是该用户的设备上限，observed 是拒绝时已计入的来源数，sourceIP 是被拒的来源地址。
+	ReportDeviceLimited(userID, limit, observed int, sourceIP string)
+}
 
 // ConnLimiter 由 limiter 包实现，内核在新连接建立时通过它做准入判断。
 // 接口放在 model 层，避免内核包反向依赖 limiter 包。

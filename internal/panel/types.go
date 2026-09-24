@@ -335,12 +335,15 @@ type UsersResponse struct {
 }
 
 // LimitEvent 是一个上报周期内某个用户触发连接限制的汇总。
-// 同一用户在同一周期内可能同时触发并发和速率两种，分成两条上报。
+// 同一用户在同一周期内可能同时触发并发、速率和设备数，每种各一条上报。
 type LimitEvent struct {
 	UserID int    `json:"user_id"`
-	Kind   string `json:"kind"`  // conn=并发超限，rate=新建速率超限
+	Kind   string `json:"kind"`  // conn=并发超限，rate=新建速率超限，device=设备数超限
 	Limit  int    `json:"limit"` // 触发时生效的上限
-	// Observed 是本周期触发并发拒绝时已占用名额的最大值（含正在调度的连接），不是全周期峰值；速率超限为 0。
+	// Observed 是本周期触发并发拒绝时已占用名额的最大值（含正在调度的连接），不是全周期峰值；
+	// 设备数超限时是拒绝新来源时已计入的来源数最大值；速率超限为 0。
 	Observed int    `json:"observed"`
 	Count    uint64 `json:"count"` // 本周期内被拒次数
+	// IPs 只在设备数超限时出现，是本周期被拒的来源地址，去重后最多 5 个。
+	IPs []string `json:"ips,omitempty"`
 }

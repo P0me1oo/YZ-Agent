@@ -462,6 +462,7 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 		}
 		nlog.Core().Debug("device limit: local over limit, rejecting",
 			"userID", userID, "ip", sourceIP, "localIPs", localCount, "limit", limit)
+		t.reportDeviceLimited(userID, limit, localCount, sourceIP)
 		return true
 	}
 
@@ -486,7 +487,22 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 	// 名额已满时只拒绝新来源，不按地址排序抢占已有来源。
 	nlog.Core().Debug("device limit: total over limit, rejecting",
 		"userID", userID, "ip", sourceIP, "totalIPs", len(allIPs), "limit", limit)
+	t.reportDeviceLimited(userID, limit, len(allIPs), sourceIP)
 	return true
+}
+
+// reportDeviceLimited 把设备数超限记入本周期统计，随状态上报面板。
+func (t *ConnTracker) reportDeviceLimited(userID, limit, observed int, sourceIP string) {
+	if userID <= 0 {
+		return
+	}
+	ptr := t.connLimiter.Load()
+	if ptr == nil {
+		return
+	}
+	if reporter, ok := (*ptr).(model.DeviceLimitReporter); ok {
+		reporter.ReportDeviceLimited(userID, limit, observed, sourceIP)
+	}
 }
 
 func (t *ConnTracker) nextID() string {

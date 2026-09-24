@@ -1232,6 +1232,16 @@ func (s *Service) collectLimitEvents() []panel.LimitEvent {
 				Count:  stat.RateHits,
 			})
 		}
+		if stat.DeviceHits > 0 {
+			events = append(events, panel.LimitEvent{
+				UserID:   userID,
+				Kind:     model.ConnLimitKindDevice,
+				Limit:    stat.DeviceLimit,
+				Observed: stat.PeakDevices,
+				Count:    stat.DeviceHits,
+				IPs:      stat.DeviceIPs,
+			})
+		}
 	}
 	// 用户 ID 顺序固定，便于面板日志和重试比对。
 	sort.Slice(events, func(i, j int) bool {

@@ -12,7 +12,7 @@
 
 - 协议：V2Ray 系列、Trojan、Shadowsocks、Hysteria2、TUIC、AnyTLS
 - 同步：WebSocket 推送与 REST 轮询
-- 用户管理：限速、设备数限制、在线 IP 跟踪与热更新
+- 用户管理：限速、设备数与连接数限制、超限事件上报、在线 IP 跟踪与热更新
 - 部署模式：节点、机器与独立运行
 - 多实例：一个进程绑定多个面板或节点
 - 自动防火墙：Linux 上按节点运行状态管理 UFW/firewalld 端口，保留手工规则和共享端口引用
