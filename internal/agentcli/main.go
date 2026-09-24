@@ -37,7 +37,7 @@ var (
 )
 
 var (
-	version   = "v1.17.4"
+	version   = "v1.18.0"
 	buildTime = "unknown"
 	commit    = "unknown"
 )
@@ -722,7 +722,7 @@ func resolveDownloadURL(artifact, version string) string {
 }
 
 func downloadFile(url, dest string) error {
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
 		return err

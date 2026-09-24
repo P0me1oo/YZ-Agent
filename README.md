@@ -136,6 +136,7 @@ systemd 日志由 journal 提供；OpenRC 的 `yz-agent` 日志写入 `/var/log/
 
 - 自动防火墙和 HY2 端口跳跃：[docs/firewall-port-hopping.md](docs/firewall-port-hopping.md)
 - Xray REALITY 最低客户端版本: [docs-xray-reality.md](docs-xray-reality.md)
+- Xray REALITY 防盗用模式：[docs-reality-anti-abuse.md](docs-reality-anti-abuse.md)
 - VLESS/HY2 前置入口与中转落地：[docs-relay.md](docs-relay.md)
 - HY2 ECH 握手、中转与构建验证：[docs/hy2-ech-validation.md](docs/hy2-ech-validation.md)
 - 自定义路由：[docs-custom-routes.md](docs-custom-routes.md)
