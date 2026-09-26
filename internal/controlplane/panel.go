@@ -119,7 +119,11 @@ func (p *PanelControlPlane) Discover(ctx context.Context, metricsFn func() map[s
 }
 
 func (p *PanelControlPlane) Report(payload ReportPayload) error {
-	return p.client.Report(payload.ReportID, payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.Alive, payload.Online, payload.CPU, payload.Mem, payload.Swap, payload.Disk, payload.Metrics, payload.LimitEvents)
+	return p.ReportContext(context.Background(), payload)
+}
+
+func (p *PanelControlPlane) ReportContext(ctx context.Context, payload ReportPayload) error {
+	return p.client.ReportContext(ctx, payload.ReportID, payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.Alive, payload.Online, payload.CPU, payload.Mem, payload.Swap, payload.Disk, payload.Metrics, payload.LimitEvents)
 }
 
 func (p *PanelControlPlane) ReportDevices(push PushClient, devices map[int][]string) {

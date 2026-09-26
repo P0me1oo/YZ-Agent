@@ -31,7 +31,7 @@ func TestSetExcludedAndCountKey(t *testing.T) {
 		{"4.4.4.9", ""},
 		{"5.5.5.5", ""},
 		{"2001:4860:4860::8888", ""},
-		{"2606:4700::1111", "2606:4700::1111"},
+		{"2606:4700::1111", "2606:4700::"},
 		{"::ffff:1.0.0.1", "1.0.0.1"},
 		{"10.0.0.2", ""},
 		{"invalid", ""},
@@ -52,5 +52,30 @@ func TestSetExcludedAndCountKey(t *testing.T) {
 	}
 	if _, changed := SetExcluded([]string{}); changed {
 		t.Fatal("名单已为空时再次清空不应视为变化")
+	}
+}
+
+// IPv6 按 /64 网段计为一台设备；名单按原始地址判断，精确到单个 IPv6 地址的条目仍然有效。
+func TestCountKeyGroupsIPv6ByPrefix(t *testing.T) {
+	t.Cleanup(func() { SetExcluded(nil) })
+	SetExcluded([]string{"2400:cb00:1:2::53"})
+
+	same := []string{"2400:cb00:1:2::1", "2400:cb00:1:2:aaaa:bbbb:cccc:dddd", "2400:cb00:0001:0002::ffff"}
+	for _, ip := range same {
+		if got := CountKey(ip); got != "2400:cb00:1:2::" {
+			t.Errorf("CountKey(%q) = %q, want 2400:cb00:1:2::", ip, got)
+		}
+	}
+	if got := CountKey("2400:cb00:1:3::1"); got != "2400:cb00:1:3::" {
+		t.Errorf("相邻网段应单独计数，得到 %q", got)
+	}
+	if got := CountKey("2400:cb00:1:2::53"); got != "" {
+		t.Errorf("名单内的单个 IPv6 地址不应计数，得到 %q", got)
+	}
+	if got := Normalize("2400:cb00:1:2::"); got != "2400:cb00:1:2::" {
+		t.Errorf("面板返回的网段地址应保持不变，得到 %q", got)
+	}
+	if got := CountKey("8.8.8.8"); got != "8.8.8.8" {
+		t.Errorf("IPv4 仍按单个地址计数，得到 %q", got)
 	}
 }

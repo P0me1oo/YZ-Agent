@@ -175,48 +175,62 @@ func mergeRouteList(a, b []map[string]any) []map[string]any {
 }
 
 func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteRule, custom []map[string]any, relayRules ...M) M {
-	var rules []M
+	// 自定义规则优先；中转域名必须保持原样交给落地解析。
+	rules := []M{}
+	var postResolveCustom []M
 
 	// Structured custom routes now take the highest priority for panel-managed overrides.
 	for _, rule := range customRules {
 		if rule.Disabled {
 			continue
 		}
-		rules = append(rules, compileCustomRouteRule(rule)...)
+		for _, compiled := range compileCustomRouteRule(rule) {
+			rules = append(rules, compiled)
+			if _, needsAddress := compiled["ip_cidr"]; needsAddress {
+				postResolveCustom = append(postResolveCustom, compiled)
+			}
+		}
 	}
 
 	// Raw custom routes remain the escape hatch, but no longer outrank structured rules.
 	for _, cr := range custom {
 		rules = append(rules, M(cr))
+		if _, needsAddress := cr["ip_cidr"]; needsAddress {
+			postResolveCustom = append(postResolveCustom, M(cr))
+		}
 	}
 
-	// Standard blocks for private IPv4 and IPv6 ranges to prevent SSRF.
+	// 自定义规则仍优先于默认拦截，按网段放行同样适用于域名解析后的地址。
+	var privateV4, privateV6 []string
+	for _, cidr := range privateDestinationCIDRs {
+		if strings.Contains(cidr, ":") {
+			privateV6 = append(privateV6, cidr)
+		} else {
+			privateV4 = append(privateV4, cidr)
+		}
+	}
+	// 字面 IP 在中转选路之前就能判断；域名留到实际直连时再解析。
 	rules = append(rules,
-		M{
-			"outbound": "block",
-			"ip_cidr": []string{
-				"10.0.0.0/8",
-				"100.64.0.0/10",
-				"127.0.0.0/8",
-				"169.254.0.0/16",
-				"172.16.0.0/12",
-				"192.0.0.0/24",
-				"192.168.0.0/16",
-				"198.18.0.0/15",
-			},
-		},
-		M{
-			"outbound": "block",
-			"ip_cidr": []string{
-				"fc00::/7",
-				"fe80::/10",
-				"::1/128",
-			},
-		},
+		M{"outbound": "block", "ip_cidr": privateV4},
+		M{"outbound": "block", "ip_cidr": privateV6},
 	)
 
-	// 中转选路优先于面板路由组，显式自定义规则保持原有优先级。
-	rules = append(rules, relayRules...)
+	// 中转出站不在入口解析目标域名；本机直连仍需在解析后再拦截。
+	var directRelayRules []M
+	for _, relayRule := range relayRules {
+		if relayRule["outbound"] == "direct" {
+			directRelayRules = append(directRelayRules, relayRule)
+		} else {
+			rules = append(rules, relayRule)
+		}
+	}
+	rules = append(rules, M{"action": "resolve"})
+	rules = append(rules, postResolveCustom...)
+	rules = append(rules,
+		M{"outbound": "block", "ip_cidr": privateV4},
+		M{"outbound": "block", "ip_cidr": privateV6},
+	)
+	rules = append(rules, directRelayRules...)
 	for _, pr := range panelRoutes {
 		rules = append(rules, compilePanelRouteRule(pr)...)
 	}
@@ -1020,11 +1034,14 @@ func applyMultiplex(base M, nc *model.NodeSpec) {
 	base["multiplex"] = mux
 }
 
-func applyProxyProtocol(base M, nc *model.NodeSpec) {
-	// if !nc.GetProxyProtocol() {
-	// 	return
-	// }
-	// base["proxy_protocol"] = true
+// applyProxyProtocol：sing-box 上游自 1.6.0 起删除了接收 PROXY 头的功能。
+// 面板为 sing-box 节点打开该开关时明确提示，而不是静默忽略；
+// 需要按真实用户地址计设备的前置转发节点应改用 Xray 内核。
+func applyProxyProtocol(_ M, nc *model.NodeSpec) {
+	if nc.GetProxyProtocol() {
+		nlog.Core().Warn("sing-box does not support accepting PROXY protocol headers; the setting is ignored, use the xray kernel for nodes behind forwarders that send real client IPs",
+			"protocol", nc.Protocol, "port", nc.ServerPort)
+	}
 }
 
 // extractECHInbound extracts ECH config for sing-box server (inbound).

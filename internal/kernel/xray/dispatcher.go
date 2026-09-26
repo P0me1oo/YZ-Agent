@@ -35,6 +35,8 @@ var origDispatcherFactory common.ConfigCreator
 // The Xray kernel reads it to configure limits and get connections.
 var globalLimitDispatcher atomic.Pointer[LimitDispatcher]
 
+type deviceFilterContextKey struct{}
+
 func init() {
 	configType := reflect.TypeOf((*xrayDispatcher.Config)(nil))
 	origDispatcherFactory = typeCreatorRegistry[configType]
@@ -55,6 +57,10 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 		innerDisp:  inner,
 		limitedIPs: make(map[string]map[string]int),
 	}
+	ld.deviceFilter, _ = ctx.Value(deviceFilterContextKey{}).(*deviceip.Filter)
+	if ld.deviceFilter == nil {
+		ld.deviceFilter = deviceip.DefaultFilter()
+	}
 	globalLimitDispatcher.Store(ld)
 	nlog.Core().Debug("xray: limit dispatcher installed")
 	return ld, nil
@@ -68,8 +74,9 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 // intact, so the dispatcher is limited to gate-keeping and safe connection
 // lifecycle bookkeeping.
 type LimitDispatcher struct {
-	inner     interface{}        // original DefaultDispatcher (Feature + Dispatcher)
-	innerDisp routing.Dispatcher // same object, typed as Dispatcher
+	inner        interface{}        // original DefaultDispatcher (Feature + Dispatcher)
+	innerDisp    routing.Dispatcher // same object, typed as Dispatcher
+	deviceFilter *deviceip.Filter
 
 	// 有设备上限的用户由同一把锁保护，检查和登记在锁内完成。
 	mu               sync.RWMutex
@@ -91,6 +98,13 @@ type LimitDispatcher struct {
 
 	// connLimiter 做连接数和新建速率准入，nil 表示不限制。
 	connLimiter atomic.Pointer[model.ConnLimiter]
+}
+
+func (d *LimitDispatcher) countKey(raw string) string {
+	if d.deviceFilter != nil {
+		return d.deviceFilter.CountKey(raw)
+	}
+	return deviceip.CountKey(raw)
 }
 
 // ipCounter tracks IPs for unlimited users without any lock.
@@ -433,27 +447,33 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 		ips = make(map[string]int)
 		d.limitedIPs[email] = ips
 	}
-	if ips[sourceIP] > 0 || !deviceip.Counts(sourceIP) {
-		ips[sourceIP]++
-		return false
-	}
-	uid := d.emailToUID[email]
-	fresh := !d.globalLastUpdate.IsZero() && time.Since(d.globalLastUpdate) <= 2*time.Minute
-	if fresh && d.globalDevices[uid][sourceIP] {
+	newKey := d.countKey(sourceIP)
+	if ips[sourceIP] > 0 || newKey == "" {
 		ips[sourceIP]++
 		return false
 	}
 	// 名单可能在连接存续期间变化，已登记的来源按当前名单重新判断。
 	seen := make(map[string]bool, len(ips))
 	for ip := range ips {
-		if key := deviceip.CountKey(ip); key != "" {
+		if key := d.countKey(ip); key != "" {
 			seen[key] = true
 		}
 	}
+	// 同一 IPv6 网段的新地址属于已在线的设备。
+	if seen[newKey] {
+		ips[sourceIP]++
+		return false
+	}
+	uid := d.emailToUID[email]
+	fresh := !d.globalLastUpdate.IsZero() && time.Since(d.globalLastUpdate) <= 2*time.Minute
+	if fresh && d.globalDevices[uid][newKey] {
+		ips[sourceIP]++
+		return false
+	}
 	if fresh {
 		for ip := range d.globalDevices[uid] {
-			if deviceip.Counts(ip) {
-				seen[ip] = true
+			if key := deviceip.Normalize(ip); key != "" {
+				seen[key] = true
 			}
 		}
 	}

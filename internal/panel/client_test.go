@@ -1,13 +1,49 @@
 package panel
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 )
+
+func TestReportContextCancelsPanelRequest(t *testing.T) {
+	started := make(chan struct{})
+	ts, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(200 * time.Millisecond):
+		}
+		w.WriteHeader(http.StatusGatewayTimeout)
+	})
+	defer ts.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- client.ReportContext(ctx, "test-report", map[int][2]int64{1: {1, 2}}, nil, nil, nil, nil,
+			0, [2]uint64{}, [2]uint64{}, [2]uint64{}, nil, nil)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("报告请求没有到达面板")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("取消后请求应返回错误")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("取消后报告请求仍在等待")
+	}
+}
 
 func newTestServer(handler http.HandlerFunc) (*httptest.Server, *Client) {
 	ts := httptest.NewServer(handler)

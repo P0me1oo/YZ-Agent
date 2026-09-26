@@ -10,6 +10,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/cert"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/limiter"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -41,6 +42,11 @@ type fakeKernel struct {
 	speedLimitFunc  func(string) *rate.Limiter
 	deviceLimitFunc func(string) (int, bool)
 	connLimiter     model.ConnLimiter
+	deviceFilter    deviceip.Filter
+}
+
+func (f *fakeKernel) SetDeviceIPExclude(entries []string) ([]string, bool) {
+	return f.deviceFilter.SetExcluded(entries)
 }
 
 type certRenewalPollSource struct {

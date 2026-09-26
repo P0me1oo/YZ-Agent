@@ -18,6 +18,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
@@ -58,11 +59,23 @@ type SingBox struct {
 	deviceLimitFunc func(string) (int, bool)
 
 	// connLimiter 做连接数和新建速率准入，同样转发给每个新建的 ConnTracker。
-	connLimiter model.ConnLimiter
+	connLimiter      model.ConnLimiter
+	deviceFilter     *deviceip.Filter
+	ownsDeviceFilter bool
 }
 
 func New(cfg config.KernelConfig) *SingBox {
-	return &SingBox{cfg: cfg, traffic: newTrafficTotals()}
+	return &SingBox{cfg: cfg, traffic: newTrafficTotals(), deviceFilter: deviceip.DefaultFilter()}
+}
+
+func (s *SingBox) SetDeviceIPExclude(entries []string) ([]string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.ownsDeviceFilter {
+		s.deviceFilter = &deviceip.Filter{}
+		s.ownsDeviceFilter = true
+	}
+	return s.deviceFilter.SetExcluded(entries)
 }
 
 var _ kernel.Kernel = (*SingBox)(nil)
@@ -135,6 +148,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 
 	// 在开放监听前注册统计器，首个连接也必须纳入同一份用户统计。
 	tracker := NewConnTracker(0)
+	tracker.deviceFilter = s.deviceFilter
 	tracker.traffic = s.traffic
 	if previous := s.connTracker; previous != nil {
 		// 设备快照更新时整体替换 map，可共享只读快照；沿用时间戳以保留原过期语义。
@@ -314,6 +328,16 @@ func (s *SingBox) SetSpeedLimitFunc(fn func(uuid string) *rate.Limiter) {
 	s.speedLimitFunc = fn
 	if s.connTracker != nil {
 		s.connTracker.SetSpeedLimitFunc(fn)
+	}
+}
+
+// RefreshSpeedLimits 让已建立的连接按用户当前套餐限速执行。
+func (s *SingBox) RefreshSpeedLimits() {
+	s.mu.Lock()
+	ct := s.connTracker
+	s.mu.Unlock()
+	if ct != nil {
+		ct.RefreshSpeedLimits()
 	}
 }
 

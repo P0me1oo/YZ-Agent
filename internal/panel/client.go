@@ -2,6 +2,7 @@ package panel
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -134,6 +135,16 @@ func (c *Client) Report(reportID string, traffic map[int][2]int64, relayTraffic 
 	metrics map[string]interface{},
 	limitEvents []LimitEvent,
 ) error {
+	return c.ReportContext(context.Background(), reportID, traffic, relayTraffic, relayUserTraffic, alive, online, cpu, mem, swap, disk, metrics, limitEvents)
+}
+
+func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map[int][2]int64, relayTraffic map[int][2]int64,
+	relayUserTraffic map[int]map[int][2]int64,
+	alive map[int][]string, online map[int]int,
+	cpu float64, mem, swap, disk [2]uint64,
+	metrics map[string]interface{},
+	limitEvents []LimitEvent,
+) error {
 	payload := make(map[string]interface{})
 	if reportID != "" {
 		payload["report_id"] = reportID
@@ -224,7 +235,7 @@ func (c *Client) Report(reportID string, traffic map[int][2]int64, relayTraffic 
 		payload["limit_events"] = limitEvents
 	}
 
-	return c.postJSON("/api/v2/server/report", payload)
+	return c.postJSONContext(ctx, "/api/v2/server/report", payload)
 }
 
 // decodeWeakRaw decodes an interface (from JSON map) into a struct using weak type conversion.
@@ -458,6 +469,10 @@ func (c *Client) authQuery() url.Values {
 
 // postJSON marshals a map payload (with auth fields injected) and POSTs it.
 func (c *Client) postJSON(path string, payload map[string]interface{}) error {
+	return c.postJSONContext(context.Background(), path, payload)
+}
+
+func (c *Client) postJSONContext(ctx context.Context, path string, payload map[string]interface{}) error {
 	c.injectAuth(payload)
 
 	body, err := json.Marshal(payload)
@@ -465,7 +480,7 @@ func (c *Client) postJSON(path string, payload map[string]interface{}) error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 
-	resp, err := c.doRequest("POST", path, body, "")
+	resp, err := c.doRequestContext(ctx, "POST", path, body, "")
 	if err != nil {
 		return fmt.Errorf("post %s: %w", path, err)
 	}
@@ -475,11 +490,15 @@ func (c *Client) postJSON(path string, payload map[string]interface{}) error {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, respBody)
 	}
-	c.apiSuccess.Add(1)
+	// 成功次数已在 doRequest 中按响应状态计入，这里不再重复累加。
 	return nil
 }
 
 func (c *Client) doRequest(method, path string, body []byte, ifNoneMatch string) (*http.Response, error) {
+	return c.doRequestContext(context.Background(), method, path, body, ifNoneMatch)
+}
+
+func (c *Client) doRequestContext(ctx context.Context, method, path string, body []byte, ifNoneMatch string) (*http.Response, error) {
 	fullURL := c.baseURL + path
 
 	var bodyReader io.Reader
@@ -494,7 +513,7 @@ func (c *Client) doRequest(method, path string, body []byte, ifNoneMatch string)
 		bodyReader = bytes.NewReader(merged)
 	}
 
-	req, err := http.NewRequest(method, fullURL, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
 		return nil, err
 	}

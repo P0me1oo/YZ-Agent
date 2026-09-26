@@ -53,6 +53,8 @@ github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/P0me1oo/YZ-Xray-core v0.0.0-20260922231406-f242ad693152 h1:Kq6hZ/H1nSvCGhUGJNzdGRF/vsp8eYm4aCCeVePGjJQ=
 github.com/P0me1oo/YZ-Xray-core v0.0.0-20260922231406-f242ad693152/go.mod h1:OxuyPpr4Ta52qQC4nSI74QOBtNWyrCjaFdVOKkxwyi8=
+github.com/P0me1oo/YZ-Xray-core v0.0.0-20260926140203-434e1c025c93 h1:SDd9lY5atQFr+o8AOKsdNEiIt3bYOZDW+xRzB9993hU=
+github.com/P0me1oo/YZ-Xray-core v0.0.0-20260926140203-434e1c025c93/go.mod h1:OxuyPpr4Ta52qQC4nSI74QOBtNWyrCjaFdVOKkxwyi8=
 github.com/P0me1oo/YZ-sing-box v1.14.0-yz.2 h1:KL0agFYXpL1qEUsa+toI8VhlUVuQser2AVYL3unVkKk=
 github.com/P0me1oo/YZ-sing-box v1.14.0-yz.2/go.mod h1:dPpNrE2MRS5VemenTVgx3u2kHj124/g2CG6YsxSZbdU=
 github.com/PuerkitoBio/purell v1.1.0/go.mod h1:c11w/QuzBsJSee3cPx9rAFu61PvFxuPbtSwDGJws/X0=

@@ -107,6 +107,19 @@ type Kernel interface {
 	ClearGlobalDevices()
 }
 
+// SpeedLimitRefresher 由每次收发都读取用户当前限速的内核实现。
+// 套餐限速变化后调用，已建立的连接立即按新设置执行。
+type SpeedLimitRefresher interface {
+	RefreshSpeedLimits()
+}
+
+// StableSpeedLimiterConsumer 由在连接建立时固定持有限速器对象的内核实现。
+// 这类内核需要每个用户都有一个固定对象（不限速时也给出），限速变化直接修改该对象，
+// 已建立的连接才能随之生效。
+type StableSpeedLimiterConsumer interface {
+	NeedsStableSpeedLimiter() bool
+}
+
 // RelayTrafficReader is an optional capability implemented by kernels that can
 // measure per-logical-node traffic on a relay entry's internal outbounds.
 //

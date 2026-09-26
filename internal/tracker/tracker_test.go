@@ -3,6 +3,7 @@ package tracker
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 )
@@ -244,24 +245,35 @@ func TestTrafficAccumulation(t *testing.T) {
 	}
 }
 
-func TestFlushAliveIPsReportsOnlyCountedSources(t *testing.T) {
+func TestFlushAliveIPsPreservesPublicSourceAddresses(t *testing.T) {
 	deviceip.SetExcluded([]string{"203.0.114.0/24"})
 	t.Cleanup(func() { deviceip.SetExcluded(nil) })
 
 	tr := New()
 	tr.Process(map[int][2]int64{}, map[int]map[string]bool{
-		1: {"203.0.114.7": true, "::ffff:1.1.1.1": true, "1.1.1.1": true, "10.0.0.2": true},
+		1: {"203.0.114.7": true, "::ffff:1.1.1.1": true, "1.1.1.1": true, "10.0.0.2": true, "2400:cb00:1:2::abcd": true},
 		2: {"203.0.114.8": true},
 		3: {"127.0.0.1": true},
 	}, 4)
 
 	flushed := tr.FlushAliveIPs()
-	if !slices.Equal(flushed[1], []string{"1.1.1.1"}) || len(flushed) != 1 {
-		t.Fatalf("设备上报只应包含规范化后的计数来源，得到 %v", flushed)
+	slices.Sort(flushed[1])
+	if !slices.Equal(flushed[1], []string{"1.1.1.1", "203.0.114.7", "2400:cb00:1:2::abcd"}) || !slices.Equal(flushed[2], []string{"203.0.114.8"}) || len(flushed) != 2 {
+		t.Fatalf("设备上报应保留完整公网来源并由面板过滤，得到 %v", flushed)
 	}
 	// 在线人数按全部来源统计，只走转发的用户也算在线。
 	online := tr.CurrentOnline()
-	if online[1] != 4 || online[2] != 1 || online[3] != 1 {
+	if online[1] != 5 || online[2] != 1 || online[3] != 1 {
 		t.Fatalf("在线人数应包含不计入设备数的来源，得到 %v", online)
+	}
+}
+
+// 速度按两次采样的实际间隔换算，不依赖固定的 10 秒采样周期。
+func TestTrackerSpeedUsesActualInterval(t *testing.T) {
+	tr := New()
+	tr.lastProcess = time.Now().Add(-30 * time.Second)
+	tr.Process(map[int][2]int64{1: {3000, 6000}}, nil, 0)
+	if in, out := tr.InboundSpeed(), tr.OutboundSpeed(); in < 190 || in > 210 || out < 95 || out > 105 {
+		t.Fatalf("30 秒内下载 6000、上传 3000 字节，速度应约为 200/100，实际 %d/%d", in, out)
 	}
 }

@@ -27,11 +27,13 @@ import (
 	"github.com/xtls/xray-core/proxy/trojan"
 	"github.com/xtls/xray-core/proxy/vless"
 	"github.com/xtls/xray-core/proxy/vmess"
+	"github.com/xtls/xray-core/transport/internet"
 	"golang.org/x/time/rate"
 
 	_ "github.com/xtls/xray-core/main/distro/all"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel/geodata"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -79,6 +81,9 @@ type Xray struct {
 
 	// connLimiter 做连接数和新建速率准入，每次重启后转发给新的 LimitDispatcher。
 	connLimiter        model.ConnLimiter
+	deviceFilter       *deviceip.Filter
+	proxyTrust         *internet.ProxyProtocolTrust
+	ownsDeviceFilter   bool
 	globalDevices      map[int][]string
 	globalDeviceUpdate time.Time
 
@@ -93,7 +98,24 @@ func New(cfg config.KernelConfig) *Xray {
 		cumTraffic:          make(map[int][2]int64),
 		cumRelayTraffic:     make(map[int][2]int64),
 		cumRelayUserTraffic: make(map[int]map[int][2]int64),
+		deviceFilter:        deviceip.DefaultFilter(),
+		proxyTrust:          &internet.ProxyProtocolTrust{},
 	}
+}
+
+// SetDeviceIPExclude 只更新本实例的名单，既用于设备限制，也用于 PROXY 头信任。
+func (x *Xray) SetDeviceIPExclude(entries []string) ([]string, bool) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if !x.ownsDeviceFilter {
+		x.deviceFilter = &deviceip.Filter{}
+		x.ownsDeviceFilter = true
+	}
+	invalid, changed := x.deviceFilter.SetExcluded(entries)
+	if changed {
+		x.proxyTrust.Set(x.deviceFilter.Prefixes())
+	}
+	return invalid, changed
 }
 
 func (x *Xray) Name() string { return "xray" }
@@ -142,6 +164,8 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 
 	// ── Phase 2: Create instance (global lock for LD capture) ───────────
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = internet.ContextWithProxyProtocolTrust(ctx, x.proxyTrust)
+	ctx = context.WithValue(ctx, deviceFilterContextKey{}, x.deviceFilter)
 	ctx = singService.ContextWithDefaultRegistry(ctx)
 	singService.MustRegister[ntp.TimeService](ctx, timesync.Default())
 	xrayCreationMu.Lock()
@@ -308,6 +332,10 @@ func (x *Xray) CloseUserConnections(_ context.Context, _ string) error {
 	// No-op: handled by RemoveUsers at the xray core level.
 	return nil
 }
+
+// NeedsStableSpeedLimiter 表示 Xray 在连接建立时固定持有限速器对象，
+// 需要每个用户都有固定对象，限速调整才能作用到已有连接。
+func (x *Xray) NeedsStableSpeedLimiter() bool { return true }
 
 // SetSpeedLimitFunc wires xray's patched bandwidth feature to the shared
 // per-user limiter callback used by the service layer. Unlike the old no-op

@@ -145,3 +145,52 @@ func TestSpeedTracker_UpdateBuckets_LogCallbackMayCallLimitedUserCount(t *testin
 		t.Fatal("deadlock: UpdateBuckets did not finish (log callback vs RWMutex)")
 	}
 }
+
+// 同一用户始终使用同一个限速器对象：开始限速、调速、取消限速都原地修改，
+// 已持有该对象的连接立即生效。
+func TestSpeedTrackerStableLimiterFollowsPlanChanges(t *testing.T) {
+	l := New()
+	st := NewSpeedTracker(l)
+	l.UpdateUsers([]model.UserSpec{{ID: 1, UUID: "u1"}})
+	st.UpdateBuckets()
+
+	if st.GetLimiter("u1") != nil {
+		t.Fatal("不限速用户不应返回限速器")
+	}
+	stable := st.GetStableLimiter("u1")
+	if stable == nil || !stable.AllowN(time.Now(), 1<<20) {
+		t.Fatal("固定限速器在不限速时应放行")
+	}
+
+	l.UpdateUsers([]model.UserSpec{{ID: 1, UUID: "u1", SpeedLimit: 1}})
+	st.UpdateBuckets()
+	if st.GetStableLimiter("u1") != stable || st.GetLimiter("u1") != stable {
+		t.Fatal("开始限速后应沿用同一个限速器对象")
+	}
+	if got := float64(stable.Limit()); got != 125000 {
+		t.Fatalf("1 Mbps 应为 125000 字节每秒，实际 %v", got)
+	}
+	// 不限速期间积累的额度不能带入限速后的突发。
+	now := time.Now()
+	if !stable.AllowN(now, stable.Burst()) || stable.AllowN(now, 1024) {
+		t.Fatal("切换到限速后突发额度应被限制在新的上限内")
+	}
+	if st.LimitedUserCount() != 1 || !st.HasLimits() {
+		t.Fatal("限速用户计数错误")
+	}
+
+	l.UpdateUsers([]model.UserSpec{{ID: 1, UUID: "u1"}})
+	st.UpdateBuckets()
+	if st.GetStableLimiter("u1") != stable || st.GetLimiter("u1") != nil {
+		t.Fatal("取消限速后应保留同一对象并对外表现为不限速")
+	}
+	if !stable.AllowN(time.Now(), 1<<20) {
+		t.Fatal("取消限速后已有连接应立即放开")
+	}
+	if st.LimitedUserCount() != 0 || st.HasLimits() {
+		t.Fatal("取消限速后不应再计为限速用户")
+	}
+	if st.GetStableLimiter("unknown") != nil {
+		t.Fatal("未知用户不应返回限速器")
+	}
+}

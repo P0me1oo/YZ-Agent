@@ -300,3 +300,27 @@ func TestConnTrackerRateLimitHonorsContextCancellation(t *testing.T) {
 		t.Fatalf("second Write() = (%d, %v), want (0, context canceled)", n, err)
 	}
 }
+
+// 设备上限为 1 时，同一 IPv6 /64 网段轮换出的新地址属于已在线的设备，不应被拒绝。
+func TestConnTrackerIPv6SamePrefixUsesOneDeviceSlot(t *testing.T) {
+	tracker := NewConnTracker(0)
+	tracker.SetUserMap(map[string]int{"uuid-1": 1})
+	tracker.SetDeviceLimitFunc(func(string) (int, bool) { return 1, true })
+
+	first := tracker.RoutedConnection(context.Background(), &testConn{}, testInboundContext("uuid-1", "2400:cb00:1:2::10"), nil, nil)
+	rotated := &testConn{}
+	if tracker.RoutedConnection(context.Background(), rotated, testInboundContext("uuid-1", "2400:cb00:1:2::abcd"), nil, nil) == rotated || rotated.closed {
+		t.Fatal("同一网段的临时地址应视为同一设备")
+	}
+	other := &testConn{}
+	if tracker.RoutedConnection(context.Background(), other, testInboundContext("uuid-1", "2400:cb00:1:3::1"), nil, nil) != other || !other.closed {
+		t.Fatal("其他网段的地址仍应占用新名额")
+	}
+	// 面板快照里的网段地址与本机来源按同一口径比较。
+	tracker.UpdateGlobalDevices(map[int][]string{1: {"2400:cb00:9:9::"}})
+	us := tracker.users[1]
+	if tracker.checkDeviceGate(us, 1, "2400:cb00:9:9::77", 2) {
+		t.Fatal("其他节点已登记的网段应视为已在线设备")
+	}
+	_ = first.Close()
+}

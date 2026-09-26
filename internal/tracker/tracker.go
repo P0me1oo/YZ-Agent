@@ -3,6 +3,7 @@ package tracker
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
@@ -15,8 +16,8 @@ type snapshot struct {
 	aliveIPs  map[int]map[string]bool // userID → set of source IPs（含不计入设备数的来源）
 	online    map[int]int             // userID → distinct IP count（含不计入设备数的来源）
 	connCount int
-	inSpeed   int64
-	outSpeed  int64
+	inSpeed   int64 // 字节每秒
+	outSpeed  int64 // 字节每秒
 }
 
 // Tracker computes per-user traffic deltas from cumulative counters
@@ -57,6 +58,9 @@ type Tracker struct {
 	// live holds the current snapshot, swapped atomically.
 	// Readers load this pointer without any lock.
 	live atomic.Pointer[snapshot]
+
+	// lastProcess 是上次采样的时间，用实际间隔换算速度，与采样周期配置无关。
+	lastProcess time.Time
 }
 
 func New() *Tracker {
@@ -67,6 +71,7 @@ func New() *Tracker {
 		pendingRelay:      make(map[int][2]int64),
 		lastSeenRelayUser: make(map[int]map[int][2]int64),
 		pendingRelayUser:  make(map[int]map[int][2]int64),
+		lastProcess:       time.Now(),
 	}
 	// Publish initial empty snapshot.
 	t.live.Store(&snapshot{
@@ -118,6 +123,11 @@ func (t *Tracker) Process(
 		}
 	}
 
+	now := time.Now()
+	elapsed := now.Sub(t.lastProcess).Seconds()
+	t.lastProcess = now
+	inSpeed, outSpeed := perSecond(cycleIn, elapsed), perSecond(cycleOut, elapsed)
+
 	// Compute online from alive IPs.
 	online := make(map[int]int, len(kernelAliveIPs))
 	for uid, ips := range kernelAliveIPs {
@@ -130,8 +140,8 @@ func (t *Tracker) Process(
 		aliveIPs:  kernelAliveIPs, // kernel provides fresh copy each tick
 		online:    online,
 		connCount: connCount,
-		inSpeed:   cycleIn,
-		outSpeed:  cycleOut,
+		inSpeed:   inSpeed,
+		outSpeed:  outSpeed,
 	})
 }
 
@@ -164,9 +174,33 @@ func (t *Tracker) HasTraffic() bool {
 	return len(t.pendingTraffic) > 0
 }
 
+// PendingSnapshot 复制尚未刷出的累计流量，不清空缓冲，用于落盘保存。
+func (t *Tracker) PendingSnapshot() (traffic, relay map[int][2]int64, relayUser map[int]map[int][2]int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.pendingTraffic) > 0 {
+		traffic = copyTrafficMap(t.pendingTraffic)
+	}
+	if len(t.pendingRelay) > 0 {
+		relay = copyTrafficMap(t.pendingRelay)
+	}
+	if len(t.pendingRelayUser) > 0 {
+		relayUser = make(map[int]map[int][2]int64, len(t.pendingRelayUser))
+		for uid, nodes := range t.pendingRelayUser {
+			if len(nodes) > 0 {
+				relayUser[uid] = copyTrafficMap(nodes)
+			}
+		}
+		if len(relayUser) == 0 {
+			relayUser = nil
+		}
+	}
+	return traffic, relay, relayUser
+}
+
 // FlushAliveIPs 返回当前权威设备快照。每次都返回完整副本，包括空快照，
 // 让面板能够续期稳定在线设备并清理已经离线的用户。
-// 只包含占用设备名额的来源：公网且不在名单内，地址已规范化。
+// 保留完整公网来源，面板在原始地址上过滤名单后再合并 IPv6 网段。
 func (t *Tracker) FlushAliveIPs() map[int][]string {
 	s := t.live.Load()
 	devices := make(map[int][]string, len(s.aliveIPs))
@@ -174,7 +208,7 @@ func (t *Tracker) FlushAliveIPs() map[int][]string {
 		buf := make([]string, 0, len(ips))
 		seen := make(map[string]bool, len(ips))
 		for ip := range ips {
-			if key := deviceip.CountKey(ip); key != "" && !seen[key] {
+			if key := deviceip.PublicAddress(ip); key != "" && !seen[key] {
 				seen[key] = true
 				buf = append(buf, key)
 			}
@@ -219,13 +253,21 @@ func (t *Tracker) TotalConnections() int64 {
 // InboundSpeed returns the last observed inbound (download) speed in bytes/second.
 // Lock-free: reads from live snapshot.
 func (t *Tracker) InboundSpeed() int64 {
-	return t.live.Load().inSpeed / 10
+	return t.live.Load().inSpeed
 }
 
 // OutboundSpeed returns the last observed outbound (upload) speed in bytes/second.
 // Lock-free: reads from live snapshot.
 func (t *Tracker) OutboundSpeed() int64 {
-	return t.live.Load().outSpeed / 10
+	return t.live.Load().outSpeed
+}
+
+// perSecond 按两次采样的实际间隔把字节数换算为每秒速度。
+func perSecond(bytes int64, seconds float64) int64 {
+	if bytes <= 0 || seconds <= 0 {
+		return 0
+	}
+	return int64(float64(bytes) / seconds)
 }
 
 // copyTrafficMap creates a shallow copy of the traffic map.

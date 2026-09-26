@@ -615,11 +615,14 @@ func TestBuildRoutes_Default(t *testing.T) {
 	assertMapValue(t, route, "final", "direct")
 
 	rules := route["rules"].([]M)
-	if len(rules) < 2 {
-		t.Fatalf("expected at least 2 default rules, got %d", len(rules))
+	if len(rules) < 5 {
+		t.Fatalf("expected at least 5 default rules, got %d", len(rules))
 	}
 	assertMapValue(t, rules[0], "outbound", "block")
 	assertMapValue(t, rules[1], "outbound", "block")
+	assertMapValue(t, rules[2], "action", "resolve")
+	assertMapValue(t, rules[3], "outbound", "block")
+	assertMapValue(t, rules[4], "outbound", "block")
 }
 
 func TestBuildRoutes_WithCustomRules(t *testing.T) {
@@ -631,17 +634,17 @@ func TestBuildRoutes_WithCustomRules(t *testing.T) {
 	route := buildRoutes(testRouteRules(rules), nil, nil)
 	allRules := route["rules"].([]M)
 
-	if len(allRules) != 5 {
-		t.Fatalf("rules count: got %d, want 5", len(allRules))
+	if len(allRules) != 8 {
+		t.Fatalf("rules count: got %d, want 8", len(allRules))
 	}
 
-	assertMapValue(t, allRules[2], "outbound", "block")
-	if _, ok := allRules[2]["domain_suffix"]; !ok {
+	assertMapValue(t, allRules[5], "outbound", "block")
+	if _, ok := allRules[5]["domain_suffix"]; !ok {
 		t.Error("domain rule should use domain_suffix")
 	}
 
-	assertMapValue(t, allRules[3], "outbound", "block")
-	if _, ok := allRules[3]["ip_cidr"]; !ok {
+	assertMapValue(t, allRules[6], "outbound", "block")
+	if _, ok := allRules[6]["ip_cidr"]; !ok {
 		t.Error("IP rule should use ip_cidr")
 	}
 }
@@ -656,31 +659,31 @@ func TestBuildRoutes_MultiMatch(t *testing.T) {
 	route := buildRoutes(testRouteRules(rules), nil, nil)
 	allRules := route["rules"].([]M)
 
-	// 2 default private-IP rules + 1 domain rule + 1 CIDR rule + 1 domain rule = 5
-	if len(allRules) != 5 {
-		t.Fatalf("rules count: got %d, want 5", len(allRules))
+	// 字面 IP 先拦截，本地直连解析后再拦截，然后应用面板规则。
+	if len(allRules) != 8 {
+		t.Fatalf("rules count: got %d, want 8", len(allRules))
 	}
 
-	// Rule #2 (index 2): domains from first route (wildcards stripped)
-	domains := allRules[2]["domain_suffix"].([]string)
+	// 第一条面板规则：域名。
+	domains := allRules[5]["domain_suffix"].([]string)
 	if len(domains) != 2 || domains[0] != "evil.com" || domains[1] != "bad.org" {
 		t.Errorf("domain_suffix: got %v, want [evil.com bad.org]", domains)
 	}
-	assertMapValue(t, allRules[2], "outbound", "block")
+	assertMapValue(t, allRules[5], "outbound", "block")
 
-	// Rule #3 (index 3): CIDRs from first route
-	cidrs := allRules[3]["ip_cidr"].([]string)
+	// 第二条面板规则：网段。
+	cidrs := allRules[6]["ip_cidr"].([]string)
 	if len(cidrs) != 1 || cidrs[0] != "192.168.1.0/24" {
 		t.Errorf("ip_cidr: got %v, want [192.168.1.0/24]", cidrs)
 	}
-	assertMapValue(t, allRules[3], "outbound", "block")
+	assertMapValue(t, allRules[6], "outbound", "block")
 
-	// Rule #4 (index 4): direct rule (wildcard stripped)
-	directDomains := allRules[4]["domain_suffix"].([]string)
+	// 第三条面板规则：直连域名。
+	directDomains := allRules[7]["domain_suffix"].([]string)
 	if len(directDomains) != 1 || directDomains[0] != "bypass.com" {
 		t.Errorf("direct domain_suffix: got %v, want [bypass.com]", directDomains)
 	}
-	assertMapValue(t, allRules[4], "outbound", "direct")
+	assertMapValue(t, allRules[7], "outbound", "direct")
 }
 
 func TestBuildRoutes_WithCustomRouteRules(t *testing.T) {
@@ -701,8 +704,8 @@ func TestBuildRoutes_WithCustomRouteRules(t *testing.T) {
 	}
 	route := buildRoutes(nil, customRules, nil)
 	allRules := route["rules"].([]M)
-	if len(allRules) != 9 {
-		t.Fatalf("rules count: got %d, want 9", len(allRules))
+	if len(allRules) != 13 {
+		t.Fatalf("rules count: got %d, want 13", len(allRules))
 	}
 	if allRules[0]["domain"].([]string)[0] != "full.example.com" {
 		t.Fatalf("unexpected exact domain rule: %v", allRules[0])

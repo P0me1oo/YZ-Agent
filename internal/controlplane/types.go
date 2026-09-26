@@ -98,6 +98,11 @@ type Sink interface {
 	SupportsDeviceReports() bool
 }
 
+// ContextReporter 允许退出上报用同一个截止时间限制 HTTP 请求。
+type ContextReporter interface {
+	ReportContext(ctx context.Context, payload ReportPayload) error
+}
+
 type ControlPlane interface {
 	Source
 	Sink

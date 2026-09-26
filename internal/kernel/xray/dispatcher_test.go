@@ -485,3 +485,26 @@ func TestLimitDispatcherExcludedSourceDoesNotUseDeviceSlot(t *testing.T) {
 		t.Fatalf("连接全部关闭后不应残留登记: %v", ips)
 	}
 }
+
+// 设备上限为 1 时，同一 IPv6 /64 网段轮换出的新地址属于已在线的设备。
+func TestLimitDispatcherIPv6SamePrefixUsesOneDeviceSlot(t *testing.T) {
+	ld := newTestDispatcher()
+	email := userEmail(1)
+	ld.UpdateLimits(map[string]int{email: 1}, map[string]int{email: 1}, nil)
+
+	if ld.checkDeviceLimit(email, "2400:cb00:1:2::10", true) {
+		t.Fatal("首个来源应放行")
+	}
+	if ld.checkDeviceLimit(email, "2400:cb00:1:2::abcd", true) {
+		t.Fatal("同一网段的临时地址应视为同一设备")
+	}
+	if !ld.checkDeviceLimit(email, "2400:cb00:1:3::1", true) {
+		t.Fatal("其他网段的地址仍应占用新名额")
+	}
+	ld.UpdateGlobalDevices(map[int][]string{1: {"2400:cb00:9:9::"}}, time.Now())
+	ld.delConn(email, "2400:cb00:1:2::10")
+	ld.delConn(email, "2400:cb00:1:2::abcd")
+	if ld.checkDeviceLimit(email, "2400:cb00:9:9::77", true) {
+		t.Fatal("其他节点已登记的网段应视为已在线设备")
+	}
+}

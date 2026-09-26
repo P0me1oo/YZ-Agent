@@ -108,6 +108,7 @@ func TestTrackStoppedKernelCollectsFinalTrafficWithoutRestart(t *testing.T) {
 }
 
 func TestShutdownKeepsFailedBatchAndPendingTraffic(t *testing.T) {
+	useFastFinalRetries(t)
 	s, cp := newShutdownReportService()
 	recordShutdownTraffic(s, 100)
 	failed := s.takeReportBatch()
@@ -115,7 +116,7 @@ func TestShutdownKeepsFailedBatchAndPendingTraffic(t *testing.T) {
 	recordShutdownTraffic(s, 200)
 	cp.onSend = func(controlplane.ReportPayload) error { return errors.New("测试网络故障") }
 	s.pushReportSync()
-	if len(cp.snapshot()) != 1 || s.retryReport != failed {
+	if len(cp.snapshot()) != 1+len(finalReportRetryDelays) || s.retryReport != failed {
 		t.Fatal("失败的关闭重试未保留原批次")
 	}
 	if s.tracker.FlushTraffic()[1] != [2]int64{100, 100} || s.tracker.FlushRelayTraffic()[2] != [2]int64{100, 100} || s.tracker.FlushRelayUserTraffic()[1][2] != [2]int64{100, 100} {
@@ -185,5 +186,34 @@ func TestShutdownWaitsForInFlightReport(t *testing.T) {
 				t.Fatal("在途报告期间产生的流量未单独发送")
 			}
 		})
+	}
+}
+
+func TestShutdownBudgetIncludesInFlightReport(t *testing.T) {
+	oldBudget := finalReportBudget
+	finalReportBudget = 40 * time.Millisecond
+	t.Cleanup(func() { finalReportBudget = oldBudget })
+	s, cp := newShutdownReportService()
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	cp.onSend = func(controlplane.ReportPayload) error {
+		close(started)
+		<-release
+		return nil
+	}
+	recordShutdownTraffic(s, 100)
+	s.pushReportAsync()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("在途报告没有开始")
+	}
+	begin := time.Now()
+	s.pushReportSync()
+	if elapsed := time.Since(begin); elapsed > 300*time.Millisecond {
+		t.Fatalf("等待在途报告超过退出预算: %s", elapsed)
+	}
+	if len(cp.snapshot()) != 1 {
+		t.Fatal("到期后不应并行发送新的报告")
 	}
 }

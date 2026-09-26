@@ -301,4 +301,4 @@ replace github.com/sagernet/sing-shadowsocks => ./compat/sing-shadowsocks
 
 // 上游 v26.9.9 没有对应的 Go module Tag；保留兼容的 require 版本，
 // 并将实际依赖固定到 YZ fork 的发布提交，避免解析到移动分支。
-replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20260922231406-f242ad693152
+replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20260926140203-434e1c025c93

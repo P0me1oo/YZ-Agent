@@ -20,7 +20,6 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
-	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel/singbox"
@@ -94,10 +93,12 @@ type Service struct {
 
 	// reportMu 保护失败的报告批次。HTTP 请求可能已到达面板后才断开连接；
 	// 保留完整批次和 report ID，可让面板丢弃重试而不丢失请求期间产生的新流量。
-	reportMu     sync.Mutex
-	retryReport  *reportBatch
-	reportBoot   string
-	reportSeq    atomic.Uint64
+	reportMu    sync.Mutex
+	retryReport *reportBatch
+	reportBoot  string
+	reportSeq   atomic.Uint64
+	// pendingStore 把待确认的报告写入磁盘，进程重启后继续上报；独立运行时为 nil。
+	pendingStore *pendingReportStore
 	status       func(RuntimeStatus)
 	timeConsumer string
 	// certRenewed 默认读取证书管理器；测试可替换以验证轮询失败语义。
@@ -125,6 +126,8 @@ type pullResult struct {
 type reportBatch struct {
 	id      string
 	payload controlplane.ReportPayload
+	// restored 表示批次来自上次运行保存的文件，发送前需要换成当前的状态数据。
+	restored bool
 }
 
 // apiBackoff implements simple exponential backoff for API failures.
@@ -218,6 +221,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 		pullResults:  make(chan pullResult, 1),
 		reportBoot:   newReportBootID(),
 		timeConsumer: fmt.Sprintf("%s/node/%d", cfg.InstanceID, cfg.Panel.NodeID),
+		pendingStore: newPendingReportStore(cfg),
 	}
 }
 
@@ -244,6 +248,9 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	// 证书与节点配置一起应用，失败时保留控制通道接收修正。
 	defer s.cert.Stop()
 	defer s.stopKernel()
+
+	// 先恢复上次未确认的流量，再开始新的采集和上报。
+	s.restorePendingReports()
 
 	// Handshake: get WS config + initial data in one call
 	if err := s.initialSetup(ctx); err != nil {
@@ -324,7 +331,12 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 
 func (s *Service) initialSetup(ctx context.Context) error {
 	// Register speed limit lookup with kernel unconditionally (before push/poll branch).
-	s.kernel.SetSpeedLimitFunc(s.speedTracker.GetLimiter)
+	// 连接建立时固定持有限速器的内核需要每个用户都有固定对象，限速调整才能作用到已有连接。
+	if stable, ok := s.kernel.(kernel.StableSpeedLimiterConsumer); ok && stable.NeedsStableSpeedLimiter() {
+		s.kernel.SetSpeedLimitFunc(s.speedTracker.GetStableLimiter)
+	} else {
+		s.kernel.SetSpeedLimitFunc(s.speedTracker.GetLimiter)
+	}
 	s.kernel.SetDeviceLimitFunc(s.limiter.GetDeviceLimitByUUID)
 	s.kernel.SetConnLimiter(s.limiter)
 
@@ -370,7 +382,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	s.metricsMu.Lock()
 	s.lastConfig = bootstrap.Config
 	s.metricsMu.Unlock()
-	applyDeviceIPExclude(bootstrap.Config)
+	s.applyDeviceIPExclude(bootstrap.Config)
 	s.lastConfigHash = computeConfigHash(bootstrap.Config)
 	s.updateUserState(bootstrap.Users)
 
@@ -608,7 +620,7 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		if event.Config == nil {
 			return
 		}
-		applyDeviceIPExclude(event.Config)
+		s.applyDeviceIPExclude(event.Config)
 		newConfigHash := computeConfigHash(event.Config)
 		if newConfigHash == s.lastConfigHash {
 			return
@@ -691,7 +703,7 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 		result := pullResult{certChanged: takeCertRenewal()}
 		if snapshot.Config != nil {
 			// 名单不参与配置哈希；配置未变时 result.config 会被丢弃，所以在这里先应用。
-			applyDeviceIPExclude(snapshot.Config)
+			s.applyDeviceIPExclude(snapshot.Config)
 			result.config = snapshot.Config
 			result.configHash = computeConfigHash(snapshot.Config)
 			if result.configHash == currentConfigHash && !result.certChanged {
@@ -767,6 +779,10 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 
 	s.limiter.UpdateUsers(users)
 	s.speedTracker.UpdateBuckets()
+	// 已建立的连接立即按新的套餐限速执行。
+	if refresher, ok := s.kernel.(kernel.SpeedLimitRefresher); ok {
+		refresher.RefreshSpeedLimits()
+	}
 
 	s.metricsMu.Lock()
 	s.lastUsers = append([]model.UserSpec{}, users...)
@@ -1096,6 +1112,8 @@ func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int,
 	}
 	s.tracker.Process(traffic, aliveIPs, connCount)
 	s.trackRelayTraffic(ctx)
+	// 每次采样都保存；面板不可用、退避或请求仍在途时也不能只留在内存里。
+	_ = s.persistPending()
 	return connCount, len(traffic), nil
 }
 
@@ -1125,7 +1143,7 @@ func (s *Service) pushReportAsync() {
 	go func() {
 		defer s.pushWG.Done()
 		defer s.pushActive.Store(false)
-		if err := s.sink.Report(batch.payload); err != nil {
+		if err := s.sendReport(batch); err != nil {
 			nlog.Core().Warn("failed to push report", "error", err)
 			s.rememberFailedReport(batch)
 			s.pushBackoff.onFailure()
@@ -1137,18 +1155,39 @@ func (s *Service) pushReportAsync() {
 	}()
 }
 
+// finalReportBudget 是退出时最后上报的总时限，需小于服务管理器 150 秒的停止等待。
+// 时限内仍未成功的数据已经写入磁盘，下次启动继续上报。
+var finalReportBudget = 90 * time.Second
+
+// finalReportRetryDelays 是最后上报失败后的等待间隔，用于跨过面板短暂重启等情况。
+var finalReportRetryDelays = []time.Duration{2 * time.Second, 5 * time.Second}
+
 // pushReportSync 等待在途报告并补采停止后的累计计数，先重试旧批次再刷出最后增量。
 func (s *Service) pushReportSync() {
 	if !s.sink.SupportsReporting() {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), finalReportBudget)
+	defer cancel()
+	// 退出期限从等待在途请求开始，不能等完请求后重新计时。
+	defer s.persistPending()
 	s.pushMu.Lock()
 	s.pushClosing = true
 	s.pushMu.Unlock()
-	s.pushWG.Wait()
+	finished := make(chan struct{})
+	go func() {
+		s.pushWG.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		nlog.Core().Warn("in-flight report exceeded shutdown budget; pending traffic saved")
+		return
+	}
 
 	// 不调用 trackAndEnforce，避免退出采样把已经停止的内核重新启动。
-	if _, _, err := s.collectTraffic(context.Background()); err != nil {
+	if _, _, err := s.collectTraffic(ctx); err != nil {
 		nlog.Core().Warn("failed to collect final traffic", "error", err)
 	}
 
@@ -1160,38 +1199,69 @@ func (s *Service) pushReportSync() {
 		batchCount++
 	}
 	for range batchCount {
-		batch := s.takeReportBatch()
-		if err := s.sink.Report(batch.payload); err != nil {
-			nlog.Core().Warn("failed to push final report", "error", err)
-			s.rememberFailedReport(batch)
+		if ctx.Err() != nil {
 			return
 		}
-		s.forgetCompletedReport(batch)
+		batch := s.takeReportBatch()
+		if !s.pushFinalBatch(ctx, batch) {
+			return
+		}
+	}
+}
+
+// pushFinalBatch 在总时限内重试同一批次；返回 false 表示放弃，批次保留在磁盘上。
+func (s *Service) pushFinalBatch(ctx context.Context, batch *reportBatch) bool {
+	for attempt := 0; ; attempt++ {
+		if ctx.Err() != nil {
+			return false
+		}
+		err := s.sendReportContext(ctx, batch)
+		if err == nil {
+			s.forgetCompletedReport(batch)
+			return true
+		}
+		s.rememberFailedReport(batch)
+		deadline, _ := ctx.Deadline()
+		if attempt >= len(finalReportRetryDelays) || time.Now().Add(finalReportRetryDelays[attempt]).After(deadline) {
+			nlog.Core().Warn("failed to push final report, pending traffic saved for next start", "error", err, "report_id", batch.id)
+			return false
+		}
+		nlog.Core().Warn("failed to push final report, retrying", "error", err, "attempt", attempt+1)
+		timer := time.NewTimer(finalReportRetryDelays[attempt])
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		}
 	}
 }
 
 // takeReportBatch 优先返回失败批次。新产生的数据留在 tracker 中，直到旧批次成功，
 // 因而重试不会在同一 ID 下混入已经接受过的新流量。
+// 新批次在发出前先连同编号写入磁盘：即使发送成功后进程立即退出，重启后
+// 原样重发的批次也会被面板按编号去重。
 func (s *Service) takeReportBatch() *reportBatch {
 	s.reportMu.Lock()
+	defer s.reportMu.Unlock()
 	if s.retryReport != nil {
 		batch := s.retryReport
-		s.reportMu.Unlock()
+		if batch.restored {
+			// 上次运行保存的批次只含流量，状态和指标换成当前值；设备与在线人数不重发旧快照。
+			s.fillReportStatus(&batch.payload)
+			batch.restored = false
+		}
 		return batch
 	}
-	s.reportMu.Unlock()
 
 	traffic := cloneTraffic(s.tracker.FlushTraffic())
 	relayTraffic := cloneTraffic(s.tracker.FlushRelayTraffic())
 	relayUserTraffic := cloneRelayUserTraffic(s.tracker.FlushRelayUserTraffic())
 	aliveIPs := cloneAliveIPs(s.tracker.FlushAliveIPs())
-	status := monitor.Collect()
-	metrics := s.buildMetrics(status)
-	metrics["kernel_status"] = s.kernel.IsRunning()
 	limitEvents := s.collectLimitEvents()
-	reportID := s.nextReportID()
+	reportID := s.nextReportIDLocked()
 
-	return &reportBatch{
+	batch := &reportBatch{
 		id: reportID,
 		payload: controlplane.ReportPayload{
 			ReportID:         reportID,
@@ -1200,14 +1270,112 @@ func (s *Service) takeReportBatch() *reportBatch {
 			RelayUserTraffic: relayUserTraffic,
 			Alive:            aliveIPs,
 			Online:           s.tracker.CurrentOnline(),
-			CPU:              status.CPU,
-			Mem:              [2]uint64{status.MemTotal, status.MemUsed},
-			Swap:             [2]uint64{status.SwapTotal, status.SwapUsed},
-			Disk:             [2]uint64{status.DiskTotal, status.DiskUsed},
-			Metrics:          metrics,
 			LimitEvents:      limitEvents,
 		},
 	}
+	s.fillReportStatus(&batch.payload)
+	// 在发出请求前登记批次，期间的采样保存必须包含这个未确认批次。
+	s.retryReport = batch
+	_ = s.persistBatchLocked(batch)
+	return batch
+}
+
+func (s *Service) fillReportStatus(payload *controlplane.ReportPayload) {
+	status := monitor.Collect()
+	metrics := s.buildMetrics(status)
+	metrics["kernel_status"] = s.kernel.IsRunning()
+	payload.CPU = status.CPU
+	payload.Mem = [2]uint64{status.MemTotal, status.MemUsed}
+	payload.Swap = [2]uint64{status.SwapTotal, status.SwapUsed}
+	payload.Disk = [2]uint64{status.DiskTotal, status.DiskUsed}
+	payload.Metrics = metrics
+}
+
+// restorePendingReports 读取上次运行保存的数据：未确认批次作为待重试批次原样重发，
+// 尚未组成批次的流量并入本次累计。
+func (s *Service) restorePendingReports() {
+	if s.pendingStore == nil {
+		return
+	}
+	batch, pending, err := s.pendingStore.load()
+	if err != nil {
+		nlog.Core().Error("failed to restore pending traffic", "error", err)
+		return
+	}
+	if batch != nil {
+		s.reportMu.Lock()
+		s.retryReport = &reportBatch{
+			id: batch.ID,
+			payload: controlplane.ReportPayload{
+				ReportID:         batch.ID,
+				Traffic:          batch.Traffic,
+				RelayTraffic:     batch.Relay,
+				RelayUserTraffic: batch.RelayUser,
+			},
+			restored: true,
+		}
+		s.reportMu.Unlock()
+	}
+	if len(pending.Traffic) > 0 {
+		s.tracker.RestoreTraffic(pending.Traffic)
+	}
+	if len(pending.Relay) > 0 {
+		s.tracker.RestoreRelayTraffic(pending.Relay)
+	}
+	if len(pending.RelayUser) > 0 {
+		s.tracker.RestoreRelayUserTraffic(pending.RelayUser)
+	}
+	if batch != nil || !pending.empty() {
+		users := len(pending.Traffic)
+		if batch != nil {
+			users += len(batch.Traffic)
+		}
+		nlog.Core().Info("restored pending traffic from previous run", "has_batch", batch != nil, "user_entries", users)
+	}
+}
+
+// persistPending 保存当前待重试批次和尚未刷出的流量。
+func (s *Service) persistPending() error {
+	s.reportMu.Lock()
+	defer s.reportMu.Unlock()
+	return s.persistBatchLocked(s.retryReport)
+}
+
+// persistBatch 保存指定批次和尚未刷出的流量；batch 为 nil 表示没有待确认批次。
+// 调用方持有 reportMu，批次变更、快照和落盘不能交错，否则旧快照会覆盖新状态。
+func (s *Service) persistBatchLocked(batch *reportBatch) error {
+	if s.pendingStore == nil {
+		return nil
+	}
+	var saved *pendingBatch
+	if batch != nil {
+		saved = &pendingBatch{ID: batch.id, pendingTraffic: pendingTraffic{
+			Traffic:   batch.payload.Traffic,
+			Relay:     batch.payload.RelayTraffic,
+			RelayUser: batch.payload.RelayUserTraffic,
+		}}
+	}
+	traffic, relay, relayUser := s.tracker.PendingSnapshot()
+	if err := s.pendingStore.save(saved, pendingTraffic{Traffic: traffic, Relay: relay, RelayUser: relayUser}); err != nil {
+		nlog.Core().Warn("failed to save pending traffic", "error", err)
+		return err
+	}
+	return nil
+}
+
+// 落盘失败时保留原编号并暂停发送，避免面板收到后重启却用新编号再报一次。
+func (s *Service) sendReport(batch *reportBatch) error {
+	return s.sendReportContext(context.Background(), batch)
+}
+
+func (s *Service) sendReportContext(ctx context.Context, batch *reportBatch) error {
+	if err := s.persistPending(); err != nil {
+		return fmt.Errorf("save report before sending: %w", err)
+	}
+	if reporter, ok := s.sink.(controlplane.ContextReporter); ok {
+		return reporter.ReportContext(ctx, batch.payload)
+	}
+	return s.sink.Report(batch.payload)
 }
 
 // collectLimitEvents 取出本周期的连接超限统计并转成上报格式。
@@ -1284,9 +1452,7 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 	s.tracker.ProcessRelayUser(relayUser)
 }
 
-func (s *Service) nextReportID() string {
-	s.reportMu.Lock()
-	defer s.reportMu.Unlock()
+func (s *Service) nextReportIDLocked() string {
 	seq := s.reportSeq.Add(1)
 	if s.reportBoot == "" {
 		s.reportBoot = newReportBootID()
@@ -1296,16 +1462,22 @@ func (s *Service) nextReportID() string {
 
 func (s *Service) rememberFailedReport(batch *reportBatch) {
 	s.reportMu.Lock()
+	defer s.reportMu.Unlock()
 	s.retryReport = batch
-	s.reportMu.Unlock()
+	// 顺带更新磁盘上的累计流量，缩小进程被强制结束时的损失。
+	_ = s.persistBatchLocked(batch)
 }
 
 func (s *Service) forgetCompletedReport(batch *reportBatch) {
 	s.reportMu.Lock()
+	defer s.reportMu.Unlock()
 	if s.retryReport == batch {
+		// 删除磁盘批次失败时继续保留同一编号，不能用新批次覆盖旧的确认状态。
+		if err := s.persistBatchLocked(nil); err != nil {
+			return
+		}
 		s.retryReport = nil
 	}
-	s.reportMu.Unlock()
 }
 
 func cloneTraffic(src map[int][2]int64) map[int][2]int64 {
@@ -1422,9 +1594,16 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	return m
 }
 
-// applyDeviceIPExclude 更新不计入设备数的来源名单，只影响后续计数和上报，不重载内核。
-func applyDeviceIPExclude(cfg *model.NodeSpec) {
-	invalid, changed := deviceip.SetExcluded(cfg.DeviceIPExclude)
+// applyDeviceIPExclude 更新当前实例的前置服务器名单，不影响同进程其他节点。
+// 名单内的来源不计入设备数；它们在连接开头附带的真实用户地址会被 Xray 内核采用。
+func (s *Service) applyDeviceIPExclude(cfg *model.NodeSpec) {
+	setter, ok := s.kernel.(interface {
+		SetDeviceIPExclude([]string) ([]string, bool)
+	})
+	if !ok {
+		return
+	}
+	invalid, changed := setter.SetDeviceIPExclude(cfg.DeviceIPExclude)
 	if len(invalid) > 0 {
 		nlog.Core().Warn("device ip exclude list has invalid entries, skipped", "entries", invalid)
 	}

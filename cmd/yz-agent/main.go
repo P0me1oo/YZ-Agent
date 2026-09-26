@@ -19,6 +19,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/buildinfo"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
+	"github.com/P0me1oo/YZ-Agent/internal/logrotate"
 	"github.com/P0me1oo/YZ-Agent/internal/machine"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/service"
@@ -26,7 +27,7 @@ import (
 )
 
 var (
-	version       = "v1.20.0"
+	version       = "v1.21.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -76,15 +77,25 @@ func main() {
 		os.Exit(1)
 	}
 	config.InitLogger(instances[0].Log)
+	// 输出写入普通文件时（OpenRC 日志或配置指定的日志文件）按大小轮转，避免占满磁盘。
+	rotator := logrotate.Start(context.Background(), logRotationPaths(instances[0].Log.Output)...)
 
 	// Apply runtime memory tuning before anything else allocates.
 	applyRuntimeConfig(instances[0].Runtime)
 
-	runWithReload(rootCfg, *configPath)
+	runWithReload(rootCfg, *configPath, rotator)
+}
+
+func logRotationPaths(output string) []string {
+	files := logrotate.StdoutFiles()
+	if output != "" && output != "stdout" && output != "stderr" {
+		files = append(files, output)
+	}
+	return files
 }
 
 // runWithReload restarts all node services when the config file changes.
-func runWithReload(initialRoot *config.RootConfig, configPath string) {
+func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *logrotate.Rotator) {
 	var healthSrv *http.Server
 	var healthPort int
 	health := newHealthTracker()
@@ -290,6 +301,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string) {
 			os.Exit(1)
 		}
 		config.InitLogger(newInstances[0].Log)
+		rotator.Update(logRotationPaths(newInstances[0].Log.Output)...)
 		applyRuntimeConfig(newInstances[0].Runtime)
 		root = newRoot
 		nlog.Core().Info("reload complete, services restarting with new config")

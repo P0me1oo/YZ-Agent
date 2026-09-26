@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -35,10 +36,10 @@ var (
 	defaultNode string
 	nodeLoggers = make(map[string]*NodeLog)
 
-	logMu      sync.RWMutex
-	logWriter  io.Writer = os.Stdout
-	logMin     = slog.LevelInfo
-	logColor   = true
+	logMu     sync.RWMutex
+	logWriter io.Writer = os.Stdout
+	logMin              = slog.LevelInfo
+	logColor            = true
 )
 
 // Init configures process-wide log output (called from config.InitLogger).
@@ -50,9 +51,41 @@ func Init(w io.Writer, minLevel slog.Level, color bool) {
 	}
 	logMu.Lock()
 	defer logMu.Unlock()
+	if old, ok := logWriter.(*os.File); ok && old != os.Stdout && old != os.Stderr && old != w {
+		_ = old.Close()
+	}
 	logWriter = w
 	logMin = minLevel
 	logColor = color
+}
+
+// RotateFile 在阻止日志写入期间关闭旧文件，并由调用方移动旧文件、打开新文件。
+// 返回 false 表示当前日志输出不使用该路径。
+func RotateFile(path string, rotate func() (*os.File, error)) (bool, error) {
+	logMu.Lock()
+	defer logMu.Unlock()
+	old, ok := logWriter.(*os.File)
+	if !ok || old == os.Stdout || old == os.Stderr {
+		return false, nil
+	}
+	current, err := filepath.Abs(old.Name())
+	if err != nil || current != path {
+		return false, nil
+	}
+	_ = old.Close()
+	next, err := rotate()
+	if err != nil {
+		// 轮转失败时恢复输出；原文件已经被移动时创建新文件继续记录。
+		next, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if next == nil {
+			logWriter = os.Stderr
+		} else {
+			logWriter = next
+		}
+		return true, err
+	}
+	logWriter = next
+	return true, nil
 }
 
 // formatMsg appends alternating key-value pairs like slog: ("k", v, "k2", v2).
@@ -169,10 +202,10 @@ func (nl *NodeLog) Error(msg string, args ...any) {
 // Format: HH:MM:SS.mmm LEVEL [prefix] message [key=value ...]
 func logWithColor(level slog.Level, prefix, msg string, args ...any) {
 	logMu.RLock()
+	defer logMu.RUnlock()
 	out := logWriter
 	min := logMin
 	color := logColor
-	logMu.RUnlock()
 
 	if level < min {
 		return

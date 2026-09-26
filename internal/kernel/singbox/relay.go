@@ -195,6 +195,11 @@ var _ kernel.RelayTrafficReader = (*SingBox)(nil)
 var _ kernel.RelayUserTrafficReader = (*SingBox)(nil)
 
 func (t *ConnTracker) setNodeUsers(nc *model.NodeSpec, users []model.UserSpec) {
+	t.replaceNodeUsers(nc, users)
+	t.RefreshSpeedLimits()
+}
+
+func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpec) {
 	identities := make(map[string]relayIdentity)
 	userMap := buildUserMap(users)
 	nodes := make(map[string]int)

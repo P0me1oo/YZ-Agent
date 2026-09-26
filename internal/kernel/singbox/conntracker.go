@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -39,6 +40,9 @@ type userStats struct {
 	mu          sync.RWMutex   // RWMutex for concurrent reads
 	ips         map[string]int // sourceIP → refcount (number of active conns from that IP)
 	connCount   int            // total active connections
+	// rate 是该用户当前的共享限速器，nil 表示不限速。连接每次收发都读取它，
+	// 面板调整或取消限速后，已建立的连接立即按新设置执行。
+	rate atomic.Pointer[rate.Limiter]
 }
 
 // addConn registers a new connection from sourceIP.
@@ -132,14 +136,15 @@ func (u *userStats) aliveIPList() map[string]bool {
 //   - Close callback to decrement IP refcounts
 //   - Per-connection rate limit token accumulation (amortized WaitN)
 type ConnTracker struct {
-	traffic    *trafficTotals
-	usersMu    sync.RWMutex
-	users      map[int]*userStats  // userID → stats
-	uuidMap    map[string]int      // UUID → userID (for lookup in RoutedConnection)
-	connMap    map[string]net.Conn // connID → conn (only for force-close support)
-	identities map[string]relayIdentity
-	relayNodes map[string]int
-	relayEntry bool
+	deviceFilter *deviceip.Filter
+	traffic      *trafficTotals
+	usersMu      sync.RWMutex
+	users        map[int]*userStats  // userID → stats
+	uuidMap      map[string]int      // UUID → userID (for lookup in RoutedConnection)
+	connMap      map[string]net.Conn // connID → conn (only for force-close support)
+	identities   map[string]relayIdentity
+	relayNodes   map[string]int
+	relayEntry   bool
 
 	idCounter atomic.Int64
 
@@ -163,6 +168,7 @@ const globalDeviceStateTTL = 2 * time.Minute
 // NewConnTracker creates a tracker.
 func NewConnTracker(_ int) *ConnTracker {
 	return &ConnTracker{
+		deviceFilter:  deviceip.DefaultFilter(),
 		traffic:       newTrafficTotals(),
 		users:         make(map[int]*userStats),
 		uuidMap:       make(map[string]int),
@@ -174,6 +180,29 @@ func NewConnTracker(_ int) *ConnTracker {
 // SetSpeedLimitFunc configures the per-user speed limit lookup.
 func (t *ConnTracker) SetSpeedLimitFunc(fn func(uuid string) *rate.Limiter) {
 	t.speedLimitFunc.Store(&fn)
+	t.RefreshSpeedLimits()
+}
+
+// RefreshSpeedLimits 按当前套餐重新取得每个用户的限速器，已建立的连接随即生效。
+func (t *ConnTracker) RefreshSpeedLimits() {
+	fn := t.speedLimitFunc.Load()
+	t.usersMu.RLock()
+	defer t.usersMu.RUnlock()
+	for name, uid := range t.uuidMap {
+		us := t.users[uid]
+		if us == nil {
+			continue
+		}
+		if fn == nil {
+			us.rate.Store(nil)
+			continue
+		}
+		uuid := name
+		if identity, ok := t.identities[name]; ok {
+			uuid = identity.UUID
+		}
+		us.rate.Store((*fn)(uuid))
+	}
 }
 
 // SetDeviceLimitFunc configures the per-user device limit lookup for gate-keeping.
@@ -202,6 +231,7 @@ func (t *ConnTracker) SetUserMap(m map[string]int) {
 		}
 	}
 	t.usersMu.Unlock()
+	t.RefreshSpeedLimits()
 }
 
 // UpdateGlobalDevices syncs global device state from panel.
@@ -425,23 +455,23 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 // Strategy: merge local + global state when fresh; local-only when stale.
 // 本地登记包含所有来源；非公网或名单内的来源不占名额，按当前名单现场筛选。
 func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string, limit int) bool {
-	if us == nil || limit <= 0 || !deviceip.Counts(sourceIP) {
+	newKey := t.deviceFilter.CountKey(sourceIP)
+	if us == nil || limit <= 0 || newKey == "" {
 		return false
 	}
 
 	us.mu.RLock()
-	known := us.ips[sourceIP] > 0
 	localIPs := make(map[string]bool, len(us.ips))
 	for ip := range us.ips {
-		if key := deviceip.CountKey(ip); key != "" {
+		if key := t.deviceFilter.CountKey(ip); key != "" {
 			localIPs[key] = true
 		}
 	}
 	us.mu.RUnlock()
 	localCount := len(localIPs)
 
-	// Already known locally
-	if known {
+	// 本机已有同一来源（IPv6 为同一网段）的连接，属于已在线的设备。
+	if localIPs[newKey] {
 		return false
 	}
 
@@ -463,7 +493,7 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 	}
 
 	// Known globally (from other node)
-	if globalIPs[sourceIP] {
+	if globalIPs[newKey] {
 		return false
 	}
 
@@ -473,8 +503,8 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 		allIPs[ip] = true
 	}
 	for ip := range globalIPs {
-		if deviceip.Counts(ip) {
-			allIPs[ip] = true
+		if key := deviceip.Normalize(ip); key != "" {
+			allIPs[key] = true
 		}
 	}
 
@@ -680,9 +710,57 @@ type trackedConn struct {
 	relay    relayCounters
 }
 
+// waitRate 按限速器等待 n 字节的额度；lim 为 nil 时不限速。
+func waitRate(ctx context.Context, lim *rate.Limiter, n int) error {
+	// UDP 数据包、零拷贝计数可能超过当前突发额度，分段申请避免无限等待。
+	if lim != nil && n > lim.Burst() {
+		for n > 0 {
+			chunk := min(n, lim.Burst())
+			if chunk <= 0 {
+				return fmt.Errorf("invalid rate limiter burst")
+			}
+			if err := waitRate(ctx, lim, chunk); err != nil {
+				return err
+			}
+			n -= chunk
+		}
+		return nil
+	}
+	if lim == nil || n <= 0 || lim.AllowN(time.Now(), n) {
+		return nil
+	}
+	resv := lim.ReserveN(time.Now(), n)
+	if !resv.OK() {
+		return fmt.Errorf("rate limiter burst changed during reservation")
+	}
+	delay := resv.Delay()
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		resv.Cancel()
+		return ctx.Err()
+	}
+}
+
+// currentLimiter 返回本次收发使用的限速器。已知用户每次读取实时设置，
+// 套餐调整或取消限速对已有连接立即生效；其他连接沿用建立时的限速器。
+func (c *trackedConn) currentLimiter() *rate.Limiter {
+	if c.us != nil {
+		return c.us.rate.Load()
+	}
+	return c.limiter
+}
+
 func (c *trackedConn) Read(b []byte) (int, error) {
-	if c.limiter != nil {
-		if burst := c.limiter.Burst(); len(b) > burst {
+	lim := c.currentLimiter()
+	if lim != nil {
+		if burst := lim.Burst(); len(b) > burst {
 			b = b[:burst]
 		}
 	}
@@ -692,22 +770,8 @@ func (c *trackedConn) Read(b []byte) (int, error) {
 		if c.us != nil {
 			c.us.upload.Add(int64(n)) // 从入站读取 = 用户上传
 		}
-		if c.limiter != nil {
-			// Non-blocking rate limiting
-			if !c.limiter.AllowN(time.Now(), n) {
-				resv := c.limiter.ReserveN(time.Now(), n)
-				if delay := resv.Delay(); delay > 0 {
-					timer := time.NewTimer(delay)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						// Tokens available
-					case <-c.ctx.Done():
-						resv.Cancel()
-						return n, c.ctx.Err()
-					}
-				}
-			}
+		if waitErr := waitRate(c.ctx, lim, n); waitErr != nil {
+			return n, waitErr
 		}
 	}
 	return n, err
@@ -715,24 +779,12 @@ func (c *trackedConn) Read(b []byte) (int, error) {
 
 func (c *trackedConn) Write(b []byte) (int, error) {
 	// Apply rate limiting before write
-	if c.limiter != nil {
-		if burst := c.limiter.Burst(); len(b) > burst {
+	if lim := c.currentLimiter(); lim != nil {
+		if burst := lim.Burst(); len(b) > burst {
 			b = b[:burst]
 		}
-		// Non-blocking check first
-		if !c.limiter.AllowN(time.Now(), len(b)) {
-			resv := c.limiter.ReserveN(time.Now(), len(b))
-			if delay := resv.Delay(); delay > 0 {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-					// Tokens available
-				case <-c.ctx.Done():
-					resv.Cancel()
-					return 0, c.ctx.Err()
-				}
-			}
+		if err := waitRate(c.ctx, lim, len(b)); err != nil {
+			return 0, err
 		}
 	}
 
@@ -757,27 +809,11 @@ func (c *trackedConn) Close() error {
 }
 
 // makeCountFunc builds a CountFunc for zero-copy byte counting via sing's
-// ReadCounter/WriteCounter unwrap interfaces.
+// ReadCounter/WriteCounter unwrap interfaces. 每次计数时读取当前限速设置。
 func (c *trackedConn) makeCountFunc(counter *atomic.Int64) N.CountFunc {
-	if c.limiter == nil {
-		return func(n int64) { counter.Add(n) }
-	}
 	return func(n int64) {
 		counter.Add(n)
-		// Non-blocking rate limiting with context cancellation
-		if !c.limiter.AllowN(time.Now(), int(n)) {
-			resv := c.limiter.ReserveN(time.Now(), int(n))
-			if delay := resv.Delay(); delay > 0 {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-					// Tokens available
-				case <-c.ctx.Done():
-					resv.Cancel()
-				}
-			}
-		}
+		_ = waitRate(c.ctx, c.currentLimiter(), int(n))
 	}
 }
 
@@ -814,6 +850,13 @@ type trackedPacketConn struct {
 	relay    relayCounters
 }
 
+func (c *trackedPacketConn) currentLimiter() *rate.Limiter {
+	if c.us != nil {
+		return c.us.rate.Load()
+	}
+	return c.limiter
+}
+
 func (c *trackedPacketConn) ReadPacket(buffer *buf.Buffer) (singM.Socksaddr, error) {
 	dest, err := c.PacketConn.ReadPacket(buffer)
 	if err == nil {
@@ -822,22 +865,8 @@ func (c *trackedPacketConn) ReadPacket(buffer *buf.Buffer) (singM.Socksaddr, err
 		if c.us != nil {
 			c.us.upload.Add(n) // 从入站读取 = 用户上传
 		}
-		if c.limiter != nil {
-			// Non-blocking rate limiting with context cancellation
-			if !c.limiter.AllowN(time.Now(), int(n)) {
-				resv := c.limiter.ReserveN(time.Now(), int(n))
-				if delay := resv.Delay(); delay > 0 {
-					timer := time.NewTimer(delay)
-					defer timer.Stop()
-					select {
-					case <-timer.C:
-						// Tokens available
-					case <-c.ctx.Done():
-						resv.Cancel()
-						return dest, c.ctx.Err()
-					}
-				}
-			}
+		if waitErr := waitRate(c.ctx, c.currentLimiter(), int(n)); waitErr != nil {
+			return dest, waitErr
 		}
 	}
 	return dest, err
@@ -847,21 +876,8 @@ func (c *trackedPacketConn) WritePacket(buffer *buf.Buffer, dest singM.Socksaddr
 	n := int64(buffer.Len())
 
 	// Apply rate limiting before write
-	if c.limiter != nil {
-		if !c.limiter.AllowN(time.Now(), int(n)) {
-			resv := c.limiter.ReserveN(time.Now(), int(n))
-			if delay := resv.Delay(); delay > 0 {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-					// Tokens available
-				case <-c.ctx.Done():
-					resv.Cancel()
-					return c.ctx.Err()
-				}
-			}
-		}
+	if err := waitRate(c.ctx, c.currentLimiter(), int(n)); err != nil {
+		return err
 	}
 
 	err := c.PacketConn.WritePacket(buffer, dest)
@@ -885,25 +901,9 @@ func (c *trackedPacketConn) Close() error {
 }
 
 func (c *trackedPacketConn) makeCountFunc(counter *atomic.Int64) N.CountFunc {
-	if c.limiter == nil {
-		return func(n int64) { counter.Add(n) }
-	}
 	return func(n int64) {
 		counter.Add(n)
-		// Non-blocking rate limiting with context cancellation
-		if !c.limiter.AllowN(time.Now(), int(n)) {
-			resv := c.limiter.ReserveN(time.Now(), int(n))
-			if delay := resv.Delay(); delay > 0 {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-					// Tokens available
-				case <-c.ctx.Done():
-					resv.Cancel()
-				}
-			}
-		}
+		_ = waitRate(c.ctx, c.currentLimiter(), int(n))
 	}
 }
 

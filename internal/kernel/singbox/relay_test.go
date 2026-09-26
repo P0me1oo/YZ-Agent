@@ -24,6 +24,30 @@ func testRelayNode() *model.NodeSpec {
 		}}}
 }
 
+func TestRelayRoutingPreservesDomainUntilLanding(t *testing.T) {
+	node := testRelayNode()
+	user := runtimeUser(t, 1000)
+	rules := buildRoutes(nil, nil, nil, buildRelayRoutingRules(node, []model.UserSpec{user})...)["rules"].([]M)
+	resolveAt, relayAt, directAt, lastBlock := -1, -1, -1, -1
+	for i, rule := range rules {
+		if rule["action"] == "resolve" {
+			resolveAt = i
+		}
+		if rule["outbound"] == "relay-7" {
+			relayAt = i
+		}
+		if rule["outbound"] == "direct" {
+			directAt = i
+		}
+		if rule["outbound"] == "block" {
+			lastBlock = i
+		}
+	}
+	if !(relayAt >= 0 && resolveAt > relayAt && lastBlock > resolveAt && directAt > lastBlock) {
+		t.Fatalf("中转必须先选路并保留域名，本机直连必须先解析再拦内网: %v", rules)
+	}
+}
+
 func TestRelayIdentityMappingAndCollision(t *testing.T) {
 	node := testRelayNode()
 	user := runtimeUser(t, 1001)
