@@ -25,7 +25,7 @@ func TestReportContextCancelsPanelRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- client.ReportContext(ctx, "test-report", map[int][2]int64{1: {1, 2}}, nil, nil, nil, nil,
+		done <- client.ReportContext(ctx, "test-report", map[int][2]int64{1: {1, 2}}, nil, nil, nil, nil, nil,
 			0, [2]uint64{}, [2]uint64{}, [2]uint64{}, nil, nil)
 	}()
 	select {
@@ -294,6 +294,7 @@ func TestReportIncludesBatchID(t *testing.T) {
 		map[int][2]int64{1: {10, 20}},
 		map[int][2]int64{7: {30, 40}},
 		map[int]map[int][2]int64{1: {7: {5, 6}}},
+		map[int]map[int][]string{1: {0: {"192.0.2.11"}, 7: {"192.0.2.10"}}},
 		map[int][]string{1: {"192.0.2.10"}},
 		map[int]int{1: 1},
 		1.5,
@@ -327,6 +328,17 @@ func TestReportIncludesBatchID(t *testing.T) {
 	if _, ok := user["7"]; !ok {
 		t.Fatalf("relay_user_traffic missing node 7: %#v", user)
 	}
+	relayAlive, ok := received["relay_user_alive"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("relay_user_alive missing or wrong type: %#v", received["relay_user_alive"])
+	}
+	aliveNodes, ok := relayAlive["1"].(map[string]interface{})
+	if !ok || len(aliveNodes) != 2 {
+		t.Fatalf("relay_user_alive user 1 = %#v, want direct and node 7", relayAlive["1"])
+	}
+	if ips, ok := aliveNodes["7"].([]interface{}); !ok || len(ips) != 1 || ips[0] != "192.0.2.10" {
+		t.Fatalf("relay_user_alive node 7 = %#v", aliveNodes["7"])
+	}
 	events, ok := received["limit_events"].([]interface{})
 	if !ok || len(events) != 1 {
 		t.Fatalf("limit_events = %#v, want one entry", received["limit_events"])
@@ -349,6 +361,7 @@ func TestReportIncludesExplicitEmptySnapshots(t *testing.T) {
 
 	if err := client.Report(
 		"boot-1-2",
+		nil,
 		nil,
 		nil,
 		nil,

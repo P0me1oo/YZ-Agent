@@ -146,6 +146,10 @@ type ConnTracker struct {
 	relayNodes   map[string]int
 	relayEntry   bool
 
+	// relaySources 按用户和实际出网节点登记来源 IP 引用计数，只在中转入口使用。
+	relaySourceMu sync.Mutex
+	relaySources  map[relaySourceKey]map[string]int
+
 	idCounter atomic.Int64
 
 	// speedLimitFunc resolves a user UUID to a *rate.Limiter.
@@ -328,15 +332,16 @@ func (t *ConnTracker) RoutedConnection(
 	}
 
 	return &trackedConn{
-		Conn:     conn,
-		tracker:  t,
-		us:       us,
-		userID:   uid,
-		connID:   connID,
-		sourceIP: sourceIP,
-		limiter:  lim,
-		ctx:      ctx,
-		relay:    relay,
+		Conn:        conn,
+		tracker:     t,
+		us:          us,
+		userID:      uid,
+		connID:      connID,
+		sourceIP:    sourceIP,
+		limiter:     lim,
+		ctx:         ctx,
+		relay:       relay,
+		relaySource: t.trackRelaySource(uid, outbound, sourceIP),
 	}
 }
 
@@ -396,15 +401,16 @@ func (t *ConnTracker) RoutedPacketConnection(
 	}
 
 	return &trackedPacketConn{
-		PacketConn: conn,
-		tracker:    t,
-		us:         us,
-		userID:     uid,
-		connID:     connID,
-		sourceIP:   sourceIP,
-		limiter:    lim,
-		ctx:        ctx,
-		relay:      relay,
+		PacketConn:  conn,
+		tracker:     t,
+		us:          us,
+		userID:      uid,
+		connID:      connID,
+		sourceIP:    sourceIP,
+		limiter:     lim,
+		ctx:         ctx,
+		relay:       relay,
+		relaySource: t.trackRelaySource(uid, outbound, sourceIP),
 	}
 }
 
@@ -708,6 +714,8 @@ type trackedConn struct {
 	ctx      context.Context
 	closed   atomic.Bool
 	relay    relayCounters
+	// relaySource 回收中转入口按实际出网节点登记的来源，非入口连接为 nil。
+	relaySource func()
 }
 
 // waitRate 按限速器等待 n 字节的额度；lim 为 nil 时不限速。
@@ -803,6 +811,9 @@ func (c *trackedConn) Close() error {
 		if c.us != nil {
 			c.us.removeConn(c.sourceIP)
 		}
+		if c.relaySource != nil {
+			c.relaySource()
+		}
 		c.tracker.removeConnRef(c.connID)
 	}
 	return c.Conn.Close()
@@ -848,6 +859,8 @@ type trackedPacketConn struct {
 	ctx      context.Context
 	closed   atomic.Bool
 	relay    relayCounters
+	// relaySource 回收中转入口按实际出网节点登记的来源，非入口连接为 nil。
+	relaySource func()
 }
 
 func (c *trackedPacketConn) currentLimiter() *rate.Limiter {
@@ -894,6 +907,9 @@ func (c *trackedPacketConn) Close() error {
 	if c.closed.CompareAndSwap(false, true) {
 		if c.us != nil {
 			c.us.removeConn(c.sourceIP)
+		}
+		if c.relaySource != nil {
+			c.relaySource()
 		}
 		c.tracker.removeConnRef(c.connID)
 	}

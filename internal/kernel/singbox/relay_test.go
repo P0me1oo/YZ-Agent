@@ -132,6 +132,40 @@ func TestRelayPacketCountersUseActualOutbound(t *testing.T) {
 	}
 }
 
+func TestRelayAliveUsesActualOutbound(t *testing.T) {
+	node := testRelayNode()
+	user := runtimeUser(t, 1003)
+	tracker := NewConnTracker(0)
+	tracker.setNodeUsers(node, []model.UserSpec{user})
+	relay := tracker.RoutedPacketConnection(context.Background(), &counterTestPacketConn{},
+		testInboundContext(relayUserName(user, 12), "198.51.100.7"), nil, relayTestOutbound{tag: "relay-7"})
+	direct := tracker.RoutedPacketConnection(context.Background(), &counterTestPacketConn{},
+		testInboundContext(relayUserName(user, 11), "198.51.100.8"), nil, relayTestOutbound{tag: "direct"})
+	alive := tracker.relaySourceSnapshot()
+	if !alive[user.ID][7]["198.51.100.7"] || !alive[user.ID][0]["198.51.100.8"] || len(alive[user.ID]) != 2 {
+		t.Fatalf("在线来源没有按实际出网节点拆分: %v", alive)
+	}
+	_ = relay.Close()
+	_ = relay.Close()
+	alive = tracker.relaySourceSnapshot()
+	if len(alive[user.ID]) != 1 || !alive[user.ID][0]["198.51.100.8"] {
+		t.Fatalf("关闭落地连接后应只剩入口直连来源: %v", alive)
+	}
+	_ = direct.Close()
+	if alive := tracker.relaySourceSnapshot(); alive != nil {
+		t.Fatalf("全部关闭后不应保留来源: %v", alive)
+	}
+
+	plain := NewConnTracker(0)
+	plain.setNodeUsers(&model.NodeSpec{Protocol: "vless"}, []model.UserSpec{user})
+	conn := plain.RoutedPacketConnection(context.Background(), &counterTestPacketConn{},
+		testInboundContext(user.UUID, "198.51.100.9"), nil, relayTestOutbound{tag: "direct"})
+	if alive := plain.relaySourceSnapshot(); alive != nil {
+		t.Fatalf("普通节点不应按出网节点登记来源: %v", alive)
+	}
+	_ = conn.Close()
+}
+
 func BenchmarkSingBoxRelayConfig(b *testing.B) {
 	node := testRelayNode()
 	for id := 13; id <= 31; id++ {

@@ -65,13 +65,16 @@ type ReportPayload struct {
 	// RelayUserTraffic 是入口节点按用户和逻辑落地节点拆分的流量。
 	// 它只用于归属明细，不参与用户套餐扣除，也不替代 RelayTraffic。
 	RelayUserTraffic map[int]map[int][2]int64
-	Alive            map[int][]string
-	Online           map[int]int
-	CPU              float64
-	Mem              [2]uint64
-	Swap             [2]uint64
-	Disk             [2]uint64
-	Metrics          map[string]interface{}
+	// RelayUserAlive 是中转入口当前在线来源按用户和实际出网节点的拆分，节点 0 表示入口直连。
+	// 它只用于按实际节点统计连接，不替代 Alive，也不参与设备数限制。
+	RelayUserAlive map[int]map[int][]string
+	Alive          map[int][]string
+	Online         map[int]int
+	CPU            float64
+	Mem            [2]uint64
+	Swap           [2]uint64
+	Disk           [2]uint64
+	Metrics        map[string]interface{}
 	// LimitEvents 是本周期内触发连接数、新建速率或设备数上限的用户汇总，无事件时为空。
 	LimitEvents []panel.LimitEvent
 }

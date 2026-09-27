@@ -191,8 +191,91 @@ func (s *SingBox) GetRelayUserTraffic(context.Context) (map[int]map[int][2]int64
 	return s.traffic.relayUserSnapshot(), nil
 }
 
+// GetRelayUserAlive 返回中转入口按实际出网节点拆分的在线来源。
+func (s *SingBox) GetRelayUserAlive(context.Context) (map[int]map[int]map[string]bool, error) {
+	ct := s.connTrackerSafe()
+	if ct == nil {
+		return nil, nil
+	}
+	return ct.relaySourceSnapshot(), nil
+}
+
 var _ kernel.RelayTrafficReader = (*SingBox)(nil)
 var _ kernel.RelayUserTrafficReader = (*SingBox)(nil)
+var _ kernel.RelayUserAliveReader = (*SingBox)(nil)
+
+// relaySourceKey 标识中转入口上的用户和实际出网节点，节点 0 表示入口直连。
+type relaySourceKey struct {
+	userID int
+	nodeID int
+}
+
+// trackRelaySource 在中转入口登记本连接的来源 IP，返回关闭时的回收函数；其他节点返回 nil。
+// 出网节点取实际选中的出站，与中转流量归属使用同一判定。
+func (t *ConnTracker) trackRelaySource(userID int, outbound adapter.Outbound, sourceIP string) func() {
+	if userID <= 0 {
+		return nil
+	}
+	t.usersMu.RLock()
+	entry := t.relayEntry
+	nodeID := 0
+	if outbound != nil {
+		nodeID = t.relayNodes[outbound.Tag()]
+	}
+	t.usersMu.RUnlock()
+	if !entry {
+		return nil
+	}
+
+	key := relaySourceKey{userID: userID, nodeID: nodeID}
+	t.relaySourceMu.Lock()
+	if t.relaySources == nil {
+		t.relaySources = make(map[relaySourceKey]map[string]int)
+	}
+	if t.relaySources[key] == nil {
+		t.relaySources[key] = make(map[string]int)
+	}
+	t.relaySources[key][sourceIP]++
+	t.relaySourceMu.Unlock()
+
+	return func() {
+		t.relaySourceMu.Lock()
+		defer t.relaySourceMu.Unlock()
+		ips := t.relaySources[key]
+		if ips == nil {
+			return
+		}
+		if ips[sourceIP]--; ips[sourceIP] <= 0 {
+			delete(ips, sourceIP)
+		}
+		if len(ips) == 0 {
+			delete(t.relaySources, key)
+		}
+	}
+}
+
+func (t *ConnTracker) relaySourceSnapshot() map[int]map[int]map[string]bool {
+	t.relaySourceMu.Lock()
+	defer t.relaySourceMu.Unlock()
+	if len(t.relaySources) == 0 {
+		return nil
+	}
+	out := make(map[int]map[int]map[string]bool)
+	for key, ips := range t.relaySources {
+		if len(ips) == 0 {
+			continue
+		}
+		if out[key.userID] == nil {
+			out[key.userID] = make(map[int]map[string]bool)
+		}
+		set := make(map[string]bool, len(ips))
+		for ip := range ips {
+			set[ip] = true
+		}
+		out[key.userID][key.nodeID] = set
+	}
+	return out
+}
 
 func (t *ConnTracker) setNodeUsers(nc *model.NodeSpec, users []model.UserSpec) {
 	t.replaceNodeUsers(nc, users)

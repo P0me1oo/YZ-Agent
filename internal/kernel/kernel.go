@@ -134,6 +134,15 @@ type RelayUserTrafficReader interface {
 	GetRelayUserTraffic(ctx context.Context) (map[int]map[int][2]int64, error)
 }
 
+// RelayUserAliveReader 是中转入口内核可选的在线来源拆分能力。
+//
+// 返回当前快照：用户 ID => 实际出网的逻辑节点 ID => 来源 IP 集合。
+// 节点 ID 为 0 表示连接没有进入任何落地，由入口自身出网。
+// 该数据只用于按实际节点统计连接，不参与设备数限制。
+type RelayUserAliveReader interface {
+	GetRelayUserAlive(ctx context.Context) (map[int]map[int]map[string]bool, error)
+}
+
 // ComputeHash returns a hash of config + user identities that would
 // require a kernel restart/reconstruction if changed.
 func ComputeHash(nc *model.NodeSpec, users []model.UserSpec) string {

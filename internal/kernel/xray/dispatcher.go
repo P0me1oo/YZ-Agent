@@ -98,6 +98,55 @@ type LimitDispatcher struct {
 
 	// connLimiter 做连接数和新建速率准入，nil 表示不限制。
 	connLimiter atomic.Pointer[model.ConnLimiter]
+
+	// relayRoutes 把 VLESS 路由编号映射到落地节点 ID，只在中转入口设置；
+	// 未命中的编号属于入口自身出网，记为节点 0。nil 表示不按实际节点拆分在线来源。
+	relayRoutes atomic.Pointer[map[net.Port]int]
+	// relaySources 按用户和实际出网节点登记来源 IP，键为 relaySourceKey。
+	relaySources sync.Map
+}
+
+// relaySourceKey 标识中转入口上的用户和实际出网节点，节点 0 表示入口直连。
+type relaySourceKey struct {
+	email string
+	node  int
+}
+
+// relaySourceSet 记录同一用户经同一出网节点的来源 IP 引用计数。
+// 连接建立和关闭时才会访问，使用互斥锁保证计数与删除一致。
+type relaySourceSet struct {
+	mu  sync.Mutex
+	ips map[string]int
+}
+
+func (s *relaySourceSet) add(ip string) {
+	s.mu.Lock()
+	if s.ips == nil {
+		s.ips = make(map[string]int)
+	}
+	s.ips[ip]++
+	s.mu.Unlock()
+}
+
+func (s *relaySourceSet) remove(ip string) {
+	s.mu.Lock()
+	if s.ips[ip]--; s.ips[ip] <= 0 {
+		delete(s.ips, ip)
+	}
+	s.mu.Unlock()
+}
+
+func (s *relaySourceSet) snapshot() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.ips) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(s.ips))
+	for ip := range s.ips {
+		out[ip] = true
+	}
+	return out
 }
 
 func (d *LimitDispatcher) countKey(raw string) string {
@@ -144,7 +193,7 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	}
 
 	if email != "" {
-		d.trackLink(link, email, sourceIP, uid, isTCP)
+		d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email))
 	}
 	return link, nil
 }
@@ -157,7 +206,7 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 
 	var release func()
 	if email != "" {
-		release = d.trackLink(link, email, sourceIP, uid, isTCP)
+		release = d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email))
 	}
 	err = d.innerDisp.DispatchLink(ctx, dest, link)
 	if err != nil && release != nil {
@@ -268,11 +317,30 @@ func (d *LimitDispatcher) userConnCounter(uid int) *atomic.Int64 {
 	return v.(*atomic.Int64)
 }
 
+// relaySourceSet 返回本连接实际出网节点的来源登记表；非中转入口返回 nil。
+// 路由编号与核心中转流量计数使用同一个会话字段，两类统计归属一致。
+func (d *LimitDispatcher) relaySourceSet(ctx context.Context, email string) *relaySourceSet {
+	routes := d.relayRoutes.Load()
+	if routes == nil {
+		return nil
+	}
+	node := 0
+	if si := session.InboundFromContext(ctx); si != nil {
+		node = (*routes)[si.VlessRoute]
+	}
+	v, _ := d.relaySources.LoadOrStore(relaySourceKey{email: email, node: node}, &relaySourceSet{})
+	return v.(*relaySourceSet)
+}
+
 // trackLink records connection lifecycle without mutating xray-core owned
 // transport primitives. This keeps mux/XUDP compatible while still allowing
 // the dispatcher to release device-limit state when the link closes.
-func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, uid int, isTCP bool) func() {
+// relay 非空时同时登记实际出网节点的来源，关闭时一并回收。
+func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, uid int, isTCP bool, relay *relaySourceSet) func() {
 	d.connCount.Add(1)
+	if relay != nil {
+		relay.add(sourceIP)
+	}
 
 	// 计数器在这里取一次，关闭回调直接复用，避免关闭路径再查 sync.Map。
 	var userConns *atomic.Int64
@@ -282,6 +350,9 @@ func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string
 
 	onClose := func() {
 		d.delConn(email, sourceIP)
+		if relay != nil {
+			relay.remove(sourceIP)
+		}
 		if userConns != nil {
 			userConns.Add(-1)
 		}
@@ -342,6 +413,48 @@ func (d *LimitDispatcher) UpdateGlobalDevices(users map[int][]string, updatedAt 
 	d.mu.Unlock()
 }
 
+// SetRelayRoutes 设置中转入口的路由编号到落地节点的映射；传 nil 表示不按实际节点拆分。
+// 实例配置变化都会重建 Xray 实例，映射在实例开始接收连接前设置一次。
+func (d *LimitDispatcher) SetRelayRoutes(routes map[net.Port]int) {
+	if routes == nil {
+		d.relayRoutes.Store(nil)
+		return
+	}
+	d.relayRoutes.Store(&routes)
+}
+
+// RelayUserAlive 返回按用户和实际出网节点拆分的在线来源，节点 0 表示入口直连。
+func (d *LimitDispatcher) RelayUserAlive() map[int]map[int]map[string]bool {
+	d.mu.RLock()
+	emailToUID := d.emailToUID
+	d.mu.RUnlock()
+
+	out := make(map[int]map[int]map[string]bool)
+	d.relaySources.Range(func(key, value interface{}) bool {
+		k := key.(relaySourceKey)
+		uid := emailToUID[k.email]
+		if uid <= 0 {
+			return true
+		}
+		ips := value.(*relaySourceSet).snapshot()
+		if len(ips) == 0 {
+			return true
+		}
+		if out[uid] == nil {
+			out[uid] = make(map[int]map[string]bool)
+		}
+		if out[uid][k.node] == nil {
+			out[uid][k.node] = ips
+			return true
+		}
+		for ip := range ips {
+			out[uid][k.node][ip] = true
+		}
+		return true
+	})
+	return out
+}
+
 // SetConnLimiter 配置连接数与新建速率准入，传 nil 表示关闭。
 func (d *LimitDispatcher) SetConnLimiter(limiter model.ConnLimiter) {
 	if limiter == nil {
@@ -364,6 +477,11 @@ func (d *LimitDispatcher) ResetConns() {
 
 	d.userConns.Range(func(key, _ interface{}) bool {
 		d.userConns.Delete(key)
+		return true
+	})
+
+	d.relaySources.Range(func(key, _ interface{}) bool {
+		d.relaySources.Delete(key)
 		return true
 	})
 

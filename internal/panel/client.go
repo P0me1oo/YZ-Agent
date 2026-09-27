@@ -130,16 +130,18 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 // relayUserTraffic 是同一组计数按用户和逻辑落地节点拆分的归属数据。
 func (c *Client) Report(reportID string, traffic map[int][2]int64, relayTraffic map[int][2]int64,
 	relayUserTraffic map[int]map[int][2]int64,
+	relayUserAlive map[int]map[int][]string,
 	alive map[int][]string, online map[int]int,
 	cpu float64, mem, swap, disk [2]uint64,
 	metrics map[string]interface{},
 	limitEvents []LimitEvent,
 ) error {
-	return c.ReportContext(context.Background(), reportID, traffic, relayTraffic, relayUserTraffic, alive, online, cpu, mem, swap, disk, metrics, limitEvents)
+	return c.ReportContext(context.Background(), reportID, traffic, relayTraffic, relayUserTraffic, relayUserAlive, alive, online, cpu, mem, swap, disk, metrics, limitEvents)
 }
 
 func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map[int][2]int64, relayTraffic map[int][2]int64,
 	relayUserTraffic map[int]map[int][2]int64,
+	relayUserAlive map[int]map[int][]string,
 	alive map[int][]string, online map[int]int,
 	cpu float64, mem, swap, disk [2]uint64,
 	metrics map[string]interface{},
@@ -174,6 +176,24 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 		}
 		if len(r) > 0 {
 			payload["relay_user_traffic"] = r
+		}
+	}
+
+	if len(relayUserAlive) > 0 {
+		r := make(map[string]map[string][]string, len(relayUserAlive))
+		for userID, nodes := range relayUserAlive {
+			entry := make(map[string][]string, len(nodes))
+			for nodeID, ips := range nodes {
+				if len(ips) > 0 {
+					entry[strconv.Itoa(nodeID)] = ips
+				}
+			}
+			if len(entry) > 0 {
+				r[strconv.Itoa(userID)] = entry
+			}
+		}
+		if len(r) > 0 {
+			payload["relay_user_alive"] = r
 		}
 	}
 

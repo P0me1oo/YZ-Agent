@@ -2,6 +2,13 @@
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
+## v1.23.0 按实际节点上报在线来源（未发布）
+
+- 修改起点为已发布的 Node `v1.22.0`（`9217d00`），配套面板 `1.28.0`、SubscriptionHub `4.50.0`。核心固定依赖不变：Xray `v0.0.0-20260926140203-434e1c025c93`，sing-box `v1.14.0-yz.2`；两个核心 fork 没有改动。
+- 节点报告新增可选字段 `relay_user_alive`，只在中转入口且有在线连接时出现。旧面板忽略该字段；新面板配旧 Node 时收不到拆分数据，连接统计仍按整入口记录。
+- Xray 在调度器中按连接携带的线路编号登记出网节点（与 `user>>>…>>>relay` 流量计数使用同一编号），sing-box 在连接跟踪器中按实际选中的出站登记；两者都在连接关闭时回收，重复关闭不重复扣减。排空中的旧 Xray 实例继续参与合并。
+- 本地验证（Windows/amd64）：`go build ./...`、受影响包的 `go vet` 通过；`internal/kernel/xray`、`internal/kernel/singbox`、`internal/tracker`、`internal/service`、`internal/panel`、`internal/controlplane` 测试通过。新增用例覆盖两种内核按落地与直连拆分来源、关闭回收、重复关闭，以及普通节点不登记。本机没有 cgo，未运行竞态检测。未连接真实服务器。
+
 ## v1.22.0 路由条件与 BT 识别
 
 - 修改起点为已发布的 Node `v1.21.0`（`5e05939e1c81c25b849b59101e83cf43e7285101`，发布记录提交 `5039d6b`），配套面板 `1.26.0`、管理端工程 `0.9.0`。核心固定依赖不变：Xray `v0.0.0-20260926140203-434e1c025c93`，sing-box `v1.14.0-yz.2`；两个核心 fork 没有改动。

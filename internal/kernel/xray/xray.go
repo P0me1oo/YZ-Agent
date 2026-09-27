@@ -177,6 +177,9 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 		return fmt.Errorf("create xray: %w", err)
 	}
 	setDispatcherLimits(ld, users)
+	if ld != nil {
+		ld.SetRelayRoutes(relayRouteNodes(nodeConfig))
+	}
 	x.mu.Lock()
 	limitFunc := x.speedLimitFunc
 	x.mu.Unlock()

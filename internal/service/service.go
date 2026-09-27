@@ -1112,6 +1112,7 @@ func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int,
 	}
 	s.tracker.Process(traffic, aliveIPs, connCount)
 	s.trackRelayTraffic(ctx)
+	s.trackRelayAlive(ctx)
 	// 每次采样都保存；面板不可用、退避或请求仍在途时也不能只留在内存里。
 	_ = s.persistPending()
 	return connCount, len(traffic), nil
@@ -1268,6 +1269,7 @@ func (s *Service) takeReportBatch() *reportBatch {
 			Traffic:          traffic,
 			RelayTraffic:     relayTraffic,
 			RelayUserTraffic: relayUserTraffic,
+			RelayUserAlive:   s.tracker.RelayUserAlive(),
 			Alive:            aliveIPs,
 			Online:           s.tracker.CurrentOnline(),
 			LimitEvents:      limitEvents,
@@ -1450,6 +1452,20 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 		return
 	}
 	s.tracker.ProcessRelayUser(relayUser)
+}
+
+// trackRelayAlive 采样中转入口按实际出网节点拆分的在线来源；不支持该能力的内核跳过。
+func (s *Service) trackRelayAlive(ctx context.Context) {
+	reader, ok := s.kernel.(kernel.RelayUserAliveReader)
+	if !ok {
+		return
+	}
+	alive, err := reader.GetRelayUserAlive(ctx)
+	if err != nil {
+		nlog.Core().Debug("get per-node relay alive failed", "error", err)
+		return
+	}
+	s.tracker.ProcessRelayAlive(alive)
 }
 
 func (s *Service) nextReportIDLocked() string {

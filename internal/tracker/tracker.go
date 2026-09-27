@@ -55,6 +55,9 @@ type Tracker struct {
 	lastSeenRelayUser map[int]map[int][2]int64
 	pendingRelayUser  map[int]map[int][2]int64
 
+	// relayAlive 是中转入口按实际出网节点拆分的在线来源快照，每次采样整体替换。
+	relayAlive atomic.Pointer[map[int]map[int]map[string]bool]
+
 	// live holds the current snapshot, swapped atomically.
 	// Readers load this pointer without any lock.
 	live atomic.Pointer[snapshot]

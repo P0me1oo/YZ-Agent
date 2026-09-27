@@ -8,6 +8,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	xnet "github.com/xtls/xray-core/common/net"
 )
 
 // relayLandingInboundTag is the tag of the internal inbound on a landing node.
@@ -298,3 +299,53 @@ func (x *Xray) GetRelayUserTraffic(_ context.Context) (map[int]map[int][2]int64,
 	}
 	return out, nil
 }
+
+// relayRouteNodes 返回中转入口路由编号到落地节点的映射，与中转流量计数使用同一组编号。
+// 非入口节点返回 nil，调度器不按实际节点登记来源。
+func relayRouteNodes(nc *model.NodeSpec) map[xnet.Port]int {
+	if !nc.IsRelayEntry() {
+		return nil
+	}
+	routes := make(map[xnet.Port]int, len(nc.Relay.Children))
+	for _, child := range nc.Relay.Children {
+		if child.RouteID > 0 && child.NodeID > 0 {
+			routes[xnet.Port(child.RouteID)] = child.NodeID
+		}
+	}
+	return routes
+}
+
+// GetRelayUserAlive 合并当前实例和排空中旧实例按实际出网节点拆分的在线来源。
+func (x *Xray) GetRelayUserAlive(_ context.Context) (map[int]map[int]map[string]bool, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	out := make(map[int]map[int]map[string]bool)
+	merge := func(ld *LimitDispatcher) {
+		if ld == nil {
+			return
+		}
+		for uid, nodes := range ld.RelayUserAlive() {
+			if out[uid] == nil {
+				out[uid] = make(map[int]map[string]bool, len(nodes))
+			}
+			for node, ips := range nodes {
+				if out[uid][node] == nil {
+					out[uid][node] = make(map[string]bool, len(ips))
+				}
+				for ip := range ips {
+					out[uid][node][ip] = true
+				}
+			}
+		}
+	}
+	merge(x.limitDispatcher)
+	for _, previous := range x.retired {
+		merge(previous.dispatcher)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+var _ kernel.RelayUserAliveReader = (*Xray)(nil)

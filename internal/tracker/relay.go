@@ -1,5 +1,7 @@
 package tracker
 
+import "sort"
+
 // ProcessRelay 根据入口内部出站的累计计数计算逻辑节点增量。
 // 该数据只用于落地线路运营统计，与用户流量分开上报，不能计入套餐扣除。
 func (t *Tracker) ProcessRelay(cumRelay map[int][2]int64) {
@@ -141,4 +143,40 @@ func (t *Tracker) RestoreRelayUserTraffic(data map[int]map[int][2]int64) {
 			t.pendingRelayUser[uid][nodeID] = pending
 		}
 	}
+}
+
+// ProcessRelayAlive 保存中转入口按实际出网节点拆分的在线来源快照。
+// 内核每次返回新副本，nil 表示当前没有中转入口连接。
+func (t *Tracker) ProcessRelayAlive(alive map[int]map[int]map[string]bool) {
+	t.relayAlive.Store(&alive)
+}
+
+// RelayUserAlive 返回最近一次快照：用户 ID => 出网节点 ID => 排序后的来源 IP。
+// 节点 0 表示入口直连；保留全部来源，与在线人数口径一致，由面板和插件按需筛选公网地址。
+func (t *Tracker) RelayUserAlive() map[int]map[int][]string {
+	ptr := t.relayAlive.Load()
+	if ptr == nil || len(*ptr) == 0 {
+		return nil
+	}
+	out := make(map[int]map[int][]string, len(*ptr))
+	for uid, nodes := range *ptr {
+		for nodeID, ips := range nodes {
+			if len(ips) == 0 {
+				continue
+			}
+			list := make([]string, 0, len(ips))
+			for ip := range ips {
+				list = append(list, ip)
+			}
+			sort.Strings(list)
+			if out[uid] == nil {
+				out[uid] = make(map[int][]string, len(nodes))
+			}
+			out[uid][nodeID] = list
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

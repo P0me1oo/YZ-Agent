@@ -143,7 +143,7 @@ func (p *MachinePanelControlPlane) Report(payload ReportPayload) error {
 func (p *MachinePanelControlPlane) ReportContext(ctx context.Context, payload ReportPayload) error {
 	return p.client.ReportContext(ctx,
 		payload.ReportID,
-		payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.Alive, payload.Online,
+		payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.RelayUserAlive, payload.Alive, payload.Online,
 		payload.CPU, payload.Mem, payload.Swap, payload.Disk,
 		payload.Metrics,
 		payload.LimitEvents,
