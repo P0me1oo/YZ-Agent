@@ -192,6 +192,11 @@ type RouteRule struct {
 	Match       []string
 	Action      string
 	ActionValue string
+	// 附加条件与目标地址同时满足才命中，规则见 PanelRouteConditions。
+	// 未设置时不参与序列化，已有路由的配置哈希保持不变。
+	Protocols []string `json:",omitempty"`
+	Ports     []string `json:",omitempty"`
+	Networks  []string `json:",omitempty"`
 }
 
 type MultiplexConfig struct {

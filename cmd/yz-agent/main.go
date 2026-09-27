@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	version       = "v1.21.0"
+	version       = "v1.22.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())

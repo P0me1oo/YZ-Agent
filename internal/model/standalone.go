@@ -15,6 +15,9 @@ func NodeSpecFromStandalone(cfg *config.Config) *NodeSpec {
 			Match:       cloneStringSlice(route.Match),
 			Action:      route.Action,
 			ActionValue: route.ActionValue,
+			Protocols:   cloneStringSlice(route.Protocol),
+			Ports:       splitRouteList(route.Port),
+			Networks:    splitRouteList(route.Network),
 		})
 	}
 

@@ -230,10 +230,20 @@ func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteR
 		M{"outbound": "block", "ip_cidr": privateV4},
 		M{"outbound": "block", "ip_cidr": privateV6},
 	)
-	rules = append(rules, directRelayRules...)
+	// 协议匹配依赖嗅探。只在第一条按协议匹配的面板路由前识别一次，
+	// 前面已经命中的连接和中转流量不再等待嗅探。
+	sniffProtocols := model.RouteSniffProtocols(panelRoutes)
+	sniffAdded := false
 	for _, pr := range panelRoutes {
-		rules = append(rules, compilePanelRouteRule(pr)...)
+		compiled := compilePanelRouteRule(pr)
+		if !sniffAdded && len(sniffProtocols) > 0 && len(compiled) > 0 && compiled[0]["protocol"] != nil {
+			rules = append(rules, M{"action": "sniff", "sniffer": sniffProtocols})
+			sniffAdded = true
+		}
+		rules = append(rules, compiled...)
 	}
+	// 入口自身线路的直连排在面板路由之后，入口绑定的路由才能作用于入口自身用户。
+	rules = append(rules, directRelayRules...)
 
 	return M{
 		"final": "direct",
@@ -241,23 +251,40 @@ func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteR
 	}
 }
 
+// compilePanelRouteRule 把一条面板路由编译为 sing-box 规则。
+// 域名和 IP 各生成一条规则，二者任一命中即可；协议、端口和网络写入每条规则，必须同时满足。
+// 只有附加条件时生成一条不限目标地址的规则；没有任何条件的路由不生成规则。
 func compilePanelRouteRule(pr model.RouteRule) []M {
-	if len(pr.Match) == 0 {
+	conditions, err := model.PanelRouteConditions(pr)
+	if err != nil {
+		nlog.Core().Warn("sing-box: panel route skipped", "id", pr.ID, "error", err)
 		return nil
 	}
 
 	var domains, cidrs []string
+	hasAddress := false
 	for _, item := range pr.Match {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
 		}
-		item = strings.TrimPrefix(item, "*.")
+		hasAddress = true
+		item = strings.TrimSpace(strings.TrimPrefix(item, "*."))
+		if item == "" {
+			continue
+		}
 		if strings.Contains(item, "/") {
 			cidrs = append(cidrs, item)
 			continue
 		}
 		domains = append(domains, item)
+	}
+	// 填写的目标地址全部无效时整条跳过，不能退化成只按附加条件匹配。
+	if hasAddress && len(domains) == 0 && len(cidrs) == 0 {
+		return nil
+	}
+	if !hasAddress && conditions.Empty() {
+		return nil
 	}
 
 	outbound := "block"
@@ -275,19 +302,39 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 			outbound = pr.ActionValue
 		}
 	}
+	newRule := func() M {
+		compiled := M{"outbound": outbound}
+		if len(conditions.Protocols) > 0 {
+			compiled["protocol"] = copyStrings(conditions.Protocols)
+		}
+		if len(conditions.Ports) > 0 {
+			ports, portRanges := splitPorts(conditions.Ports)
+			if len(ports) > 0 {
+				compiled["port"] = ports
+			}
+			if len(portRanges) > 0 {
+				compiled["port_range"] = portRanges
+			}
+		}
+		if len(conditions.Networks) > 0 {
+			compiled["network"] = copyStrings(conditions.Networks)
+		}
+		return compiled
+	}
 
 	var compiled []M
 	if len(domains) > 0 {
-		compiled = append(compiled, M{
-			"domain_suffix": copyStrings(domains),
-			"outbound":      outbound,
-		})
+		domainRule := newRule()
+		domainRule["domain_suffix"] = domains
+		compiled = append(compiled, domainRule)
 	}
 	if len(cidrs) > 0 {
-		compiled = append(compiled, M{
-			"ip_cidr":  copyStrings(cidrs),
-			"outbound": outbound,
-		})
+		cidrRule := newRule()
+		cidrRule["ip_cidr"] = cidrs
+		compiled = append(compiled, cidrRule)
+	}
+	if !hasAddress {
+		compiled = append(compiled, newRule())
 	}
 	return compiled
 }

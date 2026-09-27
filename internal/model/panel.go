@@ -1,6 +1,8 @@
 package model
 
 import (
+	"strings"
+
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
@@ -52,6 +54,9 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 			Match:       cloneStringSlice(route.Match),
 			Action:      route.Action,
 			ActionValue: route.ActionValue,
+			Protocols:   cloneStringSlice(route.Protocol),
+			Ports:       splitRouteList(route.Port),
+			Networks:    splitRouteList(route.Network),
 		})
 	}
 
@@ -231,6 +236,9 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 			Match:       cloneStringSlice(route.Match),
 			Action:      route.Action,
 			ActionValue: route.ActionValue,
+			Protocol:    cloneStringSlice(route.Protocols),
+			Port:        strings.Join(route.Ports, ","),
+			Network:     strings.Join(route.Networks, ","),
 		})
 	}
 

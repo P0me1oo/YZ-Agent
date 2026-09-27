@@ -297,6 +297,13 @@ type RouteRule struct {
 	Match       []string `json:"match"`
 	Action      string   `json:"action"`
 	ActionValue string   `json:"action_value,omitempty"`
+	// 以下为面板 1.26.0 起的附加条件，与目标地址同时满足才命中；未设置时面板不下发。
+	// Protocol 目前只有 bittorrent，依赖内核嗅探识别。
+	Protocol []string `json:"protocol,omitempty"`
+	// Port 为逗号分隔的目标端口或范围，例如 "25,6881-6889"。
+	Port string `json:"port,omitempty"`
+	// Network 为 tcp 或 udp，缺失表示不限。
+	Network string `json:"network,omitempty"`
 }
 
 type CustomRouteRule struct {

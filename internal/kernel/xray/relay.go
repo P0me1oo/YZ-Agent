@@ -70,32 +70,34 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 }
 
 // buildRelayRoutingRules 把 VLESS 身份或 HY2 认证 UUID 中的路由编号映射到出站。
-// Xray 清零 UUID 的第 7、8 字节后校验用户，再用原始字节填充 vlessRoute；
-// 入口自身的编号选择直接出站，落地编号选择对应的内部出站。
-func buildRelayRoutingRules(nc *model.NodeSpec) []M {
+// Xray 清零 UUID 的第 7、8 字节后校验用户，再用原始字节填充 vlessRoute。
+// 第一个返回值是落地编号选择内部出站的规则，必须排在面板路由之前；
+// 第二个返回值是入口自身编号选择直接出站的规则，排在面板路由之后，
+// 这样入口绑定的面板路由对入口自身用户生效，未命中时仍固定走直连。
+func buildRelayRoutingRules(nc *model.NodeSpec) (childRules []M, entryRules []M) {
 	if !nc.IsRelayEntry() {
-		return nil
+		return nil, nil
 	}
 
-	rules := make([]M, 0, len(nc.Relay.Children)+1)
 	if nc.Relay.RouteID > 0 {
-		rules = append(rules, M{
+		entryRules = append(entryRules, M{
 			"type":        "field",
 			"vlessRoute":  strconv.Itoa(nc.Relay.RouteID),
 			"outboundTag": "direct",
 		})
 	}
+	childRules = make([]M, 0, len(nc.Relay.Children))
 	for _, child := range nc.Relay.Children {
 		if child.RouteID <= 0 || child.Tag == "" {
 			continue
 		}
-		rules = append(rules, M{
+		childRules = append(childRules, M{
 			"type":        "field",
 			"vlessRoute":  strconv.Itoa(child.RouteID),
 			"outboundTag": child.Tag,
 		})
 	}
-	return rules
+	return childRules, entryRules
 }
 
 // buildRelayLandingInbound 生成落地节点的私有内部入站。

@@ -80,6 +80,11 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	inbound := buildInbound(kcfg, nc, users, tc)
 	var guardRules []M
 	if inbound != nil {
+		// 面板路由按协议匹配时依赖内核嗅探；只识别协议，不改写目标地址。
+		// 未使用协议匹配的节点不开启，避免服务器先发数据的连接多等一次嗅探。
+		if len(model.RouteSniffProtocols(nc.Routes)) > 0 {
+			inbound["sniffing"] = M{"enabled": true}
+		}
 		inbounds := []M{inbound}
 		// REALITY 防盗用：把回源改接到只监听本机的专用入口，由它按白名单放行。
 		if guard := applyRealityGuard(nc, inbound); guard != nil {
@@ -94,7 +99,8 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	}
 
 	// Merge panel routes and static config routes
-	cfg["routing"] = buildRouting(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute), buildRelayRoutingRules(nc), guardRules)
+	relayRules, relayEntryRules := buildRelayRoutingRules(nc)
+	cfg["routing"] = buildRouting(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute), relayRules, guardRules, relayEntryRules...)
 
 	mergeCustomXray(cfg, kcfg)
 	return cfg
@@ -650,7 +656,8 @@ func buildRealitySettings(kcfg config.KernelConfig, nc *model.NodeSpec) M {
 //  3. built-in private/loopback blocklist
 //  4. relay rules — a logical node's exit must not be overridden by generic panel routes
 //  5. panel routes
-func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteRule, customRules []map[string]any, relayRules []M, guardRules []M) M {
+//  6. 中转入口自身编号的直连规则 — 排在面板路由之后，入口绑定的路由才能作用于入口自身用户
+func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteRule, customRules []map[string]any, relayRules []M, guardRules []M, relayEntryRules ...M) M {
 	var xrayRules []M
 
 	// 防盗用规则必须排在所有面板规则之前，否则管理员的通用规则会放行或阻断伪装回源。
@@ -693,32 +700,53 @@ func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteR
 		xrayRules = append(xrayRules, compilePanelRouteRule(rule)...)
 	}
 
+	xrayRules = append(xrayRules, relayEntryRules...)
+
 	return M{
 		"domainStrategy": "AsIs",
 		"rules":          xrayRules,
 	}
 }
 
+// compilePanelRouteRule 把一条面板路由编译为 Xray 规则。
+// 域名和 IP 各生成一条规则，二者任一命中即可；协议、端口和网络写入每条规则，必须同时满足。
+// 只有附加条件时生成一条不限目标地址的规则；没有任何条件的路由不生成规则。
 func compilePanelRouteRule(rule model.RouteRule) []M {
-	if len(rule.Match) == 0 {
+	conditions, err := model.PanelRouteConditions(rule)
+	if err != nil {
+		nlog.Core().Warn("xray: panel route skipped", "id", rule.ID, "error", err)
 		return nil
 	}
-	match := model.RouteMatch{}
+
+	var sites, suffixes, ips []string
+	hasAddress := false
 	for _, item := range rule.Match {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
 		}
+		hasAddress = true
 		if strings.HasPrefix(item, "geoip:") || strings.Contains(item, "/") {
-			match.IPCIDRs = append(match.IPCIDRs, item)
+			ips = append(ips, item)
 			continue
 		}
 		if strings.HasPrefix(item, "geosite:") {
-			match.Domains = append(match.Domains, item)
+			sites = append(sites, item)
 			continue
 		}
-		match.DomainSuffixes = append(match.DomainSuffixes, strings.TrimPrefix(item, "*."))
+		if suffix := strings.TrimSpace(strings.TrimPrefix(item, "*.")); suffix != "" {
+			suffixes = append(suffixes, "domain:"+suffix)
+		}
 	}
+	domains := append(sites, suffixes...)
+	// 填写的目标地址全部无效时整条跳过，不能退化成只按附加条件匹配。
+	if hasAddress && len(domains) == 0 && len(ips) == 0 {
+		return nil
+	}
+	if !hasAddress && conditions.Empty() {
+		return nil
+	}
+
 	action := model.RouteAction{Type: "block"}
 	switch rule.Action {
 	case "direct":
@@ -727,7 +755,36 @@ func compilePanelRouteRule(rule model.RouteRule) []M {
 		action.Type = "route"
 		action.Target = rule.ActionValue
 	}
-	return compileCustomRouteRule(model.CustomRouteRule{Match: match, Action: action})
+	outbound := xrayOutboundForAction(action)
+	newRule := func() M {
+		compiled := M{"type": "field", "outboundTag": outbound}
+		if len(conditions.Protocols) > 0 {
+			compiled["protocol"] = copyStrings(conditions.Protocols)
+		}
+		if len(conditions.Ports) > 0 {
+			compiled["port"] = strings.Join(conditions.Ports, ",")
+		}
+		if len(conditions.Networks) > 0 {
+			compiled["network"] = strings.Join(conditions.Networks, ",")
+		}
+		return compiled
+	}
+
+	var compiled []M
+	if len(domains) > 0 {
+		domainRule := newRule()
+		domainRule["domain"] = domains
+		compiled = append(compiled, domainRule)
+	}
+	if len(ips) > 0 {
+		ipRule := newRule()
+		ipRule["ip"] = ips
+		compiled = append(compiled, ipRule)
+	}
+	if !hasAddress {
+		compiled = append(compiled, newRule())
+	}
+	return compiled
 }
 
 func compileCustomRouteRule(rule model.CustomRouteRule) []M {

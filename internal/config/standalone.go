@@ -57,6 +57,11 @@ type StandaloneRouteRule struct {
 	Match       []string `yaml:"match,omitempty"`
 	Action      string   `yaml:"action,omitempty"`
 	ActionValue string   `yaml:"action_value,omitempty"`
+	// 附加条件与面板路由相同：protocol 目前只有 bittorrent，port 为逗号分隔的端口或范围，
+	// network 为 tcp 或 udp；它们与 match 同时满足才命中。
+	Protocol []string `yaml:"protocol,omitempty"`
+	Port     string   `yaml:"port,omitempty"`
+	Network  string   `yaml:"network,omitempty"`
 }
 
 type StandaloneCustomRouteRule struct {
