@@ -8,6 +8,8 @@
 - 节点报告新增可选字段 `relay_user_alive`，只在中转入口且有在线连接时出现。旧面板忽略该字段；新面板配旧 Node 时收不到拆分数据，连接统计仍按整入口记录。
 - Xray 在调度器中按连接携带的线路编号登记出网节点（与 `user>>>…>>>relay` 流量计数使用同一编号），sing-box 在连接跟踪器中按实际选中的出站登记；两者都在连接关闭时回收，重复关闭不重复扣减。排空中的旧 Xray 实例继续参与合并。
 - 本地验证（Windows/amd64）：`go build ./...`、受影响包的 `go vet` 通过；`internal/kernel/xray`、`internal/kernel/singbox`、`internal/tracker`、`internal/service`、`internal/panel`、`internal/controlplane` 测试通过。新增用例覆盖两种内核按落地与直连拆分来源、关闭回收、重复关闭，以及普通节点不登记。本机没有 cgo，未运行竞态检测。未连接真实服务器。
+- 发布核验（2026-09-28）：来源提交 `ae4fce8f36928ec9919eae47e46d14ab3d08a3a9` 的 [Release v1.23.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.23.0) 已发布，且为 GitHub 当前最新 Release。12 个附件全部下载；11 个文件通过 `SHA256SUMS`，12 个附件又与 GitHub 摘要一致；`yz-agent` 与 `xboard-node` 同架构附件字节一致。四份构建信息均为该提交且 `vcs.modified=false`，Go `1.27.1`、`CGO_ENABLED=0`，主模块版本 `v1.23.0`，核心依赖为 YZ-Xray-core `v0.0.0-20260926140203-434e1c025c93`、YZ-sing-box `v1.14.0-yz.2`。镜像 `ghcr.io/p0me1oo/yz-agent:v1.23.0`、`latest` 和来源提交标签均为 `sha256:da04cbc3eb40220d4bbd4dfa3620cb9f310c031e10460e0d2f4391cccda2caad`，包含 `linux/amd64`（`sha256:9ccb6b5f3e6e17f3422c491df030e4c6693080e4a4613a50a7efa843ff0a80bd`）和 `linux/arm64`（`sha256:b78b2d23bb0d1cd84d6336e869a59e8b515ac7d9a4d038281ecfc6ff59d78192`）；两个架构的 OCI 来源提交和版本标签均已核对。标签工作流的测试、两个架构构建、镜像和 Release 均通过。本机没有 docker，镜像清单通过 GHCR 接口核对。未连接真实服务器。
+- 回滚基线为 Node `v1.22.0`、面板 `1.27.1`；回滚后插件的连接统计退回按整入口记录。
 
 ## v1.22.0 路由条件与 BT 识别
 
