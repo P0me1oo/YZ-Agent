@@ -6,7 +6,8 @@
 
 - 配套面板 `1.29.0`、SubscriptionHub `4.51.0`；固定 Xray 与 sing-box 依赖不变，核心 fork 不修改。上一发布版本为 `v1.23.0`。
 - 节点报告新增每用户真实连接数和按实际出网节点拆分的连接数。旧面板忽略字段；新面板配旧节点时没有真实连接样本。原有在线来源、设备数限制、流量结算保持原口径。
-- 本地验证：`go build ./...` 通过；Xray、sing-box 同一 IP 多连接与关闭回收的定向测试通过，节点报告序列化和服务快照测试通过；服务、跟踪器、控制面与命令包测试通过。未连接真实服务器，发布结果待发布后记录。
+- 本地验证：`go build ./...` 通过；Xray、sing-box 同一 IP 多连接与关闭回收的定向测试通过，节点报告序列化和服务快照测试通过；服务、跟踪器、控制面与命令包测试通过。未连接真实服务器。
+- 发布核验（2026-09-28）：来源提交 `c5a157480e2392b9c71877bbc12102f8f01bbf0c` 的 [Release v1.24.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.24.0) 已发布，且为 GitHub 当前最新 Release。12 个附件全部下载并与 GitHub 摘要匹配；其中 11 个文件与 `SHA256SUMS` 匹配，同架构的 `yz-agent` 和 `xboard-node` 字节一致。四份构建信息均为该提交且 `vcs.modified=false`，目标为 `linux/amd64` 或 `linux/arm64`，`CGO_ENABLED=0`；固定核心依赖为 YZ-Xray-core `v0.0.0-20260926140203-434e1c025c93`、YZ-sing-box `v1.14.0-yz.2`。镜像 `ghcr.io/p0me1oo/yz-agent:v1.24.0`、`latest` 和来源提交标签均为 manifest `sha256:704999dd4275718f53db0f3d57200eef3644153d9f6d2ab16a9b64e136fcd9ca`，包含 `linux/amd64`（`sha256:7d338184abf048d62938c211a41360a2b2b401e5632bdde48ecbc766e2c8b5ab`）和 `linux/arm64`（`sha256:97c9df6f7e65da9248686c65054404373c6aee6fe65e3a7deeb309f5b48712e4`）；两个架构的 OCI 来源提交和版本标签均已核对。标签工作流的测试、双架构构建、镜像和 Release 全部通过。本机没有 Docker，镜像清单通过 GHCR 接口核对。未连接或更新生产服务器。
 
 ## v1.23.0 按实际节点上报在线来源
 
