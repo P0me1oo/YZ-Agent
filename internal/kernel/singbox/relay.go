@@ -204,6 +204,38 @@ var _ kernel.RelayTrafficReader = (*SingBox)(nil)
 var _ kernel.RelayUserTrafficReader = (*SingBox)(nil)
 var _ kernel.RelayUserAliveReader = (*SingBox)(nil)
 
+// GetConnectionSnapshot 读取用户连接计数，并按入口实际出网节点拆分。
+func (s *SingBox) GetConnectionSnapshot(context.Context) (map[int]int, map[int]map[int]int, error) {
+	ct := s.connTrackerSafe()
+	if ct == nil {
+		return nil, nil, nil
+	}
+	counts := make(map[int]int)
+	ct.usersMu.RLock()
+	for uid, stats := range ct.users {
+		if n := stats.currentConns(); n > 0 {
+			counts[uid] = n
+		}
+	}
+	ct.usersMu.RUnlock()
+	relay := make(map[int]map[int]int)
+	ct.relaySourceMu.Lock()
+	for key, ips := range ct.relaySources {
+		for _, n := range ips {
+			if n > 0 {
+				if relay[key.userID] == nil {
+					relay[key.userID] = make(map[int]int)
+				}
+				relay[key.userID][key.nodeID] += n
+			}
+		}
+	}
+	ct.relaySourceMu.Unlock()
+	return counts, relay, nil
+}
+
+var _ kernel.ConnectionSnapshotReader = (*SingBox)(nil)
+
 // relaySourceKey 标识中转入口上的用户和实际出网节点，节点 0 表示入口直连。
 type relaySourceKey struct {
 	userID int

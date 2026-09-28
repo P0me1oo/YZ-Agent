@@ -166,6 +166,27 @@ func TestRelayAliveUsesActualOutbound(t *testing.T) {
 	_ = conn.Close()
 }
 
+func TestRelayConnectionSnapshotCountsPacketsFromOneSource(t *testing.T) {
+	user := runtimeUser(t, 1004)
+	tracker := NewConnTracker(0)
+	tracker.setNodeUsers(testRelayNode(), []model.UserSpec{user})
+	first := tracker.RoutedPacketConnection(context.Background(), &counterTestPacketConn{},
+		testInboundContext(relayUserName(user, 12), "198.51.100.7"), nil, relayTestOutbound{tag: "relay-7"})
+	second := tracker.RoutedPacketConnection(context.Background(), &counterTestPacketConn{},
+		testInboundContext(relayUserName(user, 12), "198.51.100.7"), nil, relayTestOutbound{tag: "relay-7"})
+	users, nodes, err := (&SingBox{connTracker: tracker}).GetConnectionSnapshot(context.Background())
+	if err != nil || users[user.ID] != 2 || nodes[user.ID][7] != 2 || len(tracker.relaySourceSnapshot()[user.ID][7]) != 1 {
+		t.Fatalf("同一来源的两条连接应计为 2，而来源只计 1: users=%v nodes=%v err=%v", users, nodes, err)
+	}
+	_ = first.Close()
+	_ = first.Close()
+	users, nodes, _ = (&SingBox{connTracker: tracker}).GetConnectionSnapshot(context.Background())
+	if users[user.ID] != 1 || nodes[user.ID][7] != 1 {
+		t.Fatalf("重复关闭后应只扣减一次: users=%v nodes=%v", users, nodes)
+	}
+	_ = second.Close()
+}
+
 func BenchmarkSingBoxRelayConfig(b *testing.B) {
 	node := testRelayNode()
 	for id := 13; id <= 31; id++ {

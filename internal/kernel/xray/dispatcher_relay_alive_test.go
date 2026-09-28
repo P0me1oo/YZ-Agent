@@ -67,3 +67,33 @@ func TestDispatcherRelayAliveDisabledOutsideEntry(t *testing.T) {
 	}
 	_ = link.Writer.(*closeTrackingWriter).Close()
 }
+
+func TestDispatcherConnectionSnapshotCountsLinksFromOneSource(t *testing.T) {
+	ld := newTestDispatcher()
+	ld.UpdateLimits(map[string]int{userEmail(1): 1}, nil, nil)
+	ld.innerDisp = &admissionDispatcher{}
+	ld.SetRelayRoutes(relayRouteNodes(&model.NodeSpec{Relay: &model.RelayConfig{
+		Mode: "entry", RouteID: 11,
+		Children: []model.RelayChild{{NodeID: 7, RouteID: 12, Tag: "relay-7"}},
+	}}))
+	dest := xnet.TCPDestination(xnet.ParseAddress("192.0.2.2"), 443)
+	first, err := ld.Dispatch(relayAliveContext("198.51.100.7", 12), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ld.Dispatch(relayAliveContext("198.51.100.7", 12), dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users, nodes := ld.ConnectionSnapshot()
+	if users[1] != 2 || nodes[1][7] != 2 || len(ld.RelayUserAlive()[1][7]) != 1 {
+		t.Fatalf("同一来源的两条连接应计为 2，而来源只计 1: users=%v nodes=%v", users, nodes)
+	}
+	_ = first.Writer.(*closeTrackingWriter).Close()
+	_ = first.Writer.(*closeTrackingWriter).Close()
+	users, nodes = ld.ConnectionSnapshot()
+	if users[1] != 1 || nodes[1][7] != 1 {
+		t.Fatalf("重复关闭后应只扣减一次: users=%v nodes=%v", users, nodes)
+	}
+	_ = second.Writer.(*closeTrackingWriter).Close()
+}

@@ -1113,6 +1113,7 @@ func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int,
 	s.tracker.Process(traffic, aliveIPs, connCount)
 	s.trackRelayTraffic(ctx)
 	s.trackRelayAlive(ctx)
+	s.trackConnectionCounts(ctx)
 	// 每次采样都保存；面板不可用、退避或请求仍在途时也不能只留在内存里。
 	_ = s.persistPending()
 	return connCount, len(traffic), nil
@@ -1260,19 +1261,22 @@ func (s *Service) takeReportBatch() *reportBatch {
 	relayUserTraffic := cloneRelayUserTraffic(s.tracker.FlushRelayUserTraffic())
 	aliveIPs := cloneAliveIPs(s.tracker.FlushAliveIPs())
 	limitEvents := s.collectLimitEvents()
+	connectionCounts, relayConnectionCounts := s.tracker.CurrentConnectionCounts()
 	reportID := s.nextReportIDLocked()
 
 	batch := &reportBatch{
 		id: reportID,
 		payload: controlplane.ReportPayload{
-			ReportID:         reportID,
-			Traffic:          traffic,
-			RelayTraffic:     relayTraffic,
-			RelayUserTraffic: relayUserTraffic,
-			RelayUserAlive:   s.tracker.RelayUserAlive(),
-			Alive:            aliveIPs,
-			Online:           s.tracker.CurrentOnline(),
-			LimitEvents:      limitEvents,
+			ReportID:              reportID,
+			Traffic:               traffic,
+			RelayTraffic:          relayTraffic,
+			RelayUserTraffic:      relayUserTraffic,
+			RelayUserAlive:        s.tracker.RelayUserAlive(),
+			Alive:                 aliveIPs,
+			Online:                s.tracker.CurrentOnline(),
+			ConnectionCounts:      connectionCounts,
+			RelayConnectionCounts: relayConnectionCounts,
+			LimitEvents:           limitEvents,
 		},
 	}
 	s.fillReportStatus(&batch.payload)
@@ -1466,6 +1470,20 @@ func (s *Service) trackRelayAlive(ctx context.Context) {
 		return
 	}
 	s.tracker.ProcessRelayAlive(alive)
+}
+
+// trackConnectionCounts 采集内核真实连接数；内核不支持时不使用在线来源数代替。
+func (s *Service) trackConnectionCounts(ctx context.Context) {
+	reader, ok := s.kernel.(kernel.ConnectionSnapshotReader)
+	if !ok {
+		return
+	}
+	users, relay, err := reader.GetConnectionSnapshot(ctx)
+	if err != nil {
+		nlog.Core().Debug("get connection snapshot failed", "error", err)
+		return
+	}
+	s.tracker.ProcessConnectionCounts(users, relay)
 }
 
 func (s *Service) nextReportIDLocked() string {

@@ -143,6 +143,12 @@ type RelayUserAliveReader interface {
 	GetRelayUserAlive(ctx context.Context) (map[int]map[int]map[string]bool, error)
 }
 
+// ConnectionSnapshotReader 返回当前每位用户的真实连接数，以及中转入口按实际节点拆分的连接数。
+// 第二个映射的节点 0 表示入口自身出网；普通节点返回空映射。
+type ConnectionSnapshotReader interface {
+	GetConnectionSnapshot(ctx context.Context) (map[int]int, map[int]map[int]int, error)
+}
+
 // ComputeHash returns a hash of config + user identities that would
 // require a kernel restart/reconstruction if changed.
 func ComputeHash(nc *model.NodeSpec, users []model.UserSpec) string {

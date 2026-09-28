@@ -45,6 +45,33 @@ type fakeKernel struct {
 	deviceFilter    deviceip.Filter
 }
 
+type countingKernel struct {
+	*fakeKernel
+	users map[int]int
+	relay map[int]map[int]int
+}
+
+func (k *countingKernel) GetConnectionSnapshot(context.Context) (map[int]int, map[int]map[int]int, error) {
+	return k.users, k.relay, nil
+}
+
+func TestConnectionCountsReplacePreviousSnapshot(t *testing.T) {
+	k := &countingKernel{fakeKernel: &fakeKernel{}, users: map[int]int{7: 12}, relay: map[int]map[int]int{7: {0: 2, 9: 10}}}
+	s := &Service{kernel: k, tracker: tracker.New()}
+	s.trackConnectionCounts(context.Background())
+	users, relay := s.tracker.CurrentConnectionCounts()
+	if users[7] != 12 || relay[7][9] != 10 {
+		t.Fatalf("真实连接数没有进入采样快照: users=%v relay=%v", users, relay)
+	}
+	k.users = map[int]int{}
+	k.relay = map[int]map[int]int{}
+	s.trackConnectionCounts(context.Background())
+	users, relay = s.tracker.CurrentConnectionCounts()
+	if len(users) != 0 || len(relay) != 0 {
+		t.Fatalf("空快照应清除离线用户: users=%v relay=%v", users, relay)
+	}
+}
+
 func (f *fakeKernel) SetDeviceIPExclude(entries []string) ([]string, bool) {
 	return f.deviceFilter.SetExcluded(entries)
 }

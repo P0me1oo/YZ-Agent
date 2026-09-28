@@ -349,3 +349,35 @@ func (x *Xray) GetRelayUserAlive(_ context.Context) (map[int]map[int]map[string]
 }
 
 var _ kernel.RelayUserAliveReader = (*Xray)(nil)
+
+// GetConnectionSnapshot 合并当前实例与排空中的旧实例，避免热重载后漏算旧连接。
+func (x *Xray) GetConnectionSnapshot(_ context.Context) (map[int]int, map[int]map[int]int, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	counts := make(map[int]int)
+	relay := make(map[int]map[int]int)
+	merge := func(ld *LimitDispatcher) {
+		if ld == nil {
+			return
+		}
+		users, nodes := ld.ConnectionSnapshot()
+		for uid, count := range users {
+			counts[uid] += count
+		}
+		for uid, entries := range nodes {
+			if relay[uid] == nil {
+				relay[uid] = make(map[int]int)
+			}
+			for node, count := range entries {
+				relay[uid][node] += count
+			}
+		}
+	}
+	merge(x.limitDispatcher)
+	for _, previous := range x.retired {
+		merge(previous.dispatcher)
+	}
+	return counts, relay, nil
+}
+
+var _ kernel.ConnectionSnapshotReader = (*Xray)(nil)

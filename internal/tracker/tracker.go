@@ -20,6 +20,11 @@ type snapshot struct {
 	outSpeed  int64 // 字节每秒
 }
 
+type connectionSnapshot struct {
+	users map[int]int
+	relay map[int]map[int]int
+}
+
 // Tracker computes per-user traffic deltas from cumulative counters
 // provided by the kernel, and accumulates totals for panel reporting.
 //
@@ -56,7 +61,8 @@ type Tracker struct {
 	pendingRelayUser  map[int]map[int][2]int64
 
 	// relayAlive 是中转入口按实际出网节点拆分的在线来源快照，每次采样整体替换。
-	relayAlive atomic.Pointer[map[int]map[int]map[string]bool]
+	relayAlive  atomic.Pointer[map[int]map[int]map[string]bool]
+	connections atomic.Pointer[connectionSnapshot]
 
 	// live holds the current snapshot, swapped atomically.
 	// Readers load this pointer without any lock.
@@ -232,6 +238,20 @@ func (t *Tracker) CurrentOnline() map[int]int {
 		cp[k] = v
 	}
 	return cp
+}
+
+// ProcessConnectionCounts 整体替换内核连接快照，空快照会清除已离线用户。
+func (t *Tracker) ProcessConnectionCounts(users map[int]int, relay map[int]map[int]int) {
+	t.connections.Store(&connectionSnapshot{users: users, relay: relay})
+}
+
+// CurrentConnectionCounts 返回最近一次内核采集的连接快照。
+func (t *Tracker) CurrentConnectionCounts() (map[int]int, map[int]map[int]int) {
+	current := t.connections.Load()
+	if current == nil {
+		return nil, nil
+	}
+	return current.users, current.relay
 }
 
 // LogStats logs current tracking statistics.

@@ -70,11 +70,15 @@ type ReportPayload struct {
 	RelayUserAlive map[int]map[int][]string
 	Alive          map[int][]string
 	Online         map[int]int
-	CPU            float64
-	Mem            [2]uint64
-	Swap           [2]uint64
-	Disk           [2]uint64
-	Metrics        map[string]interface{}
+	// ConnectionCounts 是按用户统计的真实活跃连接条数。
+	ConnectionCounts map[int]int
+	// RelayConnectionCounts 是中转入口按用户和实际出网节点拆分的活跃连接条数。
+	RelayConnectionCounts map[int]map[int]int
+	CPU                   float64
+	Mem                   [2]uint64
+	Swap                  [2]uint64
+	Disk                  [2]uint64
+	Metrics               map[string]interface{}
 	// LimitEvents 是本周期内触发连接数、新建速率或设备数上限的用户汇总，无事件时为空。
 	LimitEvents []panel.LimitEvent
 }

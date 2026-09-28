@@ -128,15 +128,20 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 // relayTraffic 是入口内部出站按逻辑节点统计的中转流量，只用于落地线路运营数据，
 // 不作为用户套餐流量。
 // relayUserTraffic 是同一组计数按用户和逻辑落地节点拆分的归属数据。
+type ConnectionSnapshot struct {
+	Users map[int]int
+	Relay map[int]map[int]int
+}
+
 func (c *Client) Report(reportID string, traffic map[int][2]int64, relayTraffic map[int][2]int64,
 	relayUserTraffic map[int]map[int][2]int64,
 	relayUserAlive map[int]map[int][]string,
 	alive map[int][]string, online map[int]int,
 	cpu float64, mem, swap, disk [2]uint64,
 	metrics map[string]interface{},
-	limitEvents []LimitEvent,
+	limitEvents []LimitEvent, counts ...ConnectionSnapshot,
 ) error {
-	return c.ReportContext(context.Background(), reportID, traffic, relayTraffic, relayUserTraffic, relayUserAlive, alive, online, cpu, mem, swap, disk, metrics, limitEvents)
+	return c.ReportContext(context.Background(), reportID, traffic, relayTraffic, relayUserTraffic, relayUserAlive, alive, online, cpu, mem, swap, disk, metrics, limitEvents, counts...)
 }
 
 func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map[int][2]int64, relayTraffic map[int][2]int64,
@@ -145,7 +150,7 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 	alive map[int][]string, online map[int]int,
 	cpu float64, mem, swap, disk [2]uint64,
 	metrics map[string]interface{},
-	limitEvents []LimitEvent,
+	limitEvents []LimitEvent, counts ...ConnectionSnapshot,
 ) error {
 	payload := make(map[string]interface{})
 	if reportID != "" {
@@ -237,6 +242,14 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 			}
 			onlineMapPool.Put(o)
 		}()
+	}
+	if len(counts) > 0 {
+		if users := counts[0].Users; users != nil {
+			payload["connection_counts"] = users
+		}
+		if relay := counts[0].Relay; len(relay) > 0 {
+			payload["relay_connection_counts"] = relay
+		}
 	}
 
 	status := map[string]interface{}{

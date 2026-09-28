@@ -149,6 +149,16 @@ func (s *relaySourceSet) snapshot() map[string]bool {
 	return out
 }
 
+func (s *relaySourceSet) connectionCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, n := range s.ips {
+		count += n
+	}
+	return count
+}
+
 func (d *LimitDispatcher) countKey(raw string) string {
 	if d.deviceFilter != nil {
 		return d.deviceFilter.CountKey(raw)
@@ -453,6 +463,52 @@ func (d *LimitDispatcher) RelayUserAlive() map[int]map[int]map[string]bool {
 		return true
 	})
 	return out
+}
+
+// ConnectionSnapshot 从连接引用计数读取真实连接条数，不受用户是否设置并发上限影响。
+func (d *LimitDispatcher) ConnectionSnapshot() (map[int]int, map[int]map[int]int) {
+	d.mu.RLock()
+	emailToUID := d.emailToUID
+	counts := make(map[int]int)
+	for email, ips := range d.limitedIPs {
+		uid := emailToUID[email]
+		if uid <= 0 {
+			continue
+		}
+		for _, n := range ips {
+			counts[uid] += n
+		}
+	}
+	d.mu.RUnlock()
+	d.unlimitedIPs.Range(func(key, value interface{}) bool {
+		uid := emailToUID[key.(string)]
+		if uid <= 0 {
+			return true
+		}
+		value.(*ipCounter).ips.Range(func(_, counter interface{}) bool {
+			if n := counter.(*atomic.Int64).Load(); n > 0 {
+				counts[uid] += int(n)
+			}
+			return true
+		})
+		return true
+	})
+	relay := make(map[int]map[int]int)
+	d.relaySources.Range(func(key, value interface{}) bool {
+		k := key.(relaySourceKey)
+		uid := emailToUID[k.email]
+		if uid <= 0 {
+			return true
+		}
+		if n := value.(*relaySourceSet).connectionCount(); n > 0 {
+			if relay[uid] == nil {
+				relay[uid] = make(map[int]int)
+			}
+			relay[uid][k.node] += n
+		}
+		return true
+	})
+	return counts, relay
 }
 
 // SetConnLimiter 配置连接数与新建速率准入，传 nil 表示关闭。
