@@ -6,7 +6,7 @@
 
 - 配套面板 `1.32.0`、管理端 `0.13.0`。运行逻辑与下节已完成真实联调的 v1.25.0 测试程序一致，核心依赖不变；本次修正命令入口测试并递增版本。
 - v1.25.0 云端测试在两个版本命令用例失败，原因是断言仍要求 v1.24.0，并非运行时故障。该流程未执行构建和发布，没有 Release；旧标签保留。修正后同时核对版本、构建时间和提交信息，未删除或跳过用例。
-- 修正后的正式功能标签命令包回归通过：`go test -mod=readonly -count=1 -tags 'with_quic with_utls with_wireguard with_acme with_clash_api' ./cmd/yz-agent`。最终来源仍须通过云端完整并发检测与构建检查。
+- 修正后的正式功能标签命令包回归通过：`go test -mod=readonly -count=1 -tags 'with_quic with_utls with_wireguard with_acme with_clash_api' ./cmd/yz-agent`。最终来源的云端完整并发检测与构建检查也已通过。
 - 发布核验（2026-09-30）：来源提交 `8627e6d578f50864c792c9d18fa2305b9f81fe0a` 的 [Release v1.25.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.25.1) 已发布，且为 GitHub 最新 Release。12 个附件全部下载并与 GitHub digest 匹配，其中 11 个文件与 `SHA256SUMS` 匹配，同架构 `yz-agent` 和兼容名称 `xboard-node` 字节一致。四份程序的实际构建信息均为该提交、`vcs.modified=false`、`CGO_ENABLED=0` 和对应 Linux 架构；固定核心仍为 YZ-sing-box `v1.14.0-yz.2`、YZ-Xray-core `v0.0.0-20260926140203-434e1c025c93`。
 - 镜像 `ghcr.io/p0me1oo/yz-agent:v1.25.1`、来源提交标签和 `latest` 均为 manifest `sha256:a6e35dff6efb3833dd83e3dd67f8f75c3453820a7214be42bac87adc09c42451`，包含 `linux/amd64`（`sha256:4207716eacdb7f289523b134c7d0891729b9cf92e1b95557484fc315cad9e221`）和 `linux/arm64`（`sha256:90de014380a3fb30dfd525ba91999ef218c1a1f3bed87f6321edf835ef728304`）。两种架构的 OCI 来源提交与版本均已匿名核对；云端完整并发检测、双架构构建、镜像运行版本校验和 Release 全部通过。未更新生产服务器。
 - 回滚基线仍为 v1.24.0，保留待上报批次。
