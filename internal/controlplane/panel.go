@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -12,9 +13,13 @@ import (
 )
 
 type PanelControlPlane struct {
-	cfg    config.PanelConfig
-	wsCfg  config.WSConfig
-	client *panel.Client
+	cfg          config.PanelConfig
+	wsCfg        config.WSConfig
+	client       *panel.Client
+	pushMu       sync.Mutex
+	pushClient   *panelPushClient
+	pushURL      string
+	pushRealtime bool
 }
 
 type panelPushClient struct {
@@ -43,9 +48,24 @@ func (p *PanelControlPlane) Initial(ctx context.Context, metricsFn func() map[st
 	bootstrap := Bootstrap{PushInterval: hs.Settings.PushInterval, PullInterval: hs.Settings.PullInterval}
 	if hs.WebSocket.Enabled && hs.WebSocket.WSURL != "" {
 		bootstrap.Push = p.newPushClient(metricsFn, events, statuses, hs.WebSocket.WSURL)
+	}
+	if p.client.RealtimeEnabled() {
+		snapshot, err := p.Poll(ctx)
+		if err != nil {
+			if bootstrap.Push != nil {
+				return bootstrap, nil
+			}
+			return Bootstrap{}, err
+		}
+		bootstrap.Config, bootstrap.Users = snapshot.Config, snapshot.Users
+		bootstrap.ControlVersion, bootstrap.DeviceVersion = snapshot.ControlVersion, snapshot.DeviceVersion
+		bootstrap.DeviceUsers = snapshot.DeviceUsers
 		return bootstrap, nil
 	}
 
+	if bootstrap.Push != nil {
+		return bootstrap, nil
+	}
 	nlog.Core().Info("websocket disabled, using REST API")
 	configETag, userETag := p.client.ETags()
 	committed := false
@@ -73,6 +93,9 @@ func (p *PanelControlPlane) Initial(ctx context.Context, metricsFn func() map[st
 }
 
 func (p *PanelControlPlane) Poll(ctx context.Context) (Snapshot, error) {
+	if p.client.RealtimeEnabled() {
+		return pollRealtime(ctx, p.client)
+	}
 	configETag, userETag := p.client.ETags()
 	committed := false
 	defer func() {
@@ -115,6 +138,11 @@ func (p *PanelControlPlane) Discover(ctx context.Context, metricsFn func() map[s
 	if hs.WebSocket.Enabled && hs.WebSocket.WSURL != "" {
 		return p.newPushClient(metricsFn, events, statuses, hs.WebSocket.WSURL), nil
 	}
+	p.pushMu.Lock()
+	p.pushClient = nil
+	p.pushURL = ""
+	p.pushMu.Unlock()
+	p.client.SetWebSocketProvider(nil)
 	return nil, nil
 }
 
@@ -138,7 +166,13 @@ func (p *PanelControlPlane) Metrics() APIMetrics {
 }
 
 func (p *PanelControlPlane) newPushClient(metricsFn func() map[string]interface{}, events chan<- Event, statuses chan<- StatusChange, wsURL string) PushClient {
+	p.pushMu.Lock()
+	defer p.pushMu.Unlock()
+	if p.pushClient != nil && p.pushURL == wsURL && p.pushRealtime == p.client.RealtimeEnabled() {
+		return p.pushClient
+	}
 	cfg := panel.WSClientConfig{
+		Realtime:         p.client.RealtimeEnabled(),
 		StatusInterval:   time.Duration(p.wsCfg.StatusInterval) * time.Second,
 		HandshakeTimeout: time.Duration(p.wsCfg.HandshakeTimeout) * time.Second,
 		BackoffInitial:   time.Duration(p.wsCfg.BackoffInitial) * time.Second,
@@ -169,12 +203,14 @@ func (p *PanelControlPlane) newPushClient(metricsFn func() map[string]interface{
 		},
 		metricsFn,
 	)
-	return &panelPushClient{inner: inner}
+	p.client.SetWebSocketProvider(func() *panel.WSClient { return inner })
+	p.pushClient, p.pushURL, p.pushRealtime = &panelPushClient{inner: inner}, wsURL, p.client.RealtimeEnabled()
+	return p.pushClient
 }
 
 // TranslateWSEvent 保留待应用快照，由目标节点按自身内核校验并报告失败。
 func TranslateWSEvent(event panel.WSEvent) Event {
-	translated := Event{Type: EventType(event.Type), DeltaAction: event.DeltaAction, DeviceUsers: event.DeviceUsers}
+	translated := Event{Type: EventType(event.Type), Version: event.Version, DeltaAction: event.DeltaAction, DeviceUsers: event.DeviceUsers}
 	if event.Config != nil {
 		translated.Config = model.NodeSpecFromPanel(event.Config)
 	}

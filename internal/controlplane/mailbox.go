@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
 
 // MailboxState is the coalesced snapshot drained from a NodeMailbox.
@@ -15,6 +16,9 @@ type MailboxState struct {
 	HasUsers       bool
 	HasDevices     bool
 	NeedsReconcile bool
+	FullSnapshot   bool
+	ControlVersion panel.StateVersion
+	DeviceVersion  panel.StateVersion
 }
 
 // NodeMailbox buffers WS events for a machine-mode node service that is not
@@ -32,6 +36,9 @@ type NodeMailbox struct {
 	needsReconcile   bool
 	hasFullUserState bool
 	notifyCh         chan struct{}
+	fullSnapshot     bool
+	controlVersion   panel.VersionGate
+	deviceVersion    panel.VersionGate
 }
 
 func NewNodeMailbox() *NodeMailbox {
@@ -63,8 +70,24 @@ func (m *NodeMailbox) SeedBaseline(users []model.UserSpec, config *model.NodeSpe
 func (m *NodeMailbox) Apply(event Event) {
 	m.mu.Lock()
 	changed := false
+	gate := &m.controlVersion
+	if event.Type == EventSyncDevices {
+		gate = &m.deviceVersion
+	}
+	if !gate.Accept(event.Version) {
+		m.mu.Unlock()
+		return
+	}
 
 	switch event.Type {
+	case EventSyncSnapshot:
+		if event.Config != nil && event.Users != nil {
+			m.config = cloneNodeSpec(event.Config)
+			m.users = cloneUsers(event.Users)
+			m.dirtyConfig, m.dirtyUsers, m.fullSnapshot = true, true, true
+			m.hasFullUserState = true
+			changed = true
+		}
 	case EventSyncConfig:
 		if event.Config != nil {
 			m.config = cloneNodeSpec(event.Config)
@@ -120,7 +143,11 @@ func (m *NodeMailbox) DrainIfReady() MailboxState {
 	if !m.ready {
 		return MailboxState{}
 	}
-	state := MailboxState{NeedsReconcile: m.needsReconcile}
+	state := MailboxState{
+		NeedsReconcile: m.needsReconcile, FullSnapshot: m.fullSnapshot,
+		ControlVersion: m.controlVersion.Current(), DeviceVersion: m.deviceVersion.Current(),
+	}
+	m.fullSnapshot = false
 	if m.dirtyConfig && m.config != nil {
 		state.Config = cloneNodeSpec(m.config)
 		state.HasConfig = true

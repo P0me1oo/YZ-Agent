@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -43,6 +44,7 @@ type Client struct {
 
 	apiSuccess atomic.Uint64
 	apiFailure atomic.Uint64
+	realtime   realtimeClient
 }
 
 // NewClient creates a new panel API client.
@@ -118,6 +120,7 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&hs); err != nil {
 		return nil, fmt.Errorf("decode handshake: %w", err)
 	}
+	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
 	return &hs, nil
 }
 
@@ -268,6 +271,9 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 		payload["limit_events"] = limitEvents
 	}
 
+	if c.RealtimeEnabled() {
+		return c.reportRealtime(ctx, payload)
+	}
 	return c.postJSONContext(ctx, "/api/v2/server/report", payload)
 }
 
@@ -548,7 +554,7 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
-		return nil, err
+		return nil, panelRequestError(err, method, path)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -562,7 +568,7 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		c.apiFailure.Add(1)
-		return nil, err
+		return nil, panelRequestError(err, method, path)
 	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
@@ -573,6 +579,15 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 
 	nlog.Core().Debug("panel response", "method", method, "path", path, "status", resp.StatusCode)
 	return resp, nil
+}
+
+// 请求失败只保留接口路径与底层原因，避免认证查询参数进入调用方日志。
+func panelRequestError(err error, method, path string) error {
+	var requestErr *url.Error
+	if errors.As(err, &requestErr) {
+		return &url.Error{Op: method, URL: strings.SplitN(path, "?", 2)[0], Err: panelRequestError(requestErr.Err, method, path)}
+	}
+	return err
 }
 
 // drainAndClose reads any remaining bytes (up to 512B) and closes the body.

@@ -123,7 +123,7 @@ func TestUserApplyFailureRetriesRESTSnapshot(t *testing.T) {
 			case "delta_remove":
 				s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncUserDelta, DeltaAction: "remove", DeltaUsers: oldUsers})
 			default:
-				s.applyPullResult(ctx, pullResult{users: next.Users, userHash: computeUserHash(next.Users)})
+				s.applyPullResult(ctx, pullResult{generation: s.controlGeneration, users: next.Users, userHash: computeUserHash(next.Users)})
 			}
 			if s.lastUserHash != computeUserHash(newUsers) {
 				t.Fatalf("失败后未保留待修正用户状态: got=%q", s.lastUserHash)
@@ -135,7 +135,7 @@ func TestUserApplyFailureRetriesRESTSnapshot(t *testing.T) {
 				t.Fatalf("读取失败快照后的 REST 对账失败: %v", err)
 			}
 			if retry.Users != nil {
-				s.applyPullResult(ctx, pullResult{users: retry.Users, userHash: computeUserHash(retry.Users)})
+				s.applyPullResult(ctx, pullResult{generation: s.controlGeneration, users: retry.Users, userHash: computeUserHash(retry.Users)})
 			}
 			if got := k.startCalls + k.updateCalls + k.addCalls + k.removeCalls; got != calls {
 				t.Fatalf("相同失败快照被后台再次应用: before=%d after=%d", calls, got)
@@ -146,7 +146,7 @@ func TestUserApplyFailureRetriesRESTSnapshot(t *testing.T) {
 			if err != nil || corrected.Users == nil {
 				t.Fatalf("修正后的用户快照未重新获取: err=%v", err)
 			}
-			s.applyPullResult(ctx, pullResult{users: corrected.Users, userHash: computeUserHash(corrected.Users)})
+			s.applyPullResult(ctx, pullResult{generation: s.controlGeneration, users: corrected.Users, userHash: computeUserHash(corrected.Users)})
 			if s.lastUserHash != computeUserHash(correctedUsers) || !k.running {
 				t.Fatalf("修正后的用户快照未恢复运行: hash=%q running=%v", s.lastUserHash, k.running)
 			}

@@ -79,14 +79,23 @@ type Service struct {
 	// pullResults delivers async pullViaAPI results back to the main goroutine.
 	pullResults chan pullResult
 
-	wsClient         controlplane.PushClient        // Push client (nil if push is not enabled)
-	wsEvents         chan controlplane.Event        // receives data events from push transport
-	wsStatusCh       chan controlplane.StatusChange // receives push connectivity notifications
-	wsCancel         context.CancelFunc             // cancels the WS client goroutine
-	wsDisconnectAt   time.Time                      // when WS last disconnected (zero if connected)
-	wsResyncPending  atomic.Bool
-	machineMailbox   *controlplane.NodeMailbox
-	machineMailboxCh <-chan struct{}
+	wsClient          controlplane.PushClient        // Push client (nil if push is not enabled)
+	wsEvents          chan controlplane.Event        // receives data events from push transport
+	wsStatusCh        chan controlplane.StatusChange // receives push connectivity notifications
+	wsCancel          context.CancelFunc             // cancels the WS client goroutine
+	wsDisconnectAt    time.Time                      // when WS last disconnected (zero if connected)
+	wsResyncPending   atomic.Bool
+	wsSynchronized    bool
+	controlVersion    versionGate
+	deviceVersion     versionGate
+	controlGeneration uint64
+	pendingCertReload bool
+	lastDeviceSync    time.Time
+	stateActive       atomic.Bool
+	discoveryActive   atomic.Bool
+	discoveryResults  chan discoveryResult
+	machineMailbox    *controlplane.NodeMailbox
+	machineMailboxCh  <-chan struct{}
 
 	// metricsMu: lastUsers, lastConfig, wsClient, wsDisconnectAt (buildMetrics vs main loop).
 	metricsMu sync.RWMutex
@@ -116,11 +125,15 @@ const (
 
 // pullResult carries the outcome of an async pullViaAPI back to the main goroutine.
 type pullResult struct {
-	config      *model.NodeSpec
-	users       []model.UserSpec
-	configHash  string
-	userHash    string
-	certChanged bool
+	config         *model.NodeSpec
+	users          []model.UserSpec
+	configHash     string
+	userHash       string
+	certChanged    bool
+	generation     uint64
+	controlVersion panel.StateVersion
+	deviceVersion  panel.StateVersion
+	deviceUsers    map[int][]string
 }
 
 type reportBatch struct {
@@ -257,10 +270,18 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 		return fmt.Errorf("initial setup: %w", err)
 	}
 
-	// Set up tickers
-	trackTicker := time.NewTicker(time.Duration(s.cfg.Node.TrackInterval) * time.Second)
+	// 状态实时采样与流量批次周期分离，累计流量仍沿用原有落盘和确认。
+	trackInterval := time.Duration(s.cfg.Node.TrackInterval) * time.Second
+	realtimeActive := s.realtimeEnabled()
+	if realtimeActive {
+		trackInterval = time.Second
+	}
+	trackTicker := time.NewTicker(trackInterval)
 	pushInterval := time.Duration(math.Max(float64(s.pushInterval), 5)) * time.Second
 	pullInterval := time.Duration(s.pullInterval) * time.Second
+	if s.realtimeEnabled() {
+		pullInterval = 10 * time.Second
+	}
 	wsReconcileInterval := max(pullInterval, 5*time.Minute)
 	lastWSReconcile := time.Now()
 	reportTicker := time.NewTicker(pushInterval)
@@ -291,16 +312,24 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			return nil
 
 		case <-trackTicker.C:
-			s.trackAndEnforce(ctx)
+			if s.trackAndEnforce(ctx) {
+				s.publishRuntimeState(ctx)
+			}
+			if s.realtimeEnabled() && !s.lastDeviceSync.IsZero() && time.Since(s.lastDeviceSync) > 35*time.Second {
+				s.kernel.ClearGlobalDevices()
+				s.lastDeviceSync = time.Time{}
+			}
 
 		case <-reportTicker.C:
 			s.pushReportAsync()
 
 		case <-deviceReportTicker.C:
-			s.reportDevices()
+			if !s.realtimeEnabled() {
+				s.reportDevices()
+			}
 
 		case <-pullTicker.C:
-			if s.wsClient != nil && s.wsClient.IsConnected() {
+			if s.wsClient != nil && s.wsClient.IsConnected() && (!s.realtimeEnabled() || s.wsSynchronized) {
 				if time.Since(lastWSReconcile) < wsReconcileInterval {
 					continue
 				}
@@ -316,6 +345,14 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 
 		case <-wsDiscoveryTicker.C:
 			s.wsDiscovery(ctx)
+
+		case result := <-s.discoveryResults:
+			s.applyWSDiscovery(ctx, result)
+			if s.realtimeEnabled() && !realtimeActive {
+				realtimeActive = true
+				trackTicker.Reset(time.Second)
+				pullTicker.Reset(10 * time.Second)
+			}
 
 		case status := <-s.wsStatusCh:
 			s.handleWSStatus(ctx, status)
@@ -394,6 +431,8 @@ func (s *Service) initialSetup(ctx context.Context) error {
 
 	// 应用失败由节点自身记录并停止内核；初始同步仍完成，继续等待面板修正。
 	s.applyChanges(ctx, true, false)
+	s.controlVersion.accept(bootstrap.ControlVersion)
+	s.applyDeviceSnapshot(bootstrap.DeviceVersion, bootstrap.DeviceUsers)
 	s.markMailboxReadyAndDrain(ctx)
 	return nil
 }
@@ -485,14 +524,18 @@ func (s *Service) drainMachineMailbox(ctx context.Context) {
 		return
 	}
 	state := s.machineMailbox.DrainIfReady()
-	if state.HasConfig {
-		s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncConfig, Config: state.Config})
-	}
-	if state.HasUsers {
-		s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncUsers, Users: state.Users})
+	if state.FullSnapshot {
+		s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncSnapshot, Version: state.ControlVersion, Config: state.Config, Users: state.Users})
+	} else {
+		if state.HasConfig {
+			s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncConfig, Version: state.ControlVersion, Config: state.Config})
+		}
+		if state.HasUsers {
+			s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncUsers, Version: state.ControlVersion, Users: state.Users})
+		}
 	}
 	if state.HasDevices {
-		s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncDevices, DeviceUsers: state.DeviceUsers})
+		s.handleWSEvent(ctx, controlplane.Event{Type: controlplane.EventSyncDevices, Version: state.DeviceVersion, DeviceUsers: state.DeviceUsers})
 	}
 	if state.NeedsReconcile {
 		s.requestWSResync(ctx, "machine_mailbox_reconcile")
@@ -523,6 +566,7 @@ func (s *Service) wsMetrics() map[string]interface{} {
 // - On disconnect: record timestamp, immediately REST poll.
 // - On reconnect: clear disconnect timestamp, REST poll to catch missed events.
 func (s *Service) handleWSStatus(ctx context.Context, status controlplane.StatusChange) {
+	s.wsSynchronized = false
 	if status.NeedsResync {
 		s.requestWSResync(ctx, "drop_detected")
 	}
@@ -536,8 +580,8 @@ func (s *Service) handleWSStatus(ctx context.Context, status controlplane.Status
 		} else {
 			nlog.Core().Info("ws connected")
 		}
-		// After reconnect, proactively pull once to ensure we haven't missed
-		// any updates during the disconnection window.
+		// 先完成一次完整对账，再停止 HTTP 兜底。
+		s.resetPollingState()
 		s.pullViaAPIAsync(ctx)
 	} else {
 		s.metricsMu.Lock()
@@ -550,8 +594,10 @@ func (s *Service) handleWSStatus(ctx context.Context, status controlplane.Status
 		} else {
 			nlog.Core().Info("ws disconnected")
 		}
-		// Clear global device state on disconnect
-		s.kernel.ClearGlobalDevices()
+		// 新协议由 HTTP 继续更新全局设备快照，只有超过有效期才清除。
+		if !s.realtimeEnabled() {
+			s.kernel.ClearGlobalDevices()
+		}
 		s.pullViaAPIAsync(ctx)
 	}
 }
@@ -569,57 +615,77 @@ func (s *Service) wsDiscovery(ctx context.Context) {
 	if !s.source.SupportsDiscovery() {
 		return
 	}
-
-	needsCheck := false
-	if s.wsClient == nil {
-		needsCheck = true
-		nlog.Core().Debug("push discovery: no push client, checking if control plane enabled push")
-	} else if !s.wsDisconnectAt.IsZero() && time.Since(s.wsDisconnectAt) > 10*time.Minute {
-		needsCheck = true
-		nlog.Core().Debug("push discovery: push disconnected for >10min, re-checking")
-	}
-	if !needsCheck {
+	if s.wsClient != nil && s.wsClient.IsConnected() && s.realtimeEnabled() {
 		return
 	}
+	if !s.discoveryActive.CompareAndSwap(false, true) {
+		return
+	}
+	if s.discoveryResults == nil {
+		s.discoveryResults = make(chan discoveryResult, 1)
+	}
+	wasRealtime := s.realtimeEnabled()
+	go func() {
+		defer s.discoveryActive.Store(false)
+		push, err := s.source.Discover(ctx, s.wsMetrics, s.wsEvents, s.wsStatusCh)
+		select {
+		case s.discoveryResults <- discoveryResult{push: push, err: err, wasRealtime: wasRealtime}:
+		case <-ctx.Done():
+		}
+	}()
+}
 
-	pushClient, err := s.source.Discover(ctx, s.wsMetrics, s.wsEvents, s.wsStatusCh)
+func (s *Service) applyWSDiscovery(ctx context.Context, result discoveryResult) {
+	pushClient, err, wasRealtime := result.push, result.err, result.wasRealtime
 	if err != nil {
 		nlog.Core().Debug("push discovery failed", "error", err)
 		return
 	}
-	if s.source.SupportsPolling() {
-		s.pullViaAPIAsync(ctx)
+	if wasRealtime && !s.realtimeEnabled() {
+		// 能力回退由重新握手确认，不能由普通旧消息自行解除版本保护。
+		s.controlVersion, s.deviceVersion = versionGate{}, versionGate{}
+		s.controlGeneration++
 	}
-
-	if pushClient != nil {
-		if s.wsClient == nil {
-			nlog.Core().Info("push discovery: control plane enabled push, creating client")
-			s.metricsMu.Lock()
-			s.wsClient = pushClient
-			s.wsDisconnectAt = time.Time{}
-			s.metricsMu.Unlock()
-			s.startWSClient(ctx)
-		}
-	} else if s.wsClient != nil {
-		nlog.Core().Info("push discovery: control plane disabled push, switching to polling")
+	if pushClient != s.wsClient {
 		if s.wsCancel != nil {
 			s.wsCancel()
 		}
-		s.metricsMu.Lock()
-		s.wsClient = nil
-		s.wsDisconnectAt = time.Time{}
-		s.metricsMu.Unlock()
 		s.wsCancel = nil
+		s.metricsMu.Lock()
+		s.wsClient = pushClient
+		s.wsDisconnectAt = time.Now()
+		s.metricsMu.Unlock()
+		s.wsSynchronized = false
+		s.controlGeneration++
+		s.resetPollingState()
+		if pushClient != nil {
+			s.startWSClient(ctx)
+		}
+	}
+	if s.source.SupportsPolling() {
+		s.pullViaAPIAsync(ctx)
 	}
 }
 
 // handleWSEvent processes data events received via WebSocket
 func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 	switch event.Type {
-	case controlplane.EventSyncConfig:
-		if event.Config == nil {
+	case controlplane.EventSyncSnapshot:
+		if event.Config == nil || event.Users == nil {
 			return
 		}
+		s.controlGeneration++
+		s.applyPullResult(ctx, pullResult{
+			config: event.Config, users: event.Users,
+			configHash: computeConfigHash(event.Config), userHash: computeUserHash(event.Users),
+			controlVersion: event.Version, generation: s.controlGeneration,
+		})
+
+	case controlplane.EventSyncConfig:
+		if event.Config == nil || !s.controlVersion.accept(event.Version) {
+			return
+		}
+		s.controlGeneration++
 		s.applyDeviceIPExclude(event.Config)
 		newConfigHash := computeConfigHash(event.Config)
 		if newConfigHash == s.lastConfigHash {
@@ -630,9 +696,10 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		}
 
 	case controlplane.EventSyncUsers:
-		if event.Users == nil {
+		if event.Users == nil || !s.controlVersion.accept(event.Version) {
 			return
 		}
+		s.controlGeneration++
 		newHash := computeUserHash(event.Users)
 		if newHash == s.lastUserHash {
 			return
@@ -645,9 +712,10 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		}
 
 	case controlplane.EventSyncUserDelta:
-		if len(event.DeltaUsers) == 0 {
+		if len(event.DeltaUsers) == 0 || !s.controlVersion.accept(event.Version) {
 			return
 		}
+		s.controlGeneration++
 		if s.nodeLog != nil {
 			s.nodeLog.Info(fmt.Sprintf("users delta: %s, %d users", event.DeltaAction, len(event.DeltaUsers)))
 		}
@@ -656,10 +724,7 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		}
 
 	case controlplane.EventSyncDevices:
-		// Sync global device state
-		if event.DeviceUsers != nil {
-			s.kernel.UpdateGlobalDevices(event.DeviceUsers)
-		}
+		s.applyDeviceSnapshot(event.Version, event.DeviceUsers)
 
 	default:
 		nlog.Core().Debug(fmt.Sprintf("unknown ws event: %v", event.Type))
@@ -682,7 +747,7 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 		return
 	}
 
-	currentConfigHash := s.lastConfigHash
+	startedGeneration := s.controlGeneration
 
 	go func() {
 		defer s.pullActive.Store(false)
@@ -700,15 +765,14 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 		if takeCertRenewal == nil {
 			takeCertRenewal = s.cert.CertRenewed
 		}
-		result := pullResult{certChanged: takeCertRenewal()}
+		result := pullResult{
+			certChanged: takeCertRenewal(), generation: startedGeneration,
+			controlVersion: snapshot.ControlVersion, deviceVersion: snapshot.DeviceVersion,
+			deviceUsers: snapshot.DeviceUsers,
+		}
 		if snapshot.Config != nil {
-			// 名单不参与配置哈希；配置未变时 result.config 会被丢弃，所以在这里先应用。
-			s.applyDeviceIPExclude(snapshot.Config)
 			result.config = snapshot.Config
 			result.configHash = computeConfigHash(snapshot.Config)
-			if result.configHash == currentConfigHash && !result.certChanged {
-				result.config = nil
-			}
 		}
 		if snapshot.Users != nil {
 			result.users = snapshot.Users
@@ -724,7 +788,24 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 
 // applyPullResult processes the result of an async pullViaAPI on the main goroutine.
 func (s *Service) applyPullResult(ctx context.Context, result pullResult) {
+	s.pendingCertReload = s.pendingCertReload || result.certChanged
+	if result.generation != s.controlGeneration || !s.controlVersion.accept(result.controlVersion) {
+		s.wsSynchronized = false
+		s.wsResyncPending.Store(true)
+		return
+	}
 	s.wsResyncPending.Store(false)
+	result.certChanged = s.pendingCertReload
+	s.pendingCertReload = false
+	s.applyDeviceSnapshot(result.deviceVersion, result.deviceUsers)
+	if result.config != nil {
+		// 名单和其他配置一样，只在顺序校验通过后由主循环应用。
+		s.applyDeviceIPExclude(result.config)
+		if result.configHash != "" && result.configHash == s.lastConfigHash && !result.certChanged {
+			result.config = nil
+		}
+	}
+	s.wsSynchronized = s.wsClient != nil && s.wsClient.IsConnected()
 
 	needsReload := result.config != nil || result.certChanged
 	usersChanged := result.users != nil && result.userHash != s.lastUserHash
@@ -1084,14 +1165,14 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 	return true
 }
 
-func (s *Service) trackAndEnforce(ctx context.Context) {
+func (s *Service) trackAndEnforce(ctx context.Context) bool {
 	if s.appliedState.Config != nil && !s.kernel.IsRunning() {
 		s.failRuntime("内核意外停止", s.lastConfig, s.lastUsers, fmt.Errorf("内核已不在运行"))
 	}
 	connCount, userCount, err := s.collectTraffic(ctx)
 	if err != nil {
 		nlog.Core().Debug("get user traffic failed", "error", err)
-		return
+		return false
 	}
 
 	// Only log stats if there's actual traffic or connections
@@ -1102,6 +1183,7 @@ func (s *Service) trackAndEnforce(ctx context.Context) {
 			nlog.TrackerStats(connCount, userCount)
 		}
 	}
+	return true
 }
 
 // collectTraffic 只采样，不启动内核；停止节点和进程退出也需要读取最终累计值。
@@ -1677,6 +1759,10 @@ func computeUserHash(users []model.UserSpec) string {
 		binary.LittleEndian.PutUint64(buf[:], uint64(u.SpeedLimit))
 		h.Write(buf[:])
 		binary.LittleEndian.PutUint64(buf[:], uint64(u.DeviceLimit))
+		h.Write(buf[:])
+		binary.LittleEndian.PutUint64(buf[:], uint64(u.ConnLimit))
+		h.Write(buf[:])
+		binary.LittleEndian.PutUint64(buf[:], uint64(u.ConnRateLimit))
 		h.Write(buf[:])
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))

@@ -29,6 +29,9 @@ func NewMachinePanelControlPlane(
 	push PushClient,
 	registerFn func(statuses chan<- StatusChange) *NodeMailbox,
 ) *MachinePanelControlPlane {
+	if socket, ok := push.(interface{ WebSocket() *panel.WSClient }); ok {
+		client.SetWebSocketProvider(socket.WebSocket)
+	}
 	return &MachinePanelControlPlane{
 		client:     client,
 		push:       push,
@@ -37,7 +40,7 @@ func NewMachinePanelControlPlane(
 }
 
 func (p *MachinePanelControlPlane) SupportsPolling() bool       { return true }
-func (p *MachinePanelControlPlane) SupportsDiscovery() bool     { return false }
+func (p *MachinePanelControlPlane) SupportsDiscovery() bool     { return true }
 func (p *MachinePanelControlPlane) SupportsReporting() bool     { return true }
 func (p *MachinePanelControlPlane) SupportsDeviceReports() bool { return p.push != nil }
 
@@ -59,6 +62,20 @@ func (p *MachinePanelControlPlane) Initial(
 	if hs != nil {
 		bootstrap.PushInterval = hs.Settings.PushInterval
 		bootstrap.PullInterval = hs.Settings.PullInterval
+	}
+	if p.client.RealtimeEnabled() {
+		snapshot, err := p.Poll(ctx)
+		if err != nil {
+			return Bootstrap{}, err
+		}
+		bootstrap.Config, bootstrap.Users = snapshot.Config, snapshot.Users
+		bootstrap.ControlVersion, bootstrap.DeviceVersion = snapshot.ControlVersion, snapshot.DeviceVersion
+		bootstrap.DeviceUsers = snapshot.DeviceUsers
+		bootstrap.Push = p.push
+		if p.registerFn != nil {
+			bootstrap.Mailbox = p.registerFn(statuses)
+		}
+		return bootstrap, nil
 	}
 
 	configETag, userETag := p.client.ETags()
@@ -98,6 +115,9 @@ func (p *MachinePanelControlPlane) Initial(
 }
 
 func (p *MachinePanelControlPlane) Poll(ctx context.Context) (Snapshot, error) {
+	if p.client.RealtimeEnabled() {
+		return pollRealtime(ctx, p.client)
+	}
 	configETag, userETag := p.client.ETags()
 	committed := false
 	defer func() {
@@ -133,7 +153,13 @@ func (p *MachinePanelControlPlane) Discover(
 	events chan<- Event,
 	statuses chan<- StatusChange,
 ) (PushClient, error) {
-	return nil, nil
+	if _, err := p.client.Handshake(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return p.push, nil
 }
 
 func (p *MachinePanelControlPlane) Report(payload ReportPayload) error {

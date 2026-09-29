@@ -10,6 +10,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/agentcli"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -53,8 +54,18 @@ type Orchestrator struct {
 	statuses  map[int]chan<- controlplane.StatusChange
 
 	// Shared WS client (nil when WS is disabled).
-	ws       *panel.WSClient
-	wsCancel context.CancelFunc
+	ws                *panel.WSClient
+	wsCancel          context.CancelFunc
+	wsMu              sync.RWMutex
+	wsURL             string
+	wsRealtime        bool
+	wsDiscovering     atomic.Bool
+	stateActive       atomic.Bool
+	rediscoverActive  atomic.Bool
+	rediscoverPending atomic.Bool
+	discoverySocket   atomic.Pointer[panel.WSClient]
+	discoveryVersion  atomic.Uint64
+	lastDiscovery     atomic.Int64
 
 	// runCtx is stored from Run() so that onWSEvent can trigger rediscover
 	// for sync.nodes events without blocking the main loop.
@@ -242,10 +253,14 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	for _, n := range nodesResp.Nodes {
 		o.startNode(ctx, n)
 	}
-	discoveryTicker := time.NewTicker(o.pullInterval)
+	discoveryTicker := time.NewTicker(min(o.pullInterval, 10*time.Second))
 	statusTicker := time.NewTicker(o.pushInterval)
+	stateTicker := time.NewTicker(time.Second)
+	wsDiscoveryTicker := time.NewTicker(10 * time.Second)
 	defer discoveryTicker.Stop()
 	defer statusTicker.Stop()
+	defer stateTicker.Stop()
+	defer wsDiscoveryTicker.Stop()
 
 	for {
 		select {
@@ -255,10 +270,20 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			return nil
 
 		case <-discoveryTicker.C:
-			o.rediscover(ctx)
+			ws := o.currentWebSocket()
+			synchronized := ws != nil && ws.IsConnected() && o.discoverySocket.Load() == ws && o.discoveryVersion.Load() == ws.Generation()
+			if !synchronized || time.Since(time.UnixMilli(o.lastDiscovery.Load())) >= 5*time.Minute {
+				go o.rediscover(ctx)
+			}
 
 		case <-statusTicker.C:
-			o.reportMachineStatus()
+			if !o.client.RealtimeEnabled() {
+				o.reportMachineStatus()
+			}
+		case <-stateTicker.C:
+			o.publishRuntimeState(ctx)
+		case <-wsDiscoveryTicker.C:
+			go o.tryStartWS(ctx)
 		}
 	}
 }
@@ -326,13 +351,7 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 	// Reset cached ETag so the subsequent GetConfig in Initial() gets a full response.
 	perNodeClient.ResetConfigETag()
 
-	var push controlplane.PushClient
-	if o.ws != nil {
-		push = &machineNodePush{
-			nodeID: mn.ID,
-			ws:     o.ws,
-		}
-	}
+	push := &machineNodePush{nodeID: mn.ID, provider: o.currentWebSocket}
 
 	// The registerFn is called by MachinePanelControlPlane.Initial() to expose
 	// the node mailbox + status channel to the Service.
@@ -425,17 +444,39 @@ func (o *Orchestrator) stopAll() {
 		<-h.done
 	}
 
-	if o.wsCancel != nil {
-		o.wsCancel()
+	o.wsMu.RLock()
+	cancelWS := o.wsCancel
+	o.wsMu.RUnlock()
+	if cancelWS != nil {
+		cancelWS()
 	}
 }
 
 // ─── Node discovery ──────────────────────────────────────────────────────
 
 func (o *Orchestrator) rediscover(ctx context.Context) {
+	o.rediscoverPending.Store(true)
+	if !o.rediscoverActive.CompareAndSwap(false, true) {
+		return
+	}
+	defer o.rediscoverActive.Store(false)
+	for o.rediscoverPending.Swap(false) && ctx.Err() == nil {
+		o.rediscoverOnce(ctx)
+	}
+}
+
+func (o *Orchestrator) rediscoverOnce(ctx context.Context) {
+	ws := o.currentWebSocket()
+	var generation uint64
+	if ws != nil {
+		generation = ws.Generation()
+	}
 	nodesResp, err := o.client.GetMachineNodes()
 	if err != nil {
 		nlog.Core().Warn("machine node discovery failed", "error", err)
+		return
+	}
+	if ctx.Err() != nil || o.rediscoverPending.Load() {
 		return
 	}
 
@@ -461,6 +502,11 @@ func (o *Orchestrator) rediscover(ctx context.Context) {
 	for _, n := range nodesResp.Nodes {
 		o.startNode(ctx, n) // no-op if already running
 	}
+	if ws != nil && ws == o.currentWebSocket() && ws.IsConnected() && generation == ws.Generation() {
+		o.discoveryVersion.Store(generation)
+		o.discoverySocket.Store(ws)
+		o.lastDiscovery.Store(time.Now().UnixMilli())
+	}
 }
 
 // ─── Machine status reporting ────────────────────────────────────────────
@@ -481,39 +527,68 @@ func (o *Orchestrator) reportMachineStatus() {
 // ─── WS mux ─────────────────────────────────────────────────────────────
 
 func (o *Orchestrator) tryStartWS(ctx context.Context) {
+	if !o.wsDiscovering.CompareAndSwap(false, true) {
+		return
+	}
+	defer o.wsDiscovering.Store(false)
 	hs, err := o.client.Handshake()
 	if err != nil {
-		nlog.Core().Warn("machine ws handshake failed, REST only", "error", err)
+		nlog.Core().Warn("machine ws discovery failed", "error", err)
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
+	o.client.SetWebSocketProvider(o.currentWebSocket)
+	o.wsMu.Lock()
+	oldCancel := o.wsCancel
 	if !hs.WebSocket.Enabled || hs.WebSocket.WSURL == "" {
-		nlog.Core().Info("machine: ws disabled by panel, REST only")
+		o.ws, o.wsCancel, o.wsURL = nil, nil, ""
+		o.wsMu.Unlock()
+		if oldCancel != nil {
+			oldCancel()
+			o.onWSStatus(panel.WSStatusChange{Connected: false})
+		}
 		return
 	}
-
+	realtime := o.client.RealtimeEnabled()
+	if o.ws != nil && o.wsURL == hs.WebSocket.WSURL && o.wsRealtime == realtime {
+		o.wsMu.Unlock()
+		return
+	}
 	wsCfg := panel.WSClientConfig{
+		Realtime:         realtime,
 		StatusInterval:   time.Duration(o.cfg.WS.StatusInterval) * time.Second,
 		HandshakeTimeout: time.Duration(o.cfg.WS.HandshakeTimeout) * time.Second,
 		BackoffInitial:   time.Duration(o.cfg.WS.BackoffInitial) * time.Second,
 		BackoffMax:       time.Duration(o.cfg.WS.BackoffMax) * time.Second,
 		MachineID:        o.cfg.Machine.MachineID,
 	}
+	var next *panel.WSClient
+	next = panel.NewWSClient(hs.WebSocket.WSURL, o.cfg.Machine.Token, 0, wsCfg,
+		func(event panel.WSEvent) {
+			if o.currentWebSocket() == next {
+				o.onWSEvent(event)
+			}
+		},
+		func(status panel.WSStatusChange) {
+			if o.currentWebSocket() == next {
+				o.onWSStatus(status)
+			}
+		}, nil)
+	wsCtx, cancel := context.WithCancel(ctx)
+	o.ws, o.wsCancel, o.wsURL, o.wsRealtime = next, cancel, hs.WebSocket.WSURL, realtime
+	o.wsMu.Unlock()
+	if oldCancel != nil {
+		oldCancel()
+	}
+	go next.Run(wsCtx)
+}
 
-	o.ws = panel.NewWSClient(
-		hs.WebSocket.WSURL,
-		o.cfg.Machine.Token,
-		0, // no single node_id
-		wsCfg,
-		o.onWSEvent,
-		o.onWSStatus,
-		nil, // per-node status is sent via machineNodePush
-	)
-
-	wsCtx, wsCancel := context.WithCancel(ctx)
-	o.wsCancel = wsCancel
-	go o.ws.Run(wsCtx)
-
-	nlog.Core().Info("machine: ws mux started")
+func (o *Orchestrator) currentWebSocket() *panel.WSClient {
+	o.wsMu.RLock()
+	defer o.wsMu.RUnlock()
+	return o.ws
 }
 
 // onWSEvent routes a WS event to the correct node's channel.
@@ -547,6 +622,11 @@ func (o *Orchestrator) onWSEvent(event panel.WSEvent) {
 
 // onWSStatus broadcasts WS connectivity changes to all registered nodes.
 func (o *Orchestrator) onWSStatus(status panel.WSStatusChange) {
+	// 连接变化立即重新取得节点列表；完整同步完成后再停止十秒兜底。
+	o.discoverySocket.Store(nil)
+	if o.runCtx != nil {
+		go o.rediscover(o.runCtx)
+	}
 	change := controlplane.StatusChange{Connected: status.Connected}
 	o.eventsMu.RLock()
 	defer o.eventsMu.RUnlock()
@@ -589,8 +669,16 @@ func (o *Orchestrator) applyIntervals(bc panel.MachineBaseConfig) {
 // WS mux directly to the Service's channels; this adapter only provides
 // connectivity status and send capabilities.
 type machineNodePush struct {
-	nodeID int
-	ws     *panel.WSClient
+	nodeID   int
+	ws       *panel.WSClient
+	provider func() *panel.WSClient
+}
+
+func (p *machineNodePush) WebSocket() *panel.WSClient {
+	if p.provider != nil {
+		return p.provider()
+	}
+	return p.ws
 }
 
 func (p *machineNodePush) Run(ctx context.Context) {
@@ -599,11 +687,13 @@ func (p *machineNodePush) Run(ctx context.Context) {
 }
 
 func (p *machineNodePush) IsConnected() bool {
-	return p.ws != nil && p.ws.IsConnected()
+	ws := p.WebSocket()
+	return ws != nil && ws.IsConnected()
 }
 
 func (p *machineNodePush) SendDeviceReport(devices map[int][]string) {
-	if p.ws == nil {
+	ws := p.WebSocket()
+	if ws == nil {
 		return
 	}
 	payload := map[string]interface{}{
@@ -616,5 +706,5 @@ func (p *machineNodePush) SendDeviceReport(devices map[int][]string) {
 	}
 	payload["devices"] = strDevices
 	data, _ := json.Marshal(payload)
-	p.ws.SendRaw(panel.WSEventReportDevices, data)
+	ws.SendRaw(panel.WSEventReportDevices, data)
 }

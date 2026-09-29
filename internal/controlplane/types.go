@@ -10,6 +10,7 @@ import (
 type EventType string
 
 const (
+	EventSyncSnapshot  EventType = "sync.snapshot"
 	EventSyncConfig    EventType = "sync.config"
 	EventSyncUsers     EventType = "sync.users"
 	EventSyncUserDelta EventType = "sync.user.delta"
@@ -18,6 +19,7 @@ const (
 
 type Event struct {
 	Type        EventType
+	Version     panel.StateVersion
 	Config      *model.NodeSpec
 	Users       []model.UserSpec
 	DeltaAction string
@@ -36,17 +38,29 @@ type APIMetrics struct {
 }
 
 type Bootstrap struct {
-	PushInterval int
-	PullInterval int
-	Push         PushClient
-	Config       *model.NodeSpec
-	Users        []model.UserSpec
-	Mailbox      *NodeMailbox
+	PushInterval   int
+	PullInterval   int
+	Push           PushClient
+	Config         *model.NodeSpec
+	Users          []model.UserSpec
+	Mailbox        *NodeMailbox
+	ControlVersion panel.StateVersion
+	DeviceVersion  panel.StateVersion
+	DeviceUsers    map[int][]string
 }
 
 type Snapshot struct {
-	Config *model.NodeSpec
-	Users  []model.UserSpec
+	Config         *model.NodeSpec
+	Users          []model.UserSpec
+	ControlVersion panel.StateVersion
+	DeviceVersion  panel.StateVersion
+	DeviceUsers    map[int][]string
+}
+
+// StatePublisher 独立发送最新运行状态，不取走或重置流量批次。
+type StatePublisher interface {
+	RealtimeEnabled() bool
+	PublishState(context.Context, panel.StatePayload) error
 }
 
 // PollStateResetter 强制下一次 REST 对账返回完整配置和用户快照。

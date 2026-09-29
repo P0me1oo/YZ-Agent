@@ -778,7 +778,7 @@ func (c *Config) setDefaultsFrom(baseDir string) {
 		c.WS.BackoffMax = 60
 	}
 	if c.WS.DiscoveryInterval == 0 {
-		c.WS.DiscoveryInterval = 300
+		c.WS.DiscoveryInterval = 10
 	}
 	// Node defaults
 	if c.Node.TrackInterval == 0 {

@@ -3,13 +3,33 @@ package panel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 )
+
+func TestRequestErrorsOmitAuthenticationQuery(t *testing.T) {
+	ts, client := newTestServer(func(http.ResponseWriter, *http.Request) {})
+	ts.Close()
+	_, err := client.doRequestContext(context.Background(), http.MethodGet, "/api/v2/server/realtime/sync", nil, "")
+	if err == nil || strings.Contains(err.Error(), "test-token") || strings.Contains(err.Error(), "token=") {
+		t.Fatalf("请求错误应保留失败信息但不含认证参数: %v", err)
+	}
+	if !strings.Contains(err.Error(), "/api/v2/server/realtime/sync") {
+		t.Fatalf("请求错误缺少接口路径: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = client.doRequestContext(ctx, http.MethodGet, "/api/v2/server/realtime/sync", nil, "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("去除认证参数后仍应能识别请求取消: %v", err)
+	}
+}
 
 func TestReportContextCancelsPanelRequest(t *testing.T) {
 	started := make(chan struct{})
