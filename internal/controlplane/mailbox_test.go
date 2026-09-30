@@ -1,10 +1,40 @@
 package controlplane
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 )
+
+func TestNodeMailboxPreservesEmptyConfigurationLists(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		name := "未提供列表"
+		cfg := &model.NodeSpec{Protocol: "vless", ServerPort: 10001}
+		if empty {
+			name = "明确的空列表"
+			cfg.Routes = []model.RouteRule{}
+			cfg.CustomOutbounds = []model.OutboundConfig{}
+			cfg.CustomRouteRules = []model.CustomRouteRule{}
+		}
+		t.Run(name, func(t *testing.T) {
+			before, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mb := NewNodeMailbox()
+			mb.MarkReady()
+			mb.Apply(Event{Type: EventSyncConfig, Config: cfg})
+			after, err := json.Marshal(mb.DrainIfReady().Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("经过机器共享连接后，未变化配置的序列化结果改变了")
+			}
+		})
+	}
+}
 
 func TestNodeMailboxLatestStateAndNotifyCollapse(t *testing.T) {
 	mb := NewNodeMailbox()

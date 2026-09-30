@@ -22,6 +22,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/systemwg"
 	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 )
 
@@ -37,10 +38,11 @@ const drainTimeout = 5 * time.Second
 type SingBox struct {
 	cfg config.KernelConfig
 
-	mu     sync.RWMutex
-	box    *box.Box
-	ctx    context.Context
-	cancel context.CancelFunc
+	mu       sync.RWMutex
+	box      *box.Box
+	ctx      context.Context
+	cancel   context.CancelFunc
+	systemWG *systemwg.Runtime
 
 	users      []model.UserSpec
 	nodeConfig *model.NodeSpec
@@ -116,6 +118,16 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 	if err != nil {
 		return err
 	}
+	wgRuntime, err := systemwg.Prepare(nodeConfig, "singbox", cfgMap)
+	if err != nil {
+		return err
+	}
+	started := false
+	defer func() {
+		if !started {
+			wgRuntime.Close()
+		}
+	}()
 	data, err := json.Marshal(cfgMap)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
@@ -176,9 +188,16 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 		cancel()
 		return fmt.Errorf("start sing-box: %w", err)
 	}
+	if err := wgRuntime.Start(); err != nil {
+		instance.Close()
+		cancel()
+		return err
+	}
 
 	// New instance started successfully — swap state.
 	s.box = instance
+	s.systemWG = wgRuntime
+	started = true
 	s.ctx = ctx
 	s.cancel = cancel
 	s.users = users
@@ -299,6 +318,8 @@ func (s *SingBox) stop() {
 
 	// Step 3: hard-close everything that is still open.
 	s.box.Close()
+	s.systemWG.Close()
+	s.systemWG = nil
 	s.box = nil
 	if s.cancel != nil {
 		s.cancel()

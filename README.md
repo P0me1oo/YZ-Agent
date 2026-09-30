@@ -1,6 +1,8 @@
 # YZ-Agent
 
-当前版本为 `v1.26.1`，配套面板 `1.33.0`、管理端 `0.14.0`。新增双核心 WireGuard 中转，VLESS／HY2 前置与 WG 落地均可使用 Xray、sing-box；配置和构建条件见 [中转说明](docs-relay.md)。使用 WG 前先升级前置和落地 Node，再更新面板。实际发布状态、固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
+目标版本为 `v2.0.0`，Linux WG 中转自动使用系统 TCP 和 BBR；入口和落地需要一起升级，不兼容旧 WG 内部连接格式。VLESS／HY2 入口与 WG 落地均支持 Xray、sing-box 和混用；详见 [系统 WG 说明](docs/system-wireguard.md)。发布状态、固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
+
+包含 `v1.26.2` 的相同配置误重载修复。面板沿用现有配置与订阅，无需为本次升级修改面板；兼容现有 `1.33.0` 及后续同接口面板、管理端 `0.14.0`。
 
 内嵌 Xray fork `v26.9.3`，修复 WireGuard 前置与落地启动时的并发初始化问题；sing-box fork 保持 `v1.14.0-yz.2`。核心随 Node 一起更新，无需另行安装。
 

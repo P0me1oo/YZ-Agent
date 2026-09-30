@@ -38,6 +38,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/kernel/geodata"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/systemwg"
 	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 )
 
@@ -66,6 +67,7 @@ type Xray struct {
 	lifecycleMu         sync.Mutex
 	instance            *xrayCore.Instance
 	cancel              context.CancelFunc
+	systemWG            *systemwg.Runtime
 	retired             []*retiredXray
 	limitDispatcher     *LimitDispatcher
 	users               []model.UserSpec
@@ -152,7 +154,21 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	// ── Phase 1: Build config (no shared state) ─────────────────────────
 	x.ensureGeoData(nodeConfig)
 
-	data, err := marshalConfig(x.cfg, nodeConfig, users, tls)
+	cfgMap := buildConfig(x.cfg, nodeConfig, users, tls)
+	if err := validateHysteriaECHKeys(nodeConfig, cfgMap); err != nil {
+		return err
+	}
+	wgRuntime, err := systemwg.Prepare(nodeConfig, "xray", cfgMap)
+	if err != nil {
+		return err
+	}
+	started := false
+	defer func() {
+		if !started {
+			wgRuntime.Close()
+		}
+	}()
+	data, err := json.Marshal(cfgMap)
 	if err != nil {
 		return err
 	}
@@ -190,10 +206,15 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	if oldInstance != nil {
 		x.running.Store(false)
 		closeXrayListeners(oldInstance)
+		x.systemWG.Close()
 	}
 
 	// ── Phase 3: Start new (no lock, potentially slow) ──────────────────
-	if err := startWithTimeout(inst, startTimeout); err != nil {
+	startErr := startWithTimeout(inst, startTimeout)
+	if startErr == nil {
+		startErr = wgRuntime.Start()
+	}
+	if startErr != nil {
 		cancel()
 		inst.Close()
 		if oldInstance != nil {
@@ -203,13 +224,15 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 			x.mu.Unlock()
 			x.closeOld(previous)
 		}
-		return err
+		return startErr
 	}
 
 	// ── Phase 4: Swap old → new (brief kernel lock) ─────────────────────
 	x.mu.Lock()
 	old := x.retireCurrentLocked()
 	x.instance = inst
+	x.systemWG = wgRuntime
+	started = true
 	x.cancel = cancel
 	x.limitDispatcher = ld
 	if ld != nil {
@@ -268,6 +291,7 @@ func (x *Xray) Stop() {
 	old := x.retireCurrentLocked()
 	x.instance = nil
 	x.cancel = nil
+	x.systemWG = nil
 	x.limitDispatcher = nil
 	retired := append([]*retiredXray(nil), x.retired...)
 	x.mu.Unlock()

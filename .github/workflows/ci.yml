@@ -57,7 +57,20 @@ jobs:
           cache: true
 
       - name: Run tests
-        run: make test
+        run: |
+          sudo modprobe tun
+          sudo modprobe tcp_bbr
+          make test TEST_EXEC="sudo -E"
+
+      - name: Verify Mihomo WG client
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/mihomo.gz" https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-linux-amd64-v1.19.31.gz
+          echo "d5e74bbddbdfff49a1aef7775bf5911da59f0d7196ed509a0ac914b3653dd5f1  $RUNNER_TEMP/mihomo.gz" | sha256sum -c -
+          gzip -dc "$RUNNER_TEMP/mihomo.gz" > "$RUNNER_TEMP/mihomo"
+          chmod 700 "$RUNNER_TEMP/mihomo"
+          WG_MIHOMO_BIN="$RUNNER_TEMP/mihomo" go test -mod=readonly -v -race -count=1 -timeout 2m -exec "sudo -E" -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration" -run '^TestWireGuardRealityClients$' ./internal/kernel/singbox
 
       - name: Validate installer syntax
         run: |

@@ -85,6 +85,17 @@ func TestWireGuardRelayRuntime(t *testing.T) {
 						t.Fatal(err)
 					}
 					relayMarkerExchange(t, runtimeClient(t, node, selected), "wg", "tcp")
+					// 固定落地端口不变的配置重载也必须成功，不能在旧监听关闭前抢占端口。
+					reloadedLanding := *landing
+					reloadedRelay := *landing.Relay
+					reloadedWG := *receiver
+					reloadedWG.MTU = 1360
+					reloadedRelay.WireGuard = &reloadedWG
+					reloadedLanding.Relay = &reloadedRelay
+					if err := landingCore.Reload(&reloadedLanding, nil, kernel.TLSCert{}); err != nil {
+						t.Fatal(err)
+					}
+					wireGuardWaitRecovery(t, runtimeClient(t, node, selected))
 					landingCore.Stop()
 					relayMarkerReject(t, runtimeClient(t, node, selected), "tcp")
 					if err := landingCore.Start(landing, nil, kernel.TLSCert{}); err != nil {

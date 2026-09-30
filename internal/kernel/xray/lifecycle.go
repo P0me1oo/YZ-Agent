@@ -6,6 +6,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/systemwg"
 	xrayCore "github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/inbound"
 )
@@ -15,6 +16,7 @@ type retiredXray struct {
 	dispatcher *LimitDispatcher
 	config     *model.NodeSpec
 	cancel     context.CancelFunc
+	systemWG   *systemwg.Runtime
 	stop       chan struct{}
 	done       chan struct{}
 }
@@ -26,7 +28,8 @@ func (x *Xray) retireCurrentLocked() *retiredXray {
 	}
 	previous := &retiredXray{
 		instance: x.instance, dispatcher: x.limitDispatcher, config: x.nodeConfig, cancel: x.cancel,
-		stop: make(chan struct{}), done: make(chan struct{}),
+		systemWG: x.systemWG,
+		stop:     make(chan struct{}), done: make(chan struct{}),
 	}
 	x.retired = append(x.retired, previous)
 	return previous
@@ -81,6 +84,7 @@ drain:
 		previous.cancel()
 	}
 	_ = previous.instance.Close()
+	previous.systemWG.Close()
 	if previous.dispatcher != nil {
 		drainConns(previous.dispatcher, time.Second)
 	}

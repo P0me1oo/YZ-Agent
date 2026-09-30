@@ -1,5 +1,7 @@
 # 中转节点（单入口多落地）
 
+`v2.0.0` 的 Linux WG 路径及两端同时升级要求见 [系统 WG 说明](docs/system-wireguard.md)。下文 WG 用户态 TCP 栈描述属于历史版本 `v1.26.1`；Linux 新路径改用系统 TCP 和 BBR。
+
 `v1.26.1` 新增双核心 WireGuard 落地，见文末“WireGuard 落地增补”；此前的 SS／VLESS 限制属于历史版本。`v1.26.0` 因发布前竞态检查失败未交付，功能与修复合入 `v1.26.1`。
 
 面板把一个 VLESS 或 Hysteria2（HY2）入口节点和若干落地节点组成一组中转拓扑。客户端只连接入口，

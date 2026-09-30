@@ -1,4 +1,5 @@
-VERSION ?= v1.26.1
+VERSION ?= v2.0.0
+TEST_EXEC ?=
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.commit=$(COMMIT)
@@ -33,7 +34,7 @@ test:
 	bash tests/install_kernel_defaults_test.sh
 	bash tests/install_paths_test.sh
 	bash tests/install_name_migration_test.sh
-	go test -mod=readonly -v -race -count=1 -tags "$(BUILD_TAGS)" ./...
+	go test -mod=readonly -v -race -count=1 -timeout 20m $(if $(TEST_EXEC),-exec "$(TEST_EXEC)") -tags "$(BUILD_TAGS)" ./...
 	go test -mod=readonly -v -race -count=1 github.com/anytls/sing-anytls/session
 	go test -mod=readonly -v -race -count=1 github.com/sagernet/sing-shadowsocks/shadowaead_2022
 	go test -mod=readonly -v -race -count=1 -tags "$(BUILD_TAGS)" github.com/xtls/xray-core/common/singbridge github.com/xtls/xray-core/transport/internet/hysteria github.com/sagernet/sing-box/transport/v2raygrpclite github.com/sagernet/sing-box/third_party/sing-shadowsocks/shadowaead_2022

@@ -184,11 +184,12 @@ func cloneNodeSpec(spec *model.NodeSpec) *model.NodeSpec {
 			clone.TLSSettings[k] = v
 		}
 	}
+	// 保留空列表；改成 nil 会使同一配置与 HTTP 快照的摘要不同，触发误重载。
 	if spec.Routes != nil {
-		clone.Routes = append([]model.RouteRule(nil), spec.Routes...)
+		clone.Routes = append([]model.RouteRule{}, spec.Routes...)
 	}
 	if spec.CustomOutbounds != nil {
-		clone.CustomOutbounds = append([]model.OutboundConfig(nil), spec.CustomOutbounds...)
+		clone.CustomOutbounds = append([]model.OutboundConfig{}, spec.CustomOutbounds...)
 	}
 	if spec.CustomRoutes != nil {
 		clone.CustomRoutes = make([]map[string]any, len(spec.CustomRoutes))
@@ -204,7 +205,7 @@ func cloneNodeSpec(spec *model.NodeSpec) *model.NodeSpec {
 		}
 	}
 	if spec.CustomRouteRules != nil {
-		clone.CustomRouteRules = append([]model.CustomRouteRule(nil), spec.CustomRouteRules...)
+		clone.CustomRouteRules = append([]model.CustomRouteRule{}, spec.CustomRouteRules...)
 	}
 	if spec.CertConfig != nil {
 		certCopy := *spec.CertConfig
