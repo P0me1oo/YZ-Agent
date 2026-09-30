@@ -2,6 +2,8 @@
 
 当前版本为 `v1.26.0`，配套面板 `1.33.0`、管理端 `0.14.0`。新增双核心 WireGuard 中转，VLESS／HY2 前置与 WG 落地均可使用 Xray、sing-box；配置和构建条件见 [中转说明](docs-relay.md)。使用 WG 前先升级前置和落地 Node，再更新面板。实际发布状态、固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
+内嵌 Xray fork `v26.9.2`，修复 WireGuard 启动时的并发初始化问题；sing-box fork 保持 `v1.14.0-yz.2`。核心随 Node 一起更新，无需另行安装。
+
 保留 `v1.25.1` 的实时通信与版本命令测试修正：新面板下运行状态以每秒采样为目标，WebSocket 失败后默认十秒 HTTP 兜底，流量仍按原批次周期落盘与确认。
 
 `v1.24.0`：两种内核都按用户采集真实活跃连接数；中转入口另按实际出网节点拆分，同一来源 IP 下的多条连接分别计数。节点报告新增 `connection_counts` 与 `relay_connection_counts`；原有在线来源、设备数和流量口径不变。

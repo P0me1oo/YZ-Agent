@@ -4,7 +4,8 @@
 
 - VLESS／HY2 中转入口新增 WireGuard 内部链路，两端支持 Xray、sing-box 和混用；WG 落地保持空用户运行，用户计费仍在入口。
 - 生成 Xray WG 入站／出站及 sing-box 用户态端点，UDP 监听纳入自动防火墙计算，校验密钥、地址、MTU 与保活参数。
-- 构建增加 `with_gvisor`，固定 `github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1` 以匹配当前 sing-tun。两个核心 fork 固定引用不变。
+- 构建增加 `with_gvisor`，固定 `github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1` 以匹配当前 sing-tun。sing-box fork 仍为 `v1.14.0-yz.2`。
+- Xray fork 升至 `v26.9.2` 的固定提交 `51c3601eabc14df1202ef8a928bcf8b6a9ce2922`，修复 WireGuard 设备启动时监听回调尚未初始化的并发问题；不改上游基线与其他核心功能。
 - 配套面板 `1.33.0`、管理端 `0.14.0`，实际验证与发布状态见兼容矩阵。
 
 ## v1.25.1 - 2026-09-30
