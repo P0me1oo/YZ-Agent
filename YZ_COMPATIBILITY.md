@@ -14,7 +14,10 @@
 - 发布前复核：Windows、Go 1.27.0 下执行 `go test -mod=readonly -count=1 -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./...`，sing-box 测试包触发默认十分钟超时，其他测试包通过；WG 专项复测通过（204.078 秒），单独完整 sing-box 包在诊断用二十分钟总时限内通过（530.822 秒），未改测试断言、场景时限或正式测试命令。上述结果使用旧 Xray 依赖。
 - 首次 Linux 全量竞态检测（[运行 36660695515](https://github.com/P0me1oo/YZ-Agent/actions/runs/36660695515)）发现 Xray WG 设备事件线程读取监听回调与初始化写入同时发生，VLESS、HY2 前置均能触发。核心补丁使用监听打开时的同一把锁保证回调初始化完成；核心新回归的十轮 Linux 竞态检测通过。Node 已固定修复提交，完整竞态与发布构建结果在完成后追加。
 - 第二次竞态检测（[v1.26.0 运行 36664060367](https://github.com/P0me1oo/YZ-Agent/actions/runs/36664060367)）发现 Xray 落地设备先收包、后安装转发处理函数，网络栈读写冲突；前一处监听回调竞争未再报告。核心 `v26.9.3` 将转发初始化放到设备构造之前，新首包回归在旧代码稳定失败、修复后连续十次通过。`v1.26.0` 没有生成 Release 或镜像，后续使用新标签 `v1.26.1`。
-- 发布状态：准备中，正式构建来源、附件与镜像核验结果在发布完成后追加。回滚基线为 Node `v1.25.1`、面板 `1.32.0`；回滚前停用新增 WG 线路，保留待上报流量批次。
+- 发布完成（2026-09-30）：[Release v1.26.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.26.1) 来源为 `1ab30205c95cca8d89cedd9e597d819eb73851c8`，已核对为 GitHub 最新正式 Release。[标签工作流 36665531773](https://github.com/P0me1oo/YZ-Agent/actions/runs/36665531773) 的完整 Linux 竞态、兼容包及安装器测试、双架构构建、镜像运行版本检查和 Release 全部通过。
+- 12 个附件全部下载并与 GitHub SHA256 匹配，11 条 `SHA256SUMS` 全部通过，同架构 `yz-agent` 与兼容名称程序字节一致。四份程序的实际构建来源均为上述完整提交，`vcs.modified=false`、`CGO_ENABLED=0`，目标为 Linux amd64／arm64；主程序包含 `with_gvisor` 及本节列出的固定双核心、gVisor 依赖。主程序 SHA256：amd64 `1d1cdea1b93cdf49199c95ff38c905f7112448598e72bf4c592ee30d20080303`，arm64 `fd0c88551152109ab541d0995fe37f3de10b9766f1bd00ebe45e3464639957c5`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v1.26.1`、`latest` 与完整来源提交标签均为 manifest `sha256:4e85d61ecdf74658d058ecb7a3fafab853dcf708dd753d3a12f24e58f64d7ccf`，amd64 为 `sha256:7b41b07297e53b01124eee7cf73f8d983c2c1545e0427c72171dfcea96768f2e`，arm64 为 `sha256:944cb42f069bc8c43cf2f2d20ab1fb77592c58164f65f2f7faef27e86749ae49`。匿名获取、两架构 OCI 版本和来源提交均已核对。
+- 回滚基线为 Node `v1.25.1`、面板 `1.32.0`；回滚前停用新增 WG 线路，保留待上报流量批次。跨机验收使用修复前的工作区程序，最终修复通过上述完整竞态与构建验证；没有再次连接或更新生产服务器。
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
