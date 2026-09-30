@@ -13,7 +13,7 @@ func (b *systemBackend) Apply(ctx context.Context, allows, redirects []Rule) err
 			return fmt.Errorf("拒绝无效的防火墙规则")
 		}
 	}
-	if b.state.Namespace == "" {
+	if b.state.Namespace == "" && !b.recovering && len(b.protected) == 0 && !hasSources(allows) {
 		// 旧记录必须先按原标记清理成功；失败时保持旧标记，重启后继续恢复。
 		if err := b.apply(ctx, nil, nil); err != nil {
 			return err
@@ -32,6 +32,21 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 		allows, redirects = nil, nil
 		if len(b.state.Owned) == 0 && b.state.Redirect == "" {
 			return nil
+		}
+	}
+	// 旧版可能把相邻端口合成一条规则；保留其中的待确认端口时，不能声称其余端口已收紧。
+	for _, owned := range b.state.Owned {
+		if !b.keepOwned(owned.Rule) {
+			continue
+		}
+		for _, wanted := range allows {
+			// 仅有 IPv4 来源时仍须撤销旧 IPv6 全开放规则，不能漏掉另一地址族。
+			samePort := owned.Rule.Protocol == wanted.Protocol && owned.Rule.Ports.Overlaps(wanted.Ports)
+			if wanted.Source != "" && samePort &&
+				(owned.Rule.Family != wanted.Family || overlaps(owned.Rule, wanted)) &&
+				!retainedSourceAllowed(owned.Rule, wanted, allows) {
+				return pending("旧托管端口范围尚有未完成检查的节点，请确认同范围端口；原规则暂时保留")
+			}
 		}
 	}
 	ufwWanted := b.cfg.Backend == "" || b.cfg.Backend == "auto" || b.cfg.Backend == "ufw"
@@ -82,6 +97,39 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 		}
 	}
 	wanted := map[ownedRule]bool{}
+	// 所有区域先检查，再执行写入；冲突不能造成半套来源策略。
+	if ufwActive && ufwWanted {
+		if hasSources(allows) {
+			status, err := b.commands.Run(ctx, "ufw", "", "status", "verbose")
+			if err != nil {
+				return err
+			}
+			if !strings.Contains(status, "deny (incoming)") && !strings.Contains(status, "reject (incoming)") {
+				return pending("无法确认 UFW 默认入站策略会拦截未授权来源，请确认防火墙默认策略；未修改来源规则")
+			}
+		}
+		if err := b.checkUFWSourceConflicts(allows, ufwRules); err != nil {
+			return err
+		}
+	}
+	fdRules := map[string]map[string]bool{}
+	var fdZones []string
+	if fdActive && fdWanted && len(allows) > 0 {
+		fdZones, err = b.firewalldZones(ctx)
+		if err != nil {
+			return err
+		}
+		for _, zone := range fdZones {
+			rules, err := b.firewalldRules(ctx, zone)
+			if err != nil {
+				return err
+			}
+			fdRules[zone] = rules
+			if err := b.checkFirewalldSourceConflicts(ctx, zone, allows, rules); err != nil {
+				return err
+			}
+		}
+	}
 	if ufwActive && ufwWanted {
 		for _, rule := range allows {
 			owned := ownedRule{Backend: "ufw", Rule: rule}
@@ -91,18 +139,9 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 			}
 		}
 	}
-	fdRules := map[string]map[string]bool{}
 	if fdActive && fdWanted && len(allows) > 0 {
-		zones, err := b.firewalldZones(ctx)
-		if err != nil {
-			return err
-		}
-		for _, zone := range zones {
-			rules, err := b.firewalldRules(ctx, zone)
-			if err != nil {
-				return err
-			}
-			fdRules[zone] = rules
+		for _, zone := range fdZones {
+			rules := fdRules[zone]
 			for _, rule := range allows {
 				owned := ownedRule{Backend: "firewalld", Zone: zone, Rule: rule}
 				wanted[owned] = true
@@ -117,7 +156,7 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 	}
 	// 已撤销的转发先移除，再回收放行规则；仍被其他节点引用的规则继续保留。
 	for _, owned := range append([]ownedRule(nil), b.state.Owned...) {
-		if wanted[owned] {
+		if wanted[owned] || b.keepOwned(owned.Rule) {
 			continue
 		}
 		switch owned.Backend {
@@ -149,6 +188,21 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 		}
 	}
 	return nil
+}
+
+// 旧规则覆盖的交集仍在已确认来源内时可以保留，包括同端口的多个出口和双栈来源。
+func retainedSourceAllowed(owned, wanted Rule, allows []Rule) bool {
+	if owned.Source == "" {
+		return false
+	}
+	from, to := max(owned.Ports.From, wanted.Ports.From), min(owned.Ports.To, wanted.Ports.To)
+	for _, rule := range allows {
+		if rule.Source == owned.Source && rule.Family == owned.Family && rule.Protocol == owned.Protocol &&
+			(rule.Address == "" || rule.Address == owned.Address) && rule.Ports.From <= from && rule.Ports.To >= to {
+			return true
+		}
+	}
+	return false
 }
 
 func firewalldInactive(status string) bool {

@@ -77,10 +77,57 @@ jobs:
           bash -n install.sh tests/install_service_manager_test.sh tests/install_kernel_defaults_test.sh tests/install_paths_test.sh tests/install_name_migration_test.sh tests/singbox_isolated_install.sh
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(encoding="utf-8")) for path in pathlib.Path("tests").glob("*.py")]'
 
+  firewall-native:
+    name: Native firewall (${{ matrix.backend }}, ${{ matrix.redirect }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [ufw, firewalld]
+        redirect: [nftables, iptables]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - name: Build isolated firewall tests
+        run: CGO_ENABLED=0 go test -mod=readonly -c -o "$RUNNER_TEMP/firewall-linux.test" ./internal/firewall
+      - name: Prepare disposable rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --tag yz-firewall-test-rootfs - <<'DOCKERFILE'
+          FROM ubuntu:24.04
+          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ufw firewalld nftables iptables iproute2 dbus python3 util-linux kmod
+          DOCKERFILE
+          rootfs="$RUNNER_TEMP/yz-firewall-rootfs"
+          mkdir -p "$rootfs"
+          container=$(docker create yz-firewall-test-rootfs)
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker export "$container" | sudo tar -xpf - -C "$rootfs"
+          sudo mkdir -p "$rootfs/work" "$rootfs/dev" "$rootfs/proc" "$rootfs/sys" "$rootfs/run"
+          sudo touch "$rootfs/.yz-firewall-test-rootfs"
+          sudo install -m 0755 "$RUNNER_TEMP/firewall-linux.test" "$rootfs/work/firewall-linux.test"
+          for spec in 'null 1 3' 'zero 1 5' 'random 1 8' 'urandom 1 9'; do
+            read -r name major minor <<< "$spec"
+            if [[ ! -e "$rootfs/dev/$name" ]]; then
+              sudo mknod -m 666 "$rootfs/dev/$name" c "$major" "$minor"
+            fi
+          done
+      - name: Verify native rule lifecycle and source traffic
+        env:
+          FIREWALL_BACKEND: ${{ matrix.backend }}
+          REDIRECT_BACKEND: ${{ matrix.redirect }}
+        run: sudo sh scripts/test-firewall-linux.sh "$RUNNER_TEMP/yz-firewall-rootfs" "$FIREWALL_BACKEND" "$REDIRECT_BACKEND" backend
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, firewall-native]
     strategy:
       matrix:
         include:

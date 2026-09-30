@@ -34,15 +34,18 @@ import (
 )
 
 type Service struct {
-	cfg          *config.Config
-	source       controlplane.Source
-	sink         controlplane.Sink
-	kernel       kernel.Kernel
-	firewall     firewall.Controller
-	tracker      *tracker.Tracker
-	limiter      *limiter.Limiter
-	speedTracker *limiter.SpeedTracker
-	cert         *cert.Manager
+	cfg               *config.Config
+	source            controlplane.Source
+	sink              controlplane.Sink
+	kernel            kernel.Kernel
+	firewall          firewall.Controller
+	firewallNotice    atomic.Pointer[string]
+	lastFirewallRetry time.Time
+	relayEgress       atomic.Pointer[relayEgress]
+	tracker           *tracker.Tracker
+	limiter           *limiter.Limiter
+	speedTracker      *limiter.SpeedTracker
+	cert              *cert.Manager
 
 	// 保存面板最新要求的状态；实际成功运行的状态单独记录在 appliedState。
 	lastConfig *model.NodeSpec
@@ -57,8 +60,9 @@ type Service struct {
 	// appliedState tracks the configuration and users that are currently
 	// successfully running in the kernel.
 	appliedState struct {
-		Config *model.NodeSpec
-		Users  []model.UserSpec
+		Config  *model.NodeSpec
+		Users   []model.UserSpec
+		TLSHash string
 	}
 
 	pushInterval int // seconds
@@ -269,6 +273,9 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	if err := s.initialSetup(ctx); err != nil {
 		return fmt.Errorf("initial setup: %w", err)
 	}
+	egressCtx, stopEgress := context.WithCancel(ctx)
+	defer stopEgress()
+	go s.relayEgressLoop(egressCtx)
 
 	// 状态实时采样与流量批次周期分离，累计流量仍沿用原有落盘和确认。
 	trackInterval := time.Duration(s.cfg.Node.TrackInterval) * time.Second
@@ -875,10 +882,19 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 // 无论成功还是失败，lastConfig 都保留面板最新要求；失败时节点保持停止，
 // 这样后续用户同步不会误把旧配置重新启动起来。
 func (s *Service) applyConfigUpdate(ctx context.Context, config *model.NodeSpec, hash string) bool {
+	// 仅来源策略变化不重建中转监听，避免切换前置出口时中断已有连接。
+	policyOnly := s.kernel.IsRunning() && computeKernelConfigHash(s.lastConfig) == computeKernelConfigHash(config) && s.appliedState.TLSHash == s.currentTLSHash()
 	s.metricsMu.Lock()
 	s.lastConfig = config
 	s.metricsMu.Unlock()
 	s.lastConfigHash = hash
+	if policyOnly {
+		if !s.applyFirewall(ctx, config, s.lastUsers) {
+			return false
+		}
+		s.appliedState.Config = config
+		return true
+	}
 
 	if !s.applyChanges(ctx, true, false) {
 		// 失败配置仍作为当前期望状态保留，避免任何后台路径拉起旧配置。
@@ -1166,6 +1182,11 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 }
 
 func (s *Service) trackAndEnforce(ctx context.Context) bool {
+	checkLanding := s.lastConfig.IsRelayLanding() && s.lastConfig.Relay.EntryNodeID > 0
+	if (checkLanding || s.firewallNotice.Load() != nil) && s.kernel.IsRunning() && time.Since(s.lastFirewallRetry) >= 30*time.Second {
+		s.lastFirewallRetry = time.Now()
+		s.applyFirewall(ctx, s.lastConfig, s.lastUsers)
+	}
 	if s.appliedState.Config != nil && !s.kernel.IsRunning() {
 		s.failRuntime("内核意外停止", s.lastConfig, s.lastUsers, fmt.Errorf("内核已不在运行"))
 	}
@@ -1646,6 +1667,12 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	s.metricsMu.RUnlock()
 
 	m := make(map[string]interface{})
+	if notice := s.firewallNotice.Load(); notice != nil {
+		m["firewall_warning"] = *notice
+	}
+	if egress := s.relayEgress.Load(); egress != nil {
+		m["relay_egress"] = egress
+	}
 	online := s.tracker.CurrentOnline()
 
 	m["uptime"] = status.Uptime

@@ -186,8 +186,16 @@ type RelayConfig struct {
 	Cipher      string                `json:"cipher,omitempty"`
 	Password    string                `json:"password,omitempty"`
 	EntryNodeID int                   `json:"entry_node_id,omitempty"`
+	Firewall    *RelayFirewallConfig  `json:"firewall,omitempty"`
 	VLESS       *RelayVLESSConfig     `json:"vless,omitempty"`
 	WireGuard   *RelayWireGuardConfig `json:"wireguard,omitempty"`
+}
+
+// RelayFirewallConfig 只用于内置中转落地，不包含认证凭据。
+type RelayFirewallConfig struct {
+	Status  string   `json:"status"`
+	Sources []string `json:"sources"`
+	Message string   `json:"message"`
 }
 
 // RelayChild is one logical node reachable through an internal outbound on the entry.

@@ -44,7 +44,7 @@ func TestUFWRecognizesScopedIPv6Rules(t *testing.T) {
 		"[ 3] 8443/tcp on eth0 ALLOW IN Anywhere # interface rule\n" +
 		"[ 4] 8443/tcp ALLOW IN 192.0.2.0/24 # restricted source\n"
 	rules := parseUFWStatus(output)
-	if len(rules) != 2 || rules[0].Rule.Family != 6 || rules[0].Rule.Ports.To != 20100 || rules[1].Rule.Address != "192.0.2.10" {
+	if len(rules) != 4 || rules[0].Rule.Family != 6 || rules[0].Rule.Ports.To != 20100 || rules[1].Rule.Address != "192.0.2.10" || !rules[2].ScopedSource || !rules[3].ScopedSource {
 		t.Fatalf("不能准确识别规则范围：%+v", rules)
 	}
 }

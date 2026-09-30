@@ -78,6 +78,7 @@ type RelayConfig struct {
 	Cipher      string
 	Password    string
 	EntryNodeID int
+	Firewall    *panel.RelayFirewallConfig
 	VLESS       *RelayVLESSConfig
 	WireGuard   *RelayWireGuardConfig
 }

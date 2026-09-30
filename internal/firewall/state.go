@@ -25,12 +25,14 @@ type savedState struct {
 }
 
 type systemBackend struct {
-	cfg      config.FirewallConfig
-	scope    string
-	commands commands
-	path     string
-	lock     *os.File
-	state    savedState
+	cfg        config.FirewallConfig
+	scope      string
+	commands   commands
+	path       string
+	lock       *os.File
+	state      savedState
+	recovering bool
+	protected  []Rule
 }
 
 func newSystemBackend(cfg config.FirewallConfig, scope string, runner commands) (*systemBackend, error) {
@@ -66,7 +68,7 @@ func newSystemBackend(cfg config.FirewallConfig, scope string, runner commands) 
 }
 
 func (b *systemBackend) validateState() error {
-	if b.state.Version != 1 || b.state.Scope != b.scope {
+	if (b.state.Version != 1 && b.state.Version != 2) || b.state.Scope != b.scope {
 		return fmt.Errorf("防火墙状态版本或实例标识不匹配")
 	}
 	if b.state.Namespace != "" && b.state.Namespace != "yz-agent" {
@@ -96,6 +98,13 @@ func (b *systemBackend) validateState() error {
 
 // save 先记录创建意图，再执行规则变更；意外退出后仍能精确回收本实例规则。
 func (b *systemBackend) save() error {
+	// 全部来源规则清理后恢复旧格式版本，使正常退出后的旧程序回滚仍可读取空状态。
+	b.state.Version = 1
+	for _, owned := range b.state.Owned {
+		if owned.Rule.Source != "" {
+			b.state.Version = 2
+		}
+	}
 	data, err := json.MarshalIndent(b.state, "", "  ")
 	if err != nil {
 		return err

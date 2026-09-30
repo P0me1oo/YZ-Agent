@@ -73,5 +73,11 @@ func (s *Service) runtimeApplied(nc *model.NodeSpec, users []model.UserSpec) {
 	s.runtimeError = nil
 	s.appliedState.Config = nc
 	s.appliedState.Users = users
+	s.appliedState.TLSHash = s.currentTLSHash()
 	s.notifyStatus(RuntimeRunning)
+}
+
+func (s *Service) currentTLSHash() string {
+	tls := s.tlsCert()
+	return fmt.Sprintf("%x/%x", sha256.Sum256(tls.CertPEM), sha256.Sum256(tls.KeyPEM))
 }

@@ -1,6 +1,6 @@
 # YZ-Agent
 
-当前版本为 `v2.0.0`，Linux WG 中转自动使用系统 TCP 和 BBR；入口和落地需要一起升级，不兼容旧 WG 内部连接格式。VLESS／HY2 入口与 WG 落地均支持 Xray、sing-box 和混用；详见 [系统 WG 说明](docs/system-wireguard.md)。发布状态、固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
+当前开发版本为 `v2.1.0`（未发布），配套面板 `1.35.0` 增加内置中转落地来源限制，按已确认的前置出口替换全开放托管规则；详见 [自动防火墙](docs/firewall-port-hopping.md)。保留 `v2.0.0` 的系统 TCP WG 格式，Linux WG 使用系统 TCP 和 BBR；从旧 WG `1.x` 升级仍要求入口、落地配套更新，详见 [系统 WG 说明](docs/system-wireguard.md)。发布状态、固定依赖和回滚基线见 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
 包含 `v1.26.2` 的相同配置误重载修复。面板沿用现有配置与订阅，无需为本次升级修改面板；兼容现有 `1.33.0` 及后续同接口面板、管理端 `0.14.0`。
 

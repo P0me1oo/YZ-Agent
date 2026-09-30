@@ -102,6 +102,7 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 			Cipher:          nc.Relay.Cipher,
 			Password:        nc.Relay.Password,
 			EntryNodeID:     nc.Relay.EntryNodeID,
+			Firewall:        cloneRelayFirewall(nc.Relay.Firewall),
 			VLESS:           relayVLESSFromPanel(nc.Relay.VLESS),
 			WireGuard:       cloneRelayWireGuard(nc.Relay.WireGuard),
 		}
@@ -287,6 +288,7 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 			Cipher:          n.Relay.Cipher,
 			Password:        n.Relay.Password,
 			EntryNodeID:     n.Relay.EntryNodeID,
+			Firewall:        cloneRelayFirewall(n.Relay.Firewall),
 			VLESS:           relayVLESSToPanel(n.Relay.VLESS),
 			WireGuard:       cloneRelayWireGuard(n.Relay.WireGuard),
 		}

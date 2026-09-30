@@ -13,6 +13,9 @@ func (b *systemBackend) richRule(rule Rule) string {
 	sum := sha256.Sum256([]byte(b.scope))
 	priority := 20000 + binary.BigEndian.Uint32(sum[:4])%10000
 	text := fmt.Sprintf(`rule priority="%d" family="ipv%d"`, priority, rule.Family)
+	if rule.Source != "" {
+		text += fmt.Sprintf(` source address="%s"`, rule.Source)
+	}
 	if rule.Address != "" {
 		text += fmt.Sprintf(` destination address="%s"`, rule.Address)
 	}

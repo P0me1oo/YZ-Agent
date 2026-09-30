@@ -192,6 +192,13 @@ func (o *Orchestrator) removeNodeStatus(nodeID int) {
 }
 
 func (o *Orchestrator) reconcileNodeStatuses(wanted map[int]panel.MachineNode) {
+	var ids []int
+	for id := range wanted {
+		ids = append(ids, id)
+	}
+	if o.cfg != nil && o.firewall != nil {
+		firewall.ExpectNodes(o.firewall, o.cfg.InstanceID, ids)
+	}
 	o.statusMu.Lock()
 	for nodeID := range o.nodeStatuses {
 		if _, ok := wanted[nodeID]; !ok {

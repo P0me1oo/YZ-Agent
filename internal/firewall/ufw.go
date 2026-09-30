@@ -11,13 +11,14 @@ import (
 )
 
 type ufwRule struct {
-	Rule    Rule
-	Action  string
-	Comment string
+	Rule         Rule
+	Action       string
+	Comment      string
+	ScopedSource bool
 }
 
 var ufwStatusLine = regexp.MustCompile(`^\[\s*\d+\]\s+(.+?)\s+((?:ALLOW|DENY|REJECT|LIMIT)(?: IN)?)\s+(.+?)\s*$`)
-var ufwDestination = regexp.MustCompile(`^(?:(\S+)\s+)?(\d+)(?::(\d+))?/(tcp|udp)$`)
+var ufwDestination = regexp.MustCompile(`^(?:(\S+)\s+)?(\d+)(?::(\d+))?(?:/(tcp|udp))?$`)
 var ufwLogSuffix = regexp.MustCompile(`\s+\(log(?:-all)?\)$`)
 
 func parseUFWStatus(output string) []ufwRule {
@@ -33,16 +34,30 @@ func parseUFWStatus(output string) []ufwRule {
 			family = 6
 		}
 		destination := strings.TrimSpace(strings.ReplaceAll(match[1], "(v6)", ""))
+		destination, _, scoped := strings.Cut(destination, " on ")
 		source := strings.TrimSpace(strings.ReplaceAll(match[3], "(v6)", ""))
 		source = strings.TrimSpace(ufwLogSuffix.ReplaceAllString(source, ""))
-		if source != "Anywhere" && source != "0.0.0.0/0" && source != "::/0" {
-			continue
+		if source == "Anywhere" || source == "0.0.0.0/0" || source == "::/0" {
+			source = ""
+		} else if prefix, err := netip.ParsePrefix(source); err == nil {
+			if prefix.Bits() == prefix.Addr().BitLen() {
+				source = prefix.Addr().String()
+			} else {
+				scoped, source = true, ""
+			}
 		}
 		parts := ufwDestination.FindStringSubmatch(destination)
 		if parts == nil {
+			// 应用名、全端口或无法解析的入站规则也可能覆盖落地，不能忽略后声称已限制。
+			for _, protocol := range []string{"tcp", "udp"} {
+				rule := Rule{Family: family, Protocol: protocol}
+				rule.Ports.From, rule.Ports.To = 1, 65535
+				result = append(result, ufwRule{Rule: rule, Action: strings.Fields(match[2])[0],
+					Comment: strings.TrimSpace(comment), ScopedSource: true})
+			}
 			continue
 		}
-		rule := Rule{Family: family, Address: parts[1], Protocol: parts[4]}
+		rule := Rule{Family: family, Address: parts[1], Source: source, Protocol: parts[4]}
 		if rule.Address == "0.0.0.0/0" || rule.Address == "::/0" {
 			rule.Address = ""
 		}
@@ -51,8 +66,17 @@ func parseUFWStatus(output string) []ufwRule {
 		if parts[3] != "" {
 			rule.Ports.To, _ = strconv.Atoi(parts[3])
 		}
-		if rule.valid() {
-			result = append(result, ufwRule{Rule: rule, Action: strings.Fields(match[2])[0], Comment: strings.TrimSpace(comment)})
+		protocols := []string{rule.Protocol}
+		if rule.Protocol == "" {
+			protocols, scoped = []string{"tcp", "udp"}, true
+		}
+		for _, protocol := range protocols {
+			rule.Protocol = protocol
+			if !rule.valid() {
+				// 地址网段、来源端口等无法精确还原时，至少保留端口占用供冲突检查。
+				rule.Address, rule.Source, scoped = "", "", true
+			}
+			result = append(result, ufwRule{Rule: rule, Action: strings.Fields(match[2])[0], Comment: strings.TrimSpace(comment), ScopedSource: scoped})
 		}
 	}
 	return result
@@ -73,16 +97,20 @@ func (b *systemBackend) ufwArgs(rule Rule, remove bool) []string {
 		address = any
 	}
 	var args []string
+	source := rule.Source
+	if source == "" {
+		source = any
+	}
 	if remove {
 		args = append(args, "--force", "delete")
 	}
-	return append(args, "allow", "in", "proto", rule.Protocol, "from", any, "to", address,
+	return append(args, "allow", "in", "proto", rule.Protocol, "from", source, "to", address,
 		"port", strings.ReplaceAll(rule.Ports.String(), "-", ":"), "comment", b.ufwComment(rule))
 }
 
 func (b *systemBackend) ensureUFW(ctx context.Context, owned ownedRule, existing []ufwRule) error {
 	for _, rule := range existing {
-		if rule.Rule != owned.Rule {
+		if rule.ScopedSource || rule.Rule != owned.Rule {
 			continue
 		}
 		if rule.Action != "ALLOW" {
@@ -110,7 +138,7 @@ func (b *systemBackend) removeUFW(ctx context.Context, owned ownedRule, existing
 	comment := b.ufwComment(owned.Rule)
 	found := false
 	for _, rule := range existing {
-		if rule.Rule == owned.Rule && rule.Action == "ALLOW" && rule.Comment == comment {
+		if !rule.ScopedSource && rule.Rule == owned.Rule && rule.Action == "ALLOW" && rule.Comment == comment {
 			found = true
 		}
 	}
@@ -152,7 +180,12 @@ func ufwAddedOwns(output string, wanted Rule, comment string) bool {
 				switch key {
 				case "from":
 					endpoint = "from"
-					valid = value == "any" || value == "0.0.0.0/0" && wanted.Family == 4 || value == "::/0" && wanted.Family == 6
+					if value == "any" || value == "0.0.0.0/0" && wanted.Family == 4 || value == "::/0" && wanted.Family == 6 {
+						break
+					}
+					ip, err := netip.ParseAddr(value)
+					valid = err == nil && ip.Is4() == (wanted.Family == 4)
+					rule.Source = ip.String()
 				case "to":
 					endpoint = "to"
 					if value != "any" && value != "0.0.0.0/0" && value != "::/0" {

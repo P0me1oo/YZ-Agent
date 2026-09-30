@@ -3,6 +3,7 @@ package firewall
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -27,15 +28,18 @@ type reconciler interface {
 }
 
 type Manager struct {
-	mu      sync.Mutex
-	plans   map[string]Plan
-	backend reconciler
-	enabled bool
-	linux   bool
-	closed  bool
-	cancel  context.CancelFunc
-	done    chan struct{}
-	lastErr error
+	mu        sync.Mutex
+	plans     map[string]Plan
+	backend   reconciler
+	enabled   bool
+	linux     bool
+	closed    bool
+	cancel    context.CancelFunc
+	done      chan struct{}
+	lastErr   error
+	confirm   map[string]Plan
+	discovery map[string]bool
+	expected  map[string]bool
 }
 
 func New(cfg config.FirewallConfig, configPath string) (*Manager, error) {
@@ -59,7 +63,11 @@ func New(cfg config.FirewallConfig, configPath string) (*Manager, error) {
 		return nil, err
 	}
 	m.backend = backend
-	// 首次启动先回收上次异常退出遗留的规则，随后按实际启动成功的节点重建。
+	// 开启管理时等节点发现与来源校验完成后再回收，避免升级时先删除未知来源的旧规则。
+	if m.enabled {
+		backend.recovering = true
+		return m, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := backend.Apply(ctx, nil, nil); err != nil {
@@ -111,7 +119,15 @@ func (m *Manager) Apply(ctx context.Context, owner string, node *model.NodeSpec,
 		return nil
 	}
 	plan, err := PlanForNode(node, kernelType)
+	if m.expected != nil {
+		m.expected[owner] = true
+	}
 	if err != nil {
+		var confirmation *ConfirmationRequired
+		if errors.As(err, &confirmation) {
+			m.confirmPlan(owner, plan)
+			m.updateProtection()
+		}
 		return err
 	}
 	if !m.linux && len(plan.Redirects) > 0 {
@@ -122,10 +138,23 @@ func (m *Manager) Apply(ctx context.Context, owner string, node *model.NodeSpec,
 		candidate[key] = value
 	}
 	candidate[owner] = plan
+	for key, held := range m.confirm {
+		if key != owner {
+			candidate["pending:"+key] = held
+		}
+	}
 	if _, _, err := combinePlans(candidate); err != nil {
+		m.confirmPlan(owner, plan)
+		m.updateProtection()
 		return err
 	}
+	for key := range m.confirm {
+		delete(candidate, "pending:"+key)
+	}
 	m.plans = candidate
+	delete(m.confirm, owner)
+	// 来源已明确的计划仍参与下一轮核对。后端在写入前检查冲突并保留旧规则，
+	// 不能把暂等其他节点发现的计划也标成来源未知，否则相邻端口会互相等待。
 	return m.reconcile(ctx)
 }
 
@@ -138,7 +167,13 @@ func (m *Manager) Release(ctx context.Context, owner string) error {
 	if m.closed {
 		return nil
 	}
-	if _, ok := m.plans[owner]; !ok && m.lastErr == nil {
+	_, wasPending := m.confirm[owner]
+	delete(m.confirm, owner)
+	if m.expected != nil {
+		m.expected[owner] = true
+	}
+	if _, ok := m.plans[owner]; !ok && m.lastErr == nil && !wasPending {
+		m.updateProtection()
 		return nil
 	}
 	delete(m.plans, owner)
@@ -149,6 +184,7 @@ func (m *Manager) reconcile(parent context.Context) error {
 	if m.backend == nil {
 		return nil
 	}
+	m.updateProtection()
 	allows, redirects, err := combinePlans(m.plans)
 	if err == nil {
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
@@ -182,6 +218,7 @@ func (m *Manager) Close() error {
 		return nil
 	}
 	m.plans = map[string]Plan{}
+	m.confirm, m.discovery, m.expected = nil, nil, nil
 	err := m.reconcile(context.Background())
 	m.closed = true
 	if m.backend != nil {

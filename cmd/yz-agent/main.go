@@ -27,7 +27,7 @@ import (
 )
 
 var (
-	version       = "v2.0.0"
+	version       = "v2.1.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -165,6 +165,20 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 		if err != nil {
 			nlog.Core().Error("防火墙管理器初始化失败", "error", err)
 			os.Exit(1)
+		}
+		var firewallInstances []string
+		for _, instance := range instances {
+			firewallInstances = append(firewallInstances, instance.InstanceID)
+		}
+		firewallManager.BeginDiscovery(firewallInstances)
+		for _, instance := range instances {
+			if !instance.IsMachineMode() {
+				var ids []int
+				for _, node := range instance.ExpandNodes() {
+					ids = append(ids, node.Panel.NodeID)
+				}
+				firewall.ExpectNodes(firewallManager, instance.InstanceID, ids)
+			}
 		}
 		firewallManager.Start(ctx)
 		stopShared := func() {
