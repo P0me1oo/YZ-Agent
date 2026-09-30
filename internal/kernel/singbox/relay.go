@@ -118,6 +118,9 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 	outbounds := make([]M, 0, len(nc.Relay.Children))
 	for _, child := range nc.Relay.Children {
 		protocol := strings.ToLower(strings.TrimSpace(child.Protocol))
+		if protocol == "wireguard" {
+			continue
+		}
 		outbound := M{"tag": child.Tag, "type": protocol, "server": child.Address, "server_port": child.Port}
 		if protocol == "shadowsocks" {
 			outbound["method"], outbound["password"] = child.Cipher, child.Password
@@ -158,6 +161,9 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 
 // 落地只接受内部凭据；无面板用户时也必须正常监听，且不能重复上报用户流量。
 func buildRelayLandingInbound(nc *model.NodeSpec, tc kernel.TLSCert) M {
+	if nc.Relay.Protocol == "wireguard" {
+		return nil
+	}
 	landing := *nc
 	landing.Relay = nil
 	landing.Protocol = strings.ToLower(strings.TrimSpace(nc.Relay.Protocol))
@@ -185,6 +191,38 @@ func buildRelayLandingInbound(nc *model.NodeSpec, tc kernel.TLSCert) M {
 
 func (s *SingBox) GetRelayTraffic(context.Context) (map[int][2]int64, error) {
 	return s.traffic.relaySnapshot(), nil
+}
+
+// WireGuard 使用端点而非已移除的旧版出站；用户态收发不创建系统网卡。
+func buildRelayWireGuardEndpoints(nc *model.NodeSpec) []M {
+	endpoint := func(tag string, w *model.RelayWireGuardConfig) M {
+		return M{"type": "wireguard", "tag": tag, "system": false,
+			"private_key": w.PrivateKey, "address": w.Address, "mtu": w.MTU,
+			"peers": []M{{"public_key": w.PeerPublicKey, "allowed_ips": w.AllowedIPs,
+				"persistent_keepalive_interval": w.Keepalive}}}
+	}
+	var endpoints []M
+	if nc.IsRelayLanding() && nc.Relay.Protocol == "wireguard" && nc.Relay.WireGuard != nil {
+		e := endpoint(relayLandingInboundTag, nc.Relay.WireGuard)
+		port := nc.Relay.ListenPort
+		if port == 0 {
+			port = nc.ServerPort
+		}
+		e["listen_port"] = port
+		endpoints = append(endpoints, e)
+	}
+	if nc.IsRelayEntry() {
+		for _, child := range nc.Relay.Children {
+			if child.Protocol != "wireguard" || child.WireGuard == nil {
+				continue
+			}
+			e := endpoint(child.Tag, child.WireGuard)
+			peer := e["peers"].([]M)[0]
+			peer["address"], peer["port"] = child.Address, child.Port
+			endpoints = append(endpoints, e)
+		}
+	}
+	return endpoints
 }
 
 func (s *SingBox) GetRelayUserTraffic(context.Context) (map[int]map[int][2]int64, error) {

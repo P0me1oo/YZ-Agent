@@ -120,7 +120,7 @@ func listenerAddresses(raw string) ([]Rule, error) {
 
 func listenerProtocols(node *model.NodeSpec, kernelType string) ([]string, error) {
 	switch node.Protocol {
-	case "hysteria", "tuic":
+	case "hysteria", "tuic", "wireguard":
 		return []string{"udp"}, nil
 	case "shadowsocks", "naive":
 		return []string{"tcp", "udp"}, nil

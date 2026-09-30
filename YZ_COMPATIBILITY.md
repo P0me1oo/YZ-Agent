@@ -1,5 +1,19 @@
 # YZ-Agent 兼容矩阵
 
+## v1.26.0 WireGuard 中转
+
+- 配套面板 `1.33.0`、管理端 `0.14.0`；新增 WG 中转落地，VLESS／HY2 前置与两种核心的四种组合均已验证。
+- Xray 与 sing-box fork 引用保持 v1.25.1 不变。新增 `with_gvisor` 构建条件，gVisor 固定为 `github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1`，匹配 sing-tun 的用户态栈接口。
+- 本地八种组合（VLESS／HY2 × 两种前置核心 × 两种落地核心）通过 TCP／UDP、重复重载、撤销用户、停用恢复与落地重启验证；多落地选路和流量统计通过。真实 Mihomo 1.19.31、sing-box 客户端经 Xray VLESS + Reality + TCP → sing-box WG 的 TCP／UDP 测试通过，目标为本地测试服务。
+- 带正式功能标签的全量测试中，其余包通过，服务包的 `TestShutdownSavesTrafficWhenPanelUnavailable` 一次因退出时发送次数不足失败；未修改该测试或服务实现，随后整个服务包独立重测通过，该测试再连续运行 10 次通过。失败原因尚未确证，不将全量描述为一次通过；本机未运行竞态检测。
+- 2026-09-30 经用户明确授权，通过 Netcatty 完成 DGN-HK 前置、YT-HK 落地的真实测试。Mihomo 1.19.31 与完整 sing-box 客户端使用真实面板订阅，八种组合的 HTTPS 出口核对及 UDP DNS 均通过；停用后的十六次旧订阅访问被拒绝，启用后原配置恢复。落地核心切换与重启恢复通过，切回核心的一轮有四条线路初次超时，重试后约 16.5–18.1 秒成功，不承诺无中断。
+- 退出后 163 个批次全部处理，69 个含用户流量；用户上传 184,229 字节、下载 428,527 字节，与唯一批次合计一致，落地用户扣费批次及失败任务均为零。早期直接出站接口探测曾失败，完整客户端验证通过；控制面临时隧道曾中断并恢复，不把过程写成一次全通过。两台测试实例、身份、配置、数据和隧道均已清理，未更新生产服务。
+- Linux amd64／arm64 交叉构建通过，Go 1.27.0、CGO 关闭、包含 `with_gvisor`；固定双核心依赖已核对。来源为基线 `cba2308a90a22dc6700e6c8c5b4e886bde094e6c` 加本次未提交修改，`vcs.modified=true`，不是 Release。
+- 本地测试构建 SHA256：amd64 `242f350aa4cd4df2810a00558644c42759a6d8f4b5162f0e8fc91150021b2ee4`；arm64 `a9181f5b1c7e5d894f67efe434d8b394ae1c533c2c893b0d73558811aa57ccab`。原构建缺少用户态栈，补上构建标签并固定匹配 gVisor 后完成构建，不修改两个核心 fork。
+
+- 发布前复核：Windows、Go 1.27.0 下执行 `go test -mod=readonly -count=1 -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./...`，sing-box 测试包触发默认十分钟超时，其他测试包通过；正在单独定位 WG 场景，并由正式 Linux 环境执行完整测试与竞态检测，不将这次本地全量记为通过。
+- 发布状态：准备中，正式构建来源、附件与镜像核验结果在发布完成后追加。回滚基线为 Node `v1.25.1`、面板 `1.32.0`；回滚前停用新增 WG 线路，保留待上报流量批次。
+
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。
 
 ## v1.25.1 实时通信与发布回归修正

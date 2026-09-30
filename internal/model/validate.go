@@ -12,6 +12,9 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if n == nil {
 		return nil
 	}
+	if n.Protocol == "wireguard" && !n.IsRelayLanding() {
+		return fmt.Errorf("wireguard requires a relay landing configuration")
+	}
 	if strings.TrimSpace(n.PortHopping) != "" {
 		if n.Protocol != "hysteria" || n.Version != 2 || n.IsRelayLanding() {
 			return fmt.Errorf("端口跳跃只支持 Hysteria2 普通节点或中转入口")

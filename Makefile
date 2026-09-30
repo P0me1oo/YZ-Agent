@@ -1,9 +1,9 @@
-VERSION ?= v1.25.1
+VERSION ?= v1.26.0
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.commit=$(COMMIT)
 BUILD_FLAGS := -mod=readonly -trimpath -buildvcs=true
-BUILD_TAGS := with_quic with_utls with_wireguard with_acme with_clash_api
+BUILD_TAGS := with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api
 
 .PHONY: build clean test docker install build-linux build-linux-arm64 build-all
 

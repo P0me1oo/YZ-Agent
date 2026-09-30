@@ -1,9 +1,11 @@
 package model
 
 import (
+	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/netip"
 	"strings"
 )
 
@@ -88,6 +90,15 @@ func validateRelayEntry(n *NodeSpec, kernelType string, availableTags map[string
 	seenTags := make(map[string]struct{}, len(n.Relay.Children))
 	seenRoutes := make(map[int]struct{}, len(n.Relay.Children)+1)
 	seenRoutes[n.Relay.RouteID] = struct{}{}
+	for _, routeID := range n.Relay.BlockedRouteIDs {
+		if err := validateRouteID(routeID, "blocked relay route"); err != nil {
+			return err
+		}
+		if _, exists := seenRoutes[routeID]; exists {
+			return fmt.Errorf("duplicate blocked relay route")
+		}
+		seenRoutes[routeID] = struct{}{}
+	}
 
 	for i := range n.Relay.Children {
 		child := &n.Relay.Children[i]
@@ -125,6 +136,10 @@ func validateRelayEntry(n *NodeSpec, kernelType string, availableTags map[string
 		}
 
 		switch strings.ToLower(strings.TrimSpace(child.Protocol)) {
+		case "wireguard":
+			if err := validateRelayWireGuard(child.WireGuard); err != nil {
+				return fmt.Errorf("relay child %d: %w", child.NodeID, err)
+			}
 		case "shadowsocks":
 			if !IsRelayTransitCipher(child.Cipher) {
 				return fmt.Errorf("relay child %d: unsupported cipher %q", child.NodeID, child.Cipher)
@@ -187,6 +202,8 @@ func validateRelayLanding(n *NodeSpec, kernelType string) error {
 	}
 
 	switch strings.ToLower(strings.TrimSpace(n.Relay.Protocol)) {
+	case "wireguard":
+		return validateRelayWireGuard(n.Relay.WireGuard)
 	case "shadowsocks":
 		if !IsRelayTransitCipher(n.Relay.Cipher) {
 			return fmt.Errorf("relay landing: unsupported cipher %q", n.Relay.Cipher)
@@ -423,6 +440,43 @@ func validateRouteID(routeID int, field string) error {
 	// 0 is unusable: Xray's port-list parser drops a bare numeric zero.
 	if routeID < 1 || routeID > 65535 {
 		return fmt.Errorf("%s must be within 1-65535, got %d", field, routeID)
+	}
+	return nil
+}
+
+func validateRelayWireGuard(w *RelayWireGuardConfig) error {
+	if w == nil {
+		return fmt.Errorf("wireguard settings are required")
+	}
+	private, err := base64.StdEncoding.DecodeString(w.PrivateKey)
+	if err != nil || len(private) != 32 {
+		return fmt.Errorf("invalid wireguard private key")
+	}
+	peer, err := base64.StdEncoding.DecodeString(w.PeerPublicKey)
+	if err != nil || len(peer) != 32 {
+		return fmt.Errorf("invalid wireguard peer public key")
+	}
+	key, err := ecdh.X25519().NewPrivateKey(private)
+	if err != nil {
+		return fmt.Errorf("invalid wireguard private key")
+	}
+	public, err := ecdh.X25519().NewPublicKey(peer)
+	if err != nil {
+		return fmt.Errorf("invalid wireguard peer public key")
+	}
+	if _, err = key.ECDH(public); err != nil || key.PublicKey().Equal(public) {
+		return fmt.Errorf("invalid wireguard peer public key")
+	}
+	if w.MTU < 1280 || w.MTU > 1420 || w.Keepalive < 0 || w.Keepalive > 65535 {
+		return fmt.Errorf("invalid wireguard MTU or keepalive")
+	}
+	if len(w.Address) == 0 || len(w.AllowedIPs) == 0 {
+		return fmt.Errorf("wireguard addresses and allowed IPs are required")
+	}
+	for _, value := range append(append([]string(nil), w.Address...), w.AllowedIPs...) {
+		if _, err := netip.ParsePrefix(value); err != nil {
+			return fmt.Errorf("invalid wireguard address prefix")
+		}
 	}
 	return nil
 }

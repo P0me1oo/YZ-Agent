@@ -96,7 +96,7 @@ func (s *SingBox) Capabilities() kernel.Capabilities {
 func (s *SingBox) Protocols() []string {
 	return []string{
 		"vmess", "vless", "trojan", "shadowsocks",
-		"hysteria", "hysteria2", "tuic", "naive", "socks", "http", "anytls", "mieru",
+		"hysteria", "hysteria2", "tuic", "naive", "socks", "http", "anytls", "mieru", "wireguard",
 	}
 }
 

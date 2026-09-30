@@ -176,29 +176,42 @@ type RelayConfig struct {
 	Mode string `json:"mode"`
 
 	// Entry-side fields.
-	RouteID  int          `json:"route_id,omitempty"`
-	Children []RelayChild `json:"children,omitempty"`
+	RouteID         int          `json:"route_id,omitempty"`
+	Children        []RelayChild `json:"children,omitempty"`
+	BlockedRouteIDs []int        `json:"blocked_route_ids,omitempty"`
 
 	// Landing-side fields.
-	Protocol    string            `json:"protocol,omitempty"`
-	ListenPort  int               `json:"listen_port,omitempty"`
-	Cipher      string            `json:"cipher,omitempty"`
-	Password    string            `json:"password,omitempty"`
-	EntryNodeID int               `json:"entry_node_id,omitempty"`
-	VLESS       *RelayVLESSConfig `json:"vless,omitempty"`
+	Protocol    string                `json:"protocol,omitempty"`
+	ListenPort  int                   `json:"listen_port,omitempty"`
+	Cipher      string                `json:"cipher,omitempty"`
+	Password    string                `json:"password,omitempty"`
+	EntryNodeID int                   `json:"entry_node_id,omitempty"`
+	VLESS       *RelayVLESSConfig     `json:"vless,omitempty"`
+	WireGuard   *RelayWireGuardConfig `json:"wireguard,omitempty"`
 }
 
 // RelayChild is one logical node reachable through an internal outbound on the entry.
 type RelayChild struct {
-	NodeID   int               `json:"node_id"`
-	Tag      string            `json:"tag"`
-	RouteID  int               `json:"route_id"`
-	Protocol string            `json:"protocol"`
-	Address  string            `json:"address"`
-	Port     int               `json:"port"`
-	Cipher   string            `json:"cipher"`
-	Password string            `json:"password"`
-	VLESS    *RelayVLESSConfig `json:"vless,omitempty"`
+	NodeID    int                   `json:"node_id"`
+	Tag       string                `json:"tag"`
+	RouteID   int                   `json:"route_id"`
+	Protocol  string                `json:"protocol"`
+	Address   string                `json:"address"`
+	Port      int                   `json:"port"`
+	Cipher    string                `json:"cipher"`
+	Password  string                `json:"password"`
+	VLESS     *RelayVLESSConfig     `json:"vless,omitempty"`
+	WireGuard *RelayWireGuardConfig `json:"wireguard,omitempty"`
+}
+
+// RelayWireGuardConfig 仅包含本端私钥、对端公钥和用户态隧道参数。
+type RelayWireGuardConfig struct {
+	PrivateKey    string   `json:"private_key"`
+	PeerPublicKey string   `json:"peer_public_key"`
+	Address       []string `json:"address"`
+	AllowedIPs    []string `json:"allowed_ips"`
+	MTU           int      `json:"mtu"`
+	Keepalive     int      `json:"keepalive"`
 }
 
 // RelayVLESSConfig 保存内部链路身份，以及入口连接落地所需的客户端传输参数。

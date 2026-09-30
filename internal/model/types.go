@@ -68,8 +68,9 @@ type RelayConfig struct {
 	Mode string
 
 	// Entry-side.
-	RouteID  int
-	Children []RelayChild
+	RouteID         int
+	Children        []RelayChild
+	BlockedRouteIDs []int
 
 	// Landing-side.
 	Protocol    string
@@ -78,18 +79,32 @@ type RelayConfig struct {
 	Password    string
 	EntryNodeID int
 	VLESS       *RelayVLESSConfig
+	WireGuard   *RelayWireGuardConfig
 }
 
 type RelayChild struct {
-	NodeID   int
-	Tag      string
-	RouteID  int
-	Protocol string
-	Address  string
-	Port     int
-	Cipher   string
-	Password string
-	VLESS    *RelayVLESSConfig
+	NodeID    int
+	Tag       string
+	RouteID   int
+	Protocol  string
+	Address   string
+	Port      int
+	Cipher    string
+	Password  string
+	VLESS     *RelayVLESSConfig
+	WireGuard *RelayWireGuardConfig
+}
+
+type RelayWireGuardConfig = panel.RelayWireGuardConfig
+
+func cloneRelayWireGuard(v *RelayWireGuardConfig) *RelayWireGuardConfig {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	c.Address = append([]string(nil), v.Address...)
+	c.AllowedIPs = append([]string(nil), v.AllowedIPs...)
+	return &c
 }
 
 type RelayVLESSConfig struct {

@@ -2,6 +2,7 @@ package xray
 
 import (
 	"context"
+	"net"
 	"strconv"
 	"strings"
 
@@ -29,6 +30,13 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 	outbounds := make([]M, 0, len(nc.Relay.Children))
 	for _, child := range nc.Relay.Children {
 		switch strings.ToLower(strings.TrimSpace(child.Protocol)) {
+		case "wireguard":
+			if child.WireGuard == nil {
+				continue
+			}
+			settings := relayWireGuardSettings(child.WireGuard)
+			settings["peers"].([]M)[0]["endpoint"] = net.JoinHostPort(child.Address, strconv.Itoa(child.Port))
+			outbounds = append(outbounds, M{"protocol": "wireguard", "tag": child.Tag, "settings": settings})
 		case "shadowsocks":
 			outbounds = append(outbounds, M{
 				"protocol": "shadowsocks",
@@ -88,6 +96,9 @@ func buildRelayRoutingRules(nc *model.NodeSpec) (childRules []M, entryRules []M)
 		})
 	}
 	childRules = make([]M, 0, len(nc.Relay.Children))
+	for _, routeID := range nc.Relay.BlockedRouteIDs {
+		childRules = append(childRules, M{"type": "field", "vlessRoute": strconv.Itoa(routeID), "outboundTag": "block"})
+	}
 	for _, child := range nc.Relay.Children {
 		if child.RouteID <= 0 || child.Tag == "" {
 			continue
@@ -130,6 +141,13 @@ func buildRelayLandingInbound(kcfg config.KernelConfig, nc *model.NodeSpec, tc k
 	}
 
 	switch strings.ToLower(strings.TrimSpace(nc.Relay.Protocol)) {
+	case "wireguard":
+		if nc.Relay.WireGuard == nil {
+			return nil
+		}
+		base["protocol"] = "wireguard"
+		base["settings"] = relayWireGuardSettings(nc.Relay.WireGuard)
+		return base
 	case "shadowsocks":
 		base["protocol"] = "shadowsocks"
 		base["settings"] = M{
@@ -195,6 +213,13 @@ func buildRelayVLESSClientStream(v *model.RelayVLESSConfig) M {
 	}
 
 	return ss
+}
+
+func relayWireGuardSettings(w *model.RelayWireGuardConfig) M {
+	return M{
+		"secretKey": w.PrivateKey, "address": w.Address, "mtu": w.MTU, "noKernelTun": true,
+		"peers": []M{{"publicKey": w.PeerPublicKey, "allowedIPs": w.AllowedIPs, "keepAlive": w.Keepalive}},
+	}
 }
 
 // buildTransportStreamSettings 将面板传输参数转换为 Xray streamSettings。

@@ -73,6 +73,9 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	if inbound != nil {
 		cfg["inbounds"] = []M{inbound}
 	}
+	if endpoints := buildRelayWireGuardEndpoints(nc); len(endpoints) > 0 {
+		cfg["endpoints"] = endpoints
+	}
 
 	// Merge panel routes and static config routes
 	cfg["route"] = buildRoutes(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute), buildRelayRoutingRules(nc, users)...)

@@ -24,7 +24,7 @@ RUN test -n "$NODE_VERSION" && \
     go build -mod=readonly -trimpath -buildvcs=true -ldflags "-s -w \
     -X main.version=$NODE_VERSION -X main.commit=$SOURCE_COMMIT \
     -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -tags "with_quic with_utls with_wireguard with_acme with_clash_api" \
+    -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api" \
     -o /out/yz-agent ./cmd/yz-agent && \
     go version -m /out/yz-agent | grep -F 'vcs.modified=false'
 
