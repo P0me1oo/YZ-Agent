@@ -119,6 +119,12 @@ jobs:
               sudo mknod -m 666 "$rootfs/dev/$name" c "$major" "$minor"
             fi
           done
+          for spec in 'fd /proc/self/fd' 'stdin /proc/self/fd/0' 'stdout /proc/self/fd/1' 'stderr /proc/self/fd/2'; do
+            read -r name target <<< "$spec"
+            if [[ ! -e "$rootfs/dev/$name" && ! -L "$rootfs/dev/$name" ]]; then
+              sudo ln -s "$target" "$rootfs/dev/$name"
+            fi
+          done
       - name: Verify native rule lifecycle and source traffic
         env:
           FIREWALL_BACKEND: ${{ matrix.backend }}
