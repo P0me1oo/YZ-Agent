@@ -1,9 +1,9 @@
 # YZ-Agent 兼容矩阵
 
-## v1.26.0 WireGuard 中转
+## v1.26.1 WireGuard 中转
 
 - 配套面板 `1.33.0`、管理端 `0.14.0`；新增 WG 中转落地，VLESS／HY2 前置与两种核心的四种组合均已验证。
-- Xray 固定为 `v26.9.2` / `51c3601eabc14df1202ef8a928bcf8b6a9ce2922`，Go 模块引用 `v0.0.0-20260930031310-51c3601eabc1`；sing-box 仍为 `v1.14.0-yz.2`。新增 `with_gvisor` 构建条件，gVisor 固定为 `github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1`，匹配 sing-tun 的用户态栈接口。
+- Xray 固定为 `v26.9.3` / `7c5728ec7d0f6deb2facac71f4187bbd76acbb6f`，Go 模块引用 `v0.0.0-20260930033643-7c5728ec7d0f`；sing-box 仍为 `v1.14.0-yz.2`。新增 `with_gvisor` 构建条件，gVisor 固定为 `github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1`，匹配 sing-tun 的用户态栈接口。
 - 本地八种组合（VLESS／HY2 × 两种前置核心 × 两种落地核心）通过 TCP／UDP、重复重载、撤销用户、停用恢复与落地重启验证；多落地选路和流量统计通过。真实 Mihomo 1.19.31、sing-box 客户端经 Xray VLESS + Reality + TCP → sing-box WG 的 TCP／UDP 测试通过，目标为本地测试服务。
 - 带正式功能标签的全量测试中，其余包通过，服务包的 `TestShutdownSavesTrafficWhenPanelUnavailable` 一次因退出时发送次数不足失败；未修改该测试或服务实现，随后整个服务包独立重测通过，该测试再连续运行 10 次通过。失败原因尚未确证，不将全量描述为一次通过；本机未运行竞态检测。
 - 2026-09-30 经用户明确授权，通过 Netcatty 完成 DGN-HK 前置、YT-HK 落地的真实测试。Mihomo 1.19.31 与完整 sing-box 客户端使用真实面板订阅，八种组合的 HTTPS 出口核对及 UDP DNS 均通过；停用后的十六次旧订阅访问被拒绝，启用后原配置恢复。落地核心切换与重启恢复通过，切回核心的一轮有四条线路初次超时，重试后约 16.5–18.1 秒成功，不承诺无中断。
@@ -13,6 +13,7 @@
 
 - 发布前复核：Windows、Go 1.27.0 下执行 `go test -mod=readonly -count=1 -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./...`，sing-box 测试包触发默认十分钟超时，其他测试包通过；WG 专项复测通过（204.078 秒），单独完整 sing-box 包在诊断用二十分钟总时限内通过（530.822 秒），未改测试断言、场景时限或正式测试命令。上述结果使用旧 Xray 依赖。
 - 首次 Linux 全量竞态检测（[运行 36660695515](https://github.com/P0me1oo/YZ-Agent/actions/runs/36660695515)）发现 Xray WG 设备事件线程读取监听回调与初始化写入同时发生，VLESS、HY2 前置均能触发。核心补丁使用监听打开时的同一把锁保证回调初始化完成；核心新回归的十轮 Linux 竞态检测通过。Node 已固定修复提交，完整竞态与发布构建结果在完成后追加。
+- 第二次竞态检测（[v1.26.0 运行 36664060367](https://github.com/P0me1oo/YZ-Agent/actions/runs/36664060367)）发现 Xray 落地设备先收包、后安装转发处理函数，网络栈读写冲突；前一处监听回调竞争未再报告。核心 `v26.9.3` 将转发初始化放到设备构造之前，新首包回归在旧代码稳定失败、修复后连续十次通过。`v1.26.0` 没有生成 Release 或镜像，后续使用新标签 `v1.26.1`。
 - 发布状态：准备中，正式构建来源、附件与镜像核验结果在发布完成后追加。回滚基线为 Node `v1.25.1`、面板 `1.32.0`；回滚前停用新增 WG 线路，保留待上报流量批次。
 
 本文件记录可发布的 Node 构建与内嵌内核之间的固定关系。构建上线时必须使用明确的 Node Release Tag 和固定的 Xray fork commit，不能依赖 `main` 或其他移动分支。

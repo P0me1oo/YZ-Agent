@@ -57,6 +57,8 @@ github.com/P0me1oo/YZ-Xray-core v0.0.0-20260926140203-434e1c025c93 h1:SDd9lY5atQ
 github.com/P0me1oo/YZ-Xray-core v0.0.0-20260926140203-434e1c025c93/go.mod h1:OxuyPpr4Ta52qQC4nSI74QOBtNWyrCjaFdVOKkxwyi8=
 github.com/P0me1oo/YZ-Xray-core v0.0.0-20260930031310-51c3601eabc1 h1:2pmvIdgO0GbuUnN8ZjKB9tLMjrJxpWPAKfDZJu+bKlQ=
 github.com/P0me1oo/YZ-Xray-core v0.0.0-20260930031310-51c3601eabc1/go.mod h1:OxuyPpr4Ta52qQC4nSI74QOBtNWyrCjaFdVOKkxwyi8=
+github.com/P0me1oo/YZ-Xray-core v0.0.0-20260930033643-7c5728ec7d0f h1:9dhZ1UYmRmfSarugd+caOL+OJAeysPksOZaImaFDqbY=
+github.com/P0me1oo/YZ-Xray-core v0.0.0-20260930033643-7c5728ec7d0f/go.mod h1:OxuyPpr4Ta52qQC4nSI74QOBtNWyrCjaFdVOKkxwyi8=
 github.com/P0me1oo/YZ-sing-box v1.14.0-yz.2 h1:KL0agFYXpL1qEUsa+toI8VhlUVuQser2AVYL3unVkKk=
 github.com/P0me1oo/YZ-sing-box v1.14.0-yz.2/go.mod h1:dPpNrE2MRS5VemenTVgx3u2kHj124/g2CG6YsxSZbdU=
 github.com/PuerkitoBio/purell v1.1.0/go.mod h1:c11w/QuzBsJSee3cPx9rAFu61PvFxuPbtSwDGJws/X0=
