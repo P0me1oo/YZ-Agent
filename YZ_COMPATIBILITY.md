@@ -1,19 +1,22 @@
 # YZ-Agent 兼容矩阵
 
-## v2.0.0 系统 TCP WG 中转（发布验证中）
+## v2.0.0 系统 TCP WG 中转
 
 - 修改范围仅为 Node；面板沿用现有 WG 参数，Linux 自动切换系统 TCP。内部连接格式改变，入口和落地必须一起升级，旧版不能混用。
 - sing-box 与 Xray 的正式依赖不变；新增的运行层使用独立网络空间、TUN 和现有 wireguard-go 依赖，不修改宿主默认路由。包含下节 `v1.26.2` 误重载修复。
 - 双核心八组互通与重载、mihomo TCP／UDP、多落地计费及 DGN-HK 真实 BBR 套接字验证通过，详情和权限要求见 [系统 WG 说明](docs/system-wireguard.md)。跨机速度未作对照，不承诺具体提速幅度。
-- 完整 Linux 竞态测试、安装器检查、双架构构建、镜像及 Release 尚待发布流水线核对。
+- 发布完成（2026-10-01）：[Release v2.0.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.0.0) 已核对为最新正式版，固定来源 `5688d6ed596cf9e7be7f49f25b4432390f081b6e`。[正式流水线 36771738458](https://github.com/P0me1oo/YZ-Agent/actions/runs/36771738458) 的完整 Linux 竞态、兼容包、安装器、mihomo 联调、双架构构建、镜像运行版本及 Release 全部通过。前置开发流水线的测试已通过，随后取消重复构建，由正式标签流水线完成交付。
+- 12 个附件全部下载并通过 GitHub SHA256，11 条 `SHA256SUMS` 全部匹配；同架构兼容名称与主程序字节一致。实际程序及附带构建记录的来源一致，`vcs.modified=false`、`CGO_ENABLED=0`，固定核心依赖不变。主程序 SHA256：amd64 `26d8488fb31a7b33b76fa2143bfeb588ea55d0f1c2baa2c80516738f4640d4aa`，arm64 `f28bbf4df6f1bf36517f78cf4f76e038d6016d12f4c14dc53de47f569ee9a7c2`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.0.0`、`latest` 和完整来源提交标签均为 manifest `sha256:af311ee077023fec093174db195ea5c955fb47636136cfe7d63b29c1172a7b25`；amd64 为 `sha256:e1ebbd058e37532812d7e12f5574d80ea1fc3d6a3146091c2cf54ff21ccba7dd`，arm64 为 `sha256:0188e84c581fb9993e514c1f4b20f949ca80352edfc1447191f8320498b505a6`。匿名读取、两个架构的 OCI 来源与版本均已核验。
+- 升级由用户在服务器执行：先落地、再入口，两端均运行 `yz-agent upgrade`，然后用 `yz-agent version`、`yz-agent service status` 确认。两端版本不一致期间 WG 不可用；回滚基线 `v1.26.2` 也必须两端同步回滚。不需要更新面板或重建节点；未代用户更新生产服务器。
 
 ## v1.26.2 配置误重载修复
 
-- 紧急修复基于已发布 `v1.26.1` 的运行代码，只修复机器模式配置复制时空列表变成空值的问题，避免相同配置反复触发核心重建；不包含上节开发中的系统 WG 改造。修复源码与回归测试已同步回当前开发目录。
+- 紧急修复基于已发布 `v1.26.1` 的运行代码，只修复机器模式配置复制时空列表变成空值的问题，避免相同配置反复触发核心重建；不包含上节系统 WG 改造。修复源码与回归测试已同步回当前开发目录。
 - 配套面板 `1.33.2`、管理端 `0.14.0`；已有 `1.33.0`／`1.33.1` 面板无需为此修复升级。协议和数据结构保持兼容，Xray 仍固定为 `v26.9.3` / `7c5728ec7d0f6deb2facac71f4187bbd76acbb6f`，sing-box 仍为 `v1.14.0-yz.2`。
 - 原代码本地复现：同一配置与用户经过三轮实时推送、HTTP 拉取，触发六次重载；修复后为零，真正修改端口仍只重载一次。两台机器的只读日志在同一完整小时各出现 24 次 Xray 核心重建，服务进程没有自动重启。详见 [排查与修复说明](docs/realtime-snapshot-disconnect.md)。
 - 本地 Windows Go 1.27.0 正式功能标签全量测试 22 个测试包通过。Git Bash 的安装路径和名称迁移测试失败于符号链接的 `readlink` 断言，相关源码未修改；同版本 Linux 发布流程全部通过，包括 20 个安装目录场景、68 个名称迁移场景。
-- 发布完成（2026-10-01）：[Release v1.26.2](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.26.2) 为最新正式版，固定来源 `7bafc1381d66d8c3c114cbbf73a5cb1bdb953c79`。[工作流 36762012566](https://github.com/P0me1oo/YZ-Agent/actions/runs/36762012566) 的完整 Linux 竞态检测、兼容包、安装器检查、双架构构建、镜像运行版本校验和 Release 全部通过。
+- 发布完成（2026-10-01）：[Release v1.26.2](https://github.com/P0me1oo/YZ-Agent/releases/tag/v1.26.2) 当时为最新正式版，固定来源 `7bafc1381d66d8c3c114cbbf73a5cb1bdb953c79`。[工作流 36762012566](https://github.com/P0me1oo/YZ-Agent/actions/runs/36762012566) 的完整 Linux 竞态检测、兼容包、安装器检查、双架构构建、镜像运行版本校验和 Release 全部通过。
 - 12 个附件全部下载并与 GitHub SHA256 匹配，11 条 `SHA256SUMS` 全部通过，同架构程序与兼容名称文件字节一致。四份程序的实际来源均为上述完整提交，`vcs.modified=false`、`CGO_ENABLED=0`，目标为 Linux amd64／arm64，固定核心依赖及 `with_gvisor` 已核对。主程序 SHA256：amd64 `d7c0cd0eaa8ea0a8bbd50f2ce6bf7493adbf2d477f7516dea12ed23ebcd81c83`，arm64 `3d064d83452bf6c0fdb5d80340414a249bb5ae7d47021b7e896f68c096b583dc`。
 - 镜像 `ghcr.io/p0me1oo/yz-agent:v1.26.2`、`latest` 与完整来源提交标签均为 manifest `sha256:a56ccd1d2cb4f6eee1d5f8829622f7db043e7766c78354b514d6342cc5e540a6`；amd64 为 `sha256:d108fe584017ec7bce241c3cbd0b8037be949253b3bdf9860afd12fda635d085`，arm64 为 `sha256:5314cc8beaf2d06fd0ac006c5a54db0e057bef267dfc8c9e7bc960f86e86aba7`。匿名镜像读取、两个架构的 OCI 来源和版本均已核验。
 - 前置与落地 Node 均需更新，建议先落地、再前置；升级重启会中断已有连接。回滚版本 `v1.26.1` 保持 WG 格式兼容，但仍包含本次修复的故障。未更新生产服务器，修复后的实际 SSH 会话需部署后观察。
