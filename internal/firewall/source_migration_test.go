@@ -30,7 +30,7 @@ func (r *sourceUFW) Run(_ context.Context, name, _ string, args ...string) (stri
 			if source == "" {
 				source = "Anywhere"
 			}
-			if rule.Family == 6 {
+			if rule.Family == 6 && rule.Source == "" {
 				source += " (v6)"
 			}
 			output += fmt.Sprintf("[ 1] %s %s/%s ALLOW IN %s # %s\n", rule.Address, strings.ReplaceAll(rule.Ports.String(), "-", ":"), rule.Protocol, source, comment)

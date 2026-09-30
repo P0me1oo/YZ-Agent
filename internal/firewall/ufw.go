@@ -37,6 +37,13 @@ func parseUFWStatus(output string) []ufwRule {
 		destination, _, scoped := strings.Cut(destination, " on ")
 		source := strings.TrimSpace(strings.ReplaceAll(match[3], "(v6)", ""))
 		source = strings.TrimSpace(ufwLogSuffix.ReplaceAllString(source, ""))
+		// 明确写出 IPv6 地址时，UFW 不一定附加 (v6) 标记。
+		for _, endpoint := range append(strings.Fields(destination), strings.Fields(source)...) {
+			address, _, _ := strings.Cut(endpoint, "/")
+			if ip, err := netip.ParseAddr(address); err == nil && ip.Is6() {
+				family = 6
+			}
+		}
 		if source == "Anywhere" || source == "0.0.0.0/0" || source == "::/0" {
 			source = ""
 		} else if prefix, err := netip.ParsePrefix(source); err == nil {

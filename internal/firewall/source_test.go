@@ -140,6 +140,62 @@ func TestUFWSourceRoundTripAndLegacyIdentity(t *testing.T) {
 	}
 }
 
+func TestUFWIPv6SourcesWithoutFamilyMarker(t *testing.T) {
+	for _, line := range []string{
+		"[ 1] 28388/tcp ALLOW IN 2001:db8::2 # owned",
+		"[ 1] 28388/tcp ALLOW IN 2001:db8::2/128 # owned",
+		"[ 1] ::/0 28388/tcp ALLOW IN 2001:db8::2 # owned",
+	} {
+		parsed := parseUFWStatus(line)
+		if len(parsed) != 1 || parsed[0].ScopedSource || parsed[0].Rule.Family != 6 || parsed[0].Rule.Source != "2001:db8::2" {
+			t.Fatalf("明确 IPv6 来源必须保持归属: %+v", parsed)
+		}
+	}
+}
+
+type runtimeFirewalldCommands struct {
+	zone    string
+	service string
+}
+
+func (runtimeFirewalldCommands) Available(string) bool { return true }
+func (c runtimeFirewalldCommands) Run(_ context.Context, name, _ string, args ...string) (string, error) {
+	if name == "firewall-cmd" && len(args) == 2 && args[0] == "--zone=public" && args[1] == "--list-all" {
+		return c.zone, nil
+	}
+	if name == "firewall-cmd" && len(args) == 1 && args[0] == "--info-service=ssh" {
+		return c.service, nil
+	}
+	return "", errors.New("测试仅允许查询 firewalld 当前运行配置")
+}
+
+func TestFirewalldRuntimeSourceConflicts(t *testing.T) {
+	wanted := Rule{Family: 4, Source: "192.0.2.1", Protocol: "tcp", Ports: portset.Range{From: 28388, To: 28388}}
+	for _, tc := range []struct {
+		name, zone, service string
+		blocked             bool
+	}{
+		{"普通区域", "public (active)\n  target: default\n  services: ssh\n  ports: 28444/tcp\n", "ssh\n  ports: 22/tcp\n  protocols:\n  source-ports:\n", false},
+		{"默认全放行", "public\n  target: ACCEPT\n", "", true},
+		{"未知策略", "public\n", "", true},
+		{"公开端口", "public\n  target: default\n  ports: 28000-29000/tcp\n", "", true},
+		{"整协议", "public\n  target: default\n  protocols: tcp\n", "", true},
+		{"来源端口", "public\n  target: default\n  source-ports: 443/tcp\n", "", true},
+		{"服务共用", "public\n  target: default\n  services: ssh\n", "ssh\n  ports: 28388/tcp\n", true},
+		{"服务整协议", "public\n  target: default\n  services: ssh\n", "ssh\n  ports:\n  protocols: tcp\n", true},
+		{"服务引用", "public\n  target: default\n  services: ssh\n", "ssh\n  ports:\n  includes: custom\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &systemBackend{commands: runtimeFirewalldCommands{zone: tc.zone, service: tc.service}}
+			err := b.checkFirewalldSourceConflicts(context.Background(), "public", []Rule{wanted}, nil)
+			var confirmation *ConfirmationRequired
+			if tc.blocked && !errors.As(err, &confirmation) || !tc.blocked && err != nil {
+				t.Fatalf("当前运行配置判断错误: %v", err)
+			}
+		})
+	}
+}
+
 func TestExternalRulesAreCheckedBeforeSourceMutation(t *testing.T) {
 	b, err := newSystemBackend(config.FirewallConfig{StateDir: t.TempDir()}, "scope", &commandSpy{})
 	if err != nil {

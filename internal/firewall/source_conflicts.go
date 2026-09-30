@@ -58,30 +58,43 @@ func (b *systemBackend) checkFirewalldSourceConflicts(ctx context.Context, zone 
 			}
 		}
 	}
-	for _, option := range []string{"--get-target", "--list-ports", "--list-services"} {
-		output, err := b.commands.Run(ctx, "firewall-cmd", "", "--zone="+zone, option)
+	// --get-target 和 --get-ports 仅查询永久配置，必须读取当前运行状态。
+	output, err := b.commands.Run(ctx, "firewall-cmd", "", "--zone="+zone, "--list-all")
+	if err != nil {
+		return err
+	}
+	target := firewalldField(output, "target")
+	if target != "default" && target != "DROP" && target != "REJECT" {
+		return pending("落地区域默认策略无法确认限制，请确认 firewalld 区域策略；未修改来源规则")
+	}
+	if publicPortsOverlap(firewalldField(output, "ports"), allows) {
+		return pending("落地端口已有 firewalld 公开放行，请确认共用情况；未修改来源规则")
+	}
+	if firewalldField(output, "protocols") != "" || firewalldField(output, "source-ports") != "" {
+		return pending("落地区域存在协议或来源端口放行，请确认 firewalld 区域策略；未修改来源规则")
+	}
+	for _, service := range strings.Fields(firewalldField(output, "services")) {
+		details, err := b.commands.Run(ctx, "firewall-cmd", "", "--info-service="+service)
 		if err != nil {
 			return err
 		}
-		if option == "--get-target" && strings.TrimSpace(output) == "ACCEPT" {
-			return pending("落地区域默认全部放行，请确认 firewalld 区域策略；未修改来源规则")
-		}
-		if option == "--list-ports" && publicPortsOverlap(output, allows) {
-			return pending("落地端口已有 firewalld 公开放行，请确认共用情况；未修改来源规则")
-		}
-		if option == "--list-services" {
-			for _, service := range strings.Fields(output) {
-				ports, err := b.commands.Run(ctx, "firewall-cmd", "", "--service="+service, "--get-ports")
-				if err != nil {
-					return err
-				}
-				if publicPortsOverlap(ports, allows) {
-					return pending("落地端口与 firewalld 服务共用，请确认服务端口；未修改来源规则")
-				}
-			}
+		if !strings.Contains(details, "ports:") || publicPortsOverlap(firewalldField(details, "ports"), allows) ||
+			firewalldField(details, "protocols") != "" || firewalldField(details, "source-ports") != "" ||
+			firewalldField(details, "includes") != "" {
+			return pending("落地端口与 firewalld 服务共用或服务范围无法确认，请确认服务端口；未修改来源规则")
 		}
 	}
 	return nil
+}
+
+func firewalldField(output, field string) string {
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && key == field {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func publicPortsOverlap(text string, allows []Rule) bool {

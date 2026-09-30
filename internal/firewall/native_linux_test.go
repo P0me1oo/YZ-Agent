@@ -183,6 +183,9 @@ func TestNativeFirewallLifecycle(t *testing.T) {
 	apply := func(owner string, node *model.NodeSpec) {
 		t.Helper()
 		if err := m.Apply(ctx, owner, node, "xray"); err != nil {
+			if backend == "ufw" {
+				t.Log(nativeCommand(t, "ufw", "status", "numbered"))
+			}
 			t.Fatal(err)
 		}
 	}

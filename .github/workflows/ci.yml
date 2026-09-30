@@ -109,6 +109,7 @@ jobs:
           container=$(docker create yz-firewall-test-rootfs)
           trap 'docker rm "$container" >/dev/null' EXIT
           docker export "$container" | sudo tar -xpf - -C "$rootfs"
+          sudo chown root:root "$rootfs"
           sudo mkdir -p "$rootfs/work" "$rootfs/dev" "$rootfs/proc" "$rootfs/sys" "$rootfs/run"
           sudo touch "$rootfs/.yz-firewall-test-rootfs"
           sudo install -m 0755 "$RUNNER_TEMP/firewall-linux.test" "$rootfs/work/firewall-linux.test"
