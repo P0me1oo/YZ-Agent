@@ -6,9 +6,14 @@
 - 新增落地来源策略、按中转目标回报的系统选路地址，以及待确认/规则失败告警；旧面板未下发来源策略时不会自动为绑定前置的落地新增全开放规则。
 - 防火墙专项及服务专项通过，覆盖双栈来源、地址改变、旧全开放规则替换、重复同步、错误保持、运行中新增冲突、分批启动、相邻范围恢复和正常清理后回滚旧格式。Windows 下未执行原生 Linux 防火墙验收或竞态检测。
 - Windows 完整功能标签回归使用 `go test -p 1 -mod=readonly -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./...`。除 sing-box 整包触发默认 10 分钟超时外，其余包通过；sing-box 使用相同标签单独加 `-json -timeout 20m` 复测通过，109 项测试、144 个子用例，耗时 641.241 秒。最终包含“无旧规则的待确认落地与普通节点共用端口”保护，防火墙整包回归通过。
-- 最终源码的 Linux amd64、arm64 完整功能构建通过，均为 `CGO_ENABLED=0`。实际依赖仍为 sing-box `v1.14.0-yz.2` 和 Xray `v0.0.0-20260930033643-7c5728ec7d0f`；来源为上述开发基线加本次未提交修改，`vcs.modified=true`，不是正式发布产物。
+- 开发阶段源码的 Linux amd64、arm64 完整功能构建通过，均为 `CGO_ENABLED=0`。实际依赖仍为 sing-box `v1.14.0-yz.2` 和 Xray `v0.0.0-20260930033643-7c5728ec7d0f`；来源为上述开发基线加当时未提交修改，`vcs.modified=true`，不是正式发布产物，也不包含随后原生验收发现的兼容修正。
 - 本地产物 SHA256：amd64 `c10f58cf2eec0159c46f5f50f7e54a5f16d576484e65938b761d1f18f5266881`；arm64 `540ee9effebc4dc0c592f0b63ae3b43cbed9be217dd81be888b77ecc06900d00`。
-- 进入发布验证：流水线新增四组专用 rootfs 与网络空间中的 UFW/firewalld、nftables/iptables 验收，包含 TCP/UDP 双栈来源允许与拒绝。发布结果、正式来源和校验值在核验完成后补录；上面的摘要仅对应本地验证产物。
+- 发布前原生验收发现 UFW 精确 IPv6 来源不一定带 `(v6)` 标记，以及 firewalld 的 `--get-target`、`--get-ports` 仅支持永久配置。修复来源解析并改查当前运行区域与服务配置；补充回归通过。隔离环境补齐 `/dev/stdin` 等设备后，四组 UFW/firewalld 与 nftables/iptables 的完整原生验收通过，覆盖双栈 TCP/UDP 来源允许与拒绝、旧规则替换、重载与异常退出恢复。上面的摘要仅对应早期本地验证产物。
+- 正式标签固定来源 `f687dbfd8fc2c4f2940f9cbb4d0affc2795a405b`；[正式流水线 36792771602](https://github.com/P0me1oo/YZ-Agent/actions/runs/36792771602) 的完整 Linux 竞态检测、兼容包、安装器、Mihomo WG 联调和四组原生防火墙全部通过。此前失败的检查保留记录，不将发布前过程写成一次通过。
+- 发布完成（2026-10-01）：[Release v2.1.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.1.0) 已核对为最新正式版；正式流水线的双架构构建、运行版本检查、镜像与 Release 全部通过。12 个附件已下载并核对 GitHub SHA256，11 条 `SHA256SUMS` 全部匹配，同架构兼容名称与主程序字节一致。实际程序与构建记录均为上述固定来源，`vcs.modified=false`、`CGO_ENABLED=0`、Linux amd64/arm64，固定核心依赖不变。
+- 正式主程序 SHA256：amd64 `92215b45aa91db6201313e68a4ce9a6c4d6b6dcf8d01629608edcea9c61e04b9`；arm64 `fe8fce81299870627c389e75f75c21191a9e7d459efc67816ee3e1d0cda4de60`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.1.0`、`latest` 和完整来源提交标签均为 manifest `sha256:ee2221870645e670fb0eb6806593421e93c0438d4661c04c71c5913ca6901a88`；amd64 为 `sha256:2c4daacb5d64f1646a153015e822eeec545ed7a97527821b06a05228774d18d0`，arm64 为 `sha256:c36eb7fcab37e958eb5fa1acef093f94446f52578af69071db92ec3979199718`。匿名读取和两个架构的 OCI 来源、版本均已核验。
+- 由用户先更新面板 `1.35.0`，再更新前置，等待出口回报并处理待确认来源后更新落地。旧 WG `1.x` 仍需双端迁移，不能与 `2.x` 混用。回滚基线 `v2.0.0` 的 Release 附件仍可获取；回滚前先由新版正常停止并完成来源规则清理。未连接或更新生产服务器。
 
 ## v2.0.0 系统 TCP WG 中转
 
