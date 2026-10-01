@@ -1,8 +1,8 @@
 # YZ-Agent
 
-版本 `v2.3.1` 与面板 `1.37.1` 配套修复中转线路撤权，拒绝旧配置并关闭撤权线路已有连接。详见 [中转线路权限](docs/relay-route-permissions.md)，发布进度见 [兼容矩阵](YZ_COMPATIBILITY.md)。
+当前正式版本为 [`v2.3.1`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.3.1)，配套面板 `1.37.1`、管理端 `0.18.0`。修复中转线路撤权后旧配置仍可连接的问题，并关闭撤权线路已有连接。先升级节点程序，再更新面板。行为见 [中转线路权限](docs/relay-route-permissions.md)，正式核验见 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
-当前正式版本为 [`v2.3.0`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.3.0)，配套面板 `1.37.0`、管理端 `0.18.0`。移除中转来源 IP 白名单、出口核对与确认提示，保留自动端口放行；升级后清理本实例的旧来源规则。先升级节点程序，再更新面板。发布状态见 [兼容矩阵](YZ_COMPATIBILITY.md)。
+保留此前的用户实时网速、自动端口放行等修改；不再使用中转来源 IP 白名单、出口核对与确认提示，升级后仍会清理本实例的旧来源规则。
 
 本版同时纳入原计划 `v2.2.0` 的用户上传、下载速度上报，复用已有秒级采样，不保存历史或改变计费。保留 [自动端口放行](docs/firewall-port-hopping.md) 和 `v2.0.0` 的系统 TCP WG 格式；从旧 WG `1.x` 升级仍要求入口、落地配套更新，详见 [系统 WG 说明](docs/system-wireguard.md)。固定依赖和回滚基线见兼容矩阵。
 
