@@ -158,73 +158,50 @@ func TestSourceFailureAndPendingRecoveryNeverRemoveOldRules(t *testing.T) {
 	}
 }
 
-func TestDiscoveryWaitsForEveryNodeAndPreservesOnlyPendingPorts(t *testing.T) {
+func TestSourceRemovalRestoresPortsAndSurvivesRestart(t *testing.T) {
 	b, runner, old := seedSourceBackend(t)
-	m := testManager(b)
-	m.BeginDiscovery([]string{"instance"})
-	ExpectNodes(m, "instance", []int{1, 2})
-	first := landingWithSources("192.0.2.1")
-	first.Protocol, first.Relay.Protocol = "vless", "vless"
-	var confirmation *ConfirmationRequired
-	if err := m.Apply(context.Background(), "instance/node/1", first, "xray"); !errors.As(err, &confirmation) {
-		t.Fatalf("全部节点检查前应报告待确认: %v", err)
-	}
-	if runner.rules[old] == "" {
-		t.Fatal("另一个节点尚未恢复就删除旧规则")
-	}
-	if err := m.Release(context.Background(), "instance/node/2"); err != nil {
+	source := old
+	source.Source = "192.0.2.1"
+	if err := b.Apply(context.Background(), []Rule{source}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Apply(context.Background(), "instance/node/1", first, "xray"); err != nil {
+	b.Close()
+	reopened, err := newSystemBackend(b.cfg, b.scope, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	m := testManager(reopened)
+	m.BeginDiscovery([]string{"instance"})
+	ExpectNodes(m, "instance", []int{1, 2})
+	node := landingWithSources()
+	node.Protocol, node.Relay.Protocol = "vless", "vless"
+	runner.failAdd = true
+	if err := m.Apply(context.Background(), "instance/node/1", node, "xray"); err == nil || runner.rules[source] == "" {
+		t.Fatal("放行失败必须保留旧来源规则")
+	}
+	runner.failAdd = false
+	if err := m.Apply(context.Background(), "instance/node/1", node, "xray"); err != nil {
+		t.Fatal(err)
+	}
+	if runner.rules[source] == "" {
+		t.Fatal("发现尚未完成就删除旧规则")
+	}
+	if err := m.Release(context.Background(), "instance/node/2"); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.rules) != 1 || runner.rules[old] != "" {
-		t.Fatal("发现完成后旧规则未清理")
+	if len(runner.rules) != 2 || runner.rules[source] != "" || reopened.state.Version != 1 {
+		t.Fatal("未将旧来源规则替换为双栈普通放行")
 	}
-}
-
-func TestAdjacentLegacyPortsRecoverTogetherAfterDiscovery(t *testing.T) {
-	b, runner, old := seedSourceBackend(t)
-	runner.rules = map[Rule]string{}
-	for i := range b.state.Owned {
-		b.state.Owned[i].Rule.Ports.To++
-		rule := b.state.Owned[i].Rule
-		runner.rules[rule] = b.ufwComment(rule)
+	writes := runner.writes
+	if err := m.Apply(context.Background(), "instance/node/1", node, "xray"); err != nil || writes != runner.writes {
+		t.Fatal("重复同步改写规则")
 	}
-	if err := b.save(); err != nil {
-		t.Fatal(err)
-	}
-	m := testManager(b)
-	m.BeginDiscovery([]string{"instance"})
-	ExpectNodes(m, "instance", []int{1, 2})
-	first := landingWithSources("192.0.2.1")
-	first.Protocol, first.Relay.Protocol = "vless", "vless"
-	second := landingWithSources("192.0.2.2")
-	second.Protocol, second.Relay.Protocol = "vless", "vless"
-	second.ServerPort, second.Relay.ListenPort = old.Ports.From+1, old.Ports.From+1
-	var confirmation *ConfirmationRequired
-	if err := m.Apply(context.Background(), "instance/node/1", first, "xray"); !errors.As(err, &confirmation) {
-		t.Fatalf("发现完成前应保留旧范围: %v", err)
-	}
-	if runner.writes != 0 {
-		t.Fatal("发现完成前不能改写旧范围")
-	}
-	if err := m.Apply(context.Background(), "instance/node/2", second, "xray"); err != nil {
-		t.Fatalf("两个已确认节点不应互相等待: %v", err)
-	}
-	if err := m.Apply(context.Background(), "instance/node/1", first, "xray"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.rules) != 2 {
-		t.Fatalf("旧范围未替换为两个独立来源: %+v", runner.rules)
-	}
-	for rule := range runner.rules {
-		if rule.Source == "" || rule.Ports.From != rule.Ports.To {
-			t.Fatal("仍有全开放范围规则")
-		}
+	if err := m.Release(context.Background(), "instance/node/1"); err != nil || len(runner.rules) != 0 {
+		t.Fatal("停止后未清理")
 	}
 }
 

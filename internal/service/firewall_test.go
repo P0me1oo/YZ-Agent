@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/P0me1oo/YZ-Agent/internal/firewall"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
@@ -18,22 +17,22 @@ type lifecycleFirewall struct {
 	err      error
 }
 
-func TestRelayFirewallConfirmationKeepsRuntimeAndUpdatesWithoutReload(t *testing.T) {
+func TestRelayFirewallFailureKeepsRuntimeAndIgnoresLegacyPolicy(t *testing.T) {
 	k := &fakeKernel{protocols: []string{"shadowsocks"}}
 	s := newTestService(k)
-	fw := &lifecycleFirewall{kernel: k, err: &firewall.ConfirmationRequired{Message: "待确认"}}
+	fw := &lifecycleFirewall{kernel: k, err: errors.New("模拟端口放行失败")}
 	s.SetFirewallController(fw)
 	s.lastConfig = landingConfig()
 	s.lastConfig.Relay.EntryNodeID = 1
 	if !s.applyChanges(context.Background(), true, false) || !k.running || fw.releases != 0 || s.firewallNotice.Load() == nil {
-		t.Fatal("待确认错误不应停止中转或删除已有规则")
+		t.Fatal("放行失败不应停止中转或删除已有规则")
 	}
 	config := landingConfig()
 	config.Relay.EntryNodeID = 1
 	config.Relay.Firewall = &panel.RelayFirewallConfig{Status: "ready", Sources: []string{"192.0.2.1"}}
 	fw.err = nil
 	if !s.applyConfigUpdate(context.Background(), config, computeConfigHash(config)) || k.reloadCalls != 0 || s.firewallNotice.Load() != nil {
-		t.Fatal("仅来源变化不应重建监听，成功后应清除告警")
+		t.Fatal("旧版来源策略不应重建监听，放行成功后应清除重试状态")
 	}
 	fw.err = errors.New("模拟系统规则写入失败")
 	config.Relay.Firewall.Sources = []string{"192.0.2.2"}
@@ -52,7 +51,7 @@ func TestRelayFirewallReportsLaterConflictAndRecoveryWithoutConfigChange(t *test
 	if !s.applyChanges(context.Background(), true, false) || s.firewallNotice.Load() != nil {
 		t.Fatal("初始来源规则未成功应用")
 	}
-	fw.err = &firewall.ConfirmationRequired{Message: "新增手工规则与落地共用端口"}
+	fw.err = errors.New("模拟端口规则写入失败")
 	s.trackAndEnforce(context.Background())
 	if s.firewallNotice.Load() == nil || !k.running || fw.releases != 0 {
 		t.Fatal("运行后新增冲突必须回报告警并保留监听")

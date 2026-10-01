@@ -17,6 +17,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/portset"
 )
 
 // 原生命令测试只能在独立 rootfs、网络命名空间和专用客户端中显式运行。
@@ -222,37 +223,35 @@ func TestNativeFirewallLifecycle(t *testing.T) {
 	release("tcp-second")
 	probe("tcp", 28443, false)
 
-	// 用同一监听验证旧全开放替换、两种地址族来源匹配和来源切换后的拒绝。
-	apply("relay", &model.NodeSpec{Protocol: "shadowsocks", ServerPort: 28443})
-	landing := landingWithSources("192.0.2.2", "2001:db8:1::2")
+	// 先模拟旧版来源规则，再验证新版恢复普通放行和停用清理。
+	legacy := []Rule{}
+	for _, family := range []int{4, 6} {
+		source := "192.0.2.99"
+		if family == 6 {
+			source = "2001:db8:1::99"
+		}
+		for _, protocol := range []string{"tcp", "udp"} {
+			legacy = append(legacy, Rule{Family: family, Protocol: protocol, Source: source, Ports: portset.Range{From: 28443, To: 28443}})
+		}
+	}
+	if err := b.Apply(ctx, legacy, nil); err != nil {
+		t.Fatal(err)
+	}
+	probe("tcp", 28443, false)
+	probe("udp", 28443, false)
+	landing := landingWithSources()
 	landing.ServerPort, landing.Relay.ListenPort = 28443, 28443
 	apply("relay", landing)
 	for _, owned := range b.state.Owned {
-		if owned.Rule.Ports.From == 28443 && owned.Rule.Source == "" {
-			t.Fatal("落地迁移后仍有全开放托管规则")
+		if owned.Rule.Source != "" {
+			t.Fatal("旧来源规则未清理")
 		}
-	}
-	probe("tcp", 28443, true)
-	probe("udp", 28443, true)
-	landing.Relay.Firewall.Sources = []string{"192.0.2.99", "2001:db8:1::99"}
-	apply("relay", landing)
-	probe("tcp", 28443, false)
-	probe("udp", 28443, false)
-	landing.Relay.Firewall.Sources = []string{"192.0.2.2", "2001:db8:1::2"}
-	apply("relay", landing)
-	landing.Relay.Firewall = nil
-	if err := m.Apply(ctx, "relay", landing, "xray"); err == nil {
-		t.Fatal("缺少来源时必须待确认")
-	}
-	if err := m.reconcile(ctx); err != nil {
-		t.Fatal(err)
 	}
 	probe("tcp", 28443, true)
 	probe("udp", 28443, true)
 	release("relay")
 	probe("tcp", 28443, false)
 	probe("udp", 28443, false)
-	t.Log("中转双栈来源匹配、旧规则替换与待确认保持通过")
 
 	hy2 := &model.NodeSpec{Protocol: "hysteria", Version: 2, ServerPort: 28443, PortHopping: "29440-29442,29500"}
 	apply("hy2", hy2)

@@ -3,7 +3,6 @@ package firewall
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -20,99 +19,30 @@ func landingWithSources(sources ...string) *model.NodeSpec {
 	}}
 }
 
-func TestRelaySourcePolicyScopeAndFamilies(t *testing.T) {
-	node := landingWithSources("192.0.2.1", "2001:db8::1", "192.0.2.1")
-	plan, err := PlanForNode(node, "xray")
-	if err != nil || len(plan.Listeners) != 4 {
-		t.Fatalf("来源计划错误: %+v %v", plan, err)
-	}
-	for _, rule := range plan.Listeners {
-		if rule.Source == "" || rule.Ports.From != 28388 || !rule.valid() {
-			t.Fatal("来源限制或内部端口丢失")
+// 旧面板仍可能下发来源策略，新版必须忽略并恢复普通双栈放行。
+func TestRelaySourcePolicyRemoved(t *testing.T) {
+	for _, policy := range []*panel.RelayFirewallConfig{nil, {Status: "pending"}, {Status: "ready", Sources: []string{"192.0.2.1"}}} {
+		for _, kernel := range []string{"xray", "singbox"} {
+			node := landingWithSources()
+			node.Relay.Firewall = policy
+			plan, err := PlanForNode(node, kernel)
+			if err != nil || plan.Restricted || hasSources(plan.Listeners) || len(plan.Listeners) != 4 {
+				t.Fatalf("落地应普通双栈放行: %+v %v", plan, err)
+			}
+			b := &recordingBackend{}
+			m := testManager(b)
+			for i := 0; i < 2; i++ {
+				if err := m.Apply(context.Background(), "landing", node, kernel); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(b.allows) != 4 {
+				t.Fatal("重复同步规则不正确")
+			}
+			if err := m.Release(context.Background(), "landing"); err != nil || len(b.allows) != 0 {
+				t.Fatal("停用未清理规则")
+			}
 		}
-	}
-	node.Relay.EntryNodeID = 0
-	plain, err := PlanForNode(node, "singbox")
-	if err != nil || hasSources(plain.Listeners) {
-		t.Fatal("未绑定前置的独立监听不应被收紧")
-	}
-	node.Relay.Mode = "entry"
-	plain, err = PlanForNode(node, "singbox")
-	if err != nil || hasSources(plain.Listeners) {
-		t.Fatal("前置公开入口不应被收紧")
-	}
-}
-
-func TestRelayUnknownSourceAndSharedPortsPreserveExistingRules(t *testing.T) {
-	b := &recordingBackend{}
-	m := testManager(b)
-	ctx := context.Background()
-	node := landingWithSources("192.0.2.1")
-	if err := m.Apply(ctx, "landing", node, "xray"); err != nil {
-		t.Fatal(err)
-	}
-	previous := append([]Rule(nil), b.allows...)
-	node.Relay.Firewall = nil
-	var pendingError *ConfirmationRequired
-	if err := m.Apply(ctx, "landing", node, "xray"); !errors.As(err, &pendingError) {
-		t.Fatalf("缺地址必须待确认: %v", err)
-	}
-	if !reflect.DeepEqual(previous, b.allows) {
-		t.Fatal("缺地址不能删除旧规则")
-	}
-	other := &model.NodeSpec{Protocol: "shadowsocks", ServerPort: 28388}
-	if err := m.Apply(ctx, "public", other, "xray"); !errors.As(err, &pendingError) {
-		t.Fatalf("共用端口必须待确认: %v", err)
-	}
-	if !reflect.DeepEqual(previous, b.allows) {
-		t.Fatal("共用不能全开放")
-	}
-	if err := m.Release(ctx, "public"); err != nil {
-		t.Fatal(err)
-	}
-	node.Relay.Firewall = &panel.RelayFirewallConfig{Status: "ready", Sources: []string{"192.0.2.2"}}
-	if err := m.Apply(ctx, "landing", node, "xray"); err != nil {
-		t.Fatal(err)
-	}
-	for _, rule := range b.allows {
-		if rule.Source != "192.0.2.2" {
-			t.Fatal("旧出口没有撤销")
-		}
-	}
-	if err := m.Apply(ctx, "landing", node, "xray"); err != nil || len(b.allows) != 2 {
-		t.Fatal("重复同步不应重复添加")
-	}
-}
-
-func TestRelayInvalidSourcesCannotBecomeWildcard(t *testing.T) {
-	for _, source := range []string{"", "0.0.0.0", "::", "192.0.2.0/24", "127.0.0.1", "example.com", "ff02::1", "fe80::1%eth0"} {
-		_, err := PlanForNode(landingWithSources(source), "singbox")
-		var confirmation *ConfirmationRequired
-		if !errors.As(err, &confirmation) {
-			t.Fatalf("%q 必须待确认: %v", source, err)
-		}
-	}
-	plan, err := PlanForNode(landingWithSources("10.0.0.8"), "xray")
-	if err != nil || len(plan.Listeners) != 2 || plan.Listeners[0].Source != "10.0.0.8" {
-		t.Fatal("面板明确确认的内网中转来源应使用具体 IP 放行")
-	}
-}
-
-func TestNewPendingLandingCannotBeOpenedBySharedPublicNode(t *testing.T) {
-	b := &recordingBackend{}
-	m := testManager(b)
-	node := landingWithSources()
-	node.Relay.Firewall = nil
-	var confirmation *ConfirmationRequired
-	if err := m.Apply(context.Background(), "landing", node, "xray"); !errors.As(err, &confirmation) {
-		t.Fatalf("没有来源时应等待确认: %v", err)
-	}
-	public := &model.NodeSpec{Protocol: "shadowsocks", ServerPort: node.ServerPort}
-	if err := m.Apply(context.Background(), "public", public, "xray"); !errors.As(err, &confirmation) {
-		t.Fatalf("共用节点不能在落地待确认时创建全开放规则: %v", err)
-	}
-	if len(b.allows) != 0 {
-		t.Fatal("尚无旧规则的待确认落地被共用节点全开放")
 	}
 }
 

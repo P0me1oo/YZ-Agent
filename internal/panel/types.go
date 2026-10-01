@@ -191,7 +191,7 @@ type RelayConfig struct {
 	WireGuard   *RelayWireGuardConfig `json:"wireguard,omitempty"`
 }
 
-// RelayFirewallConfig 只用于内置中转落地，不包含认证凭据。
+// RelayFirewallConfig 仅兼容读取旧面板数据；新版不据此限制来源。
 type RelayFirewallConfig struct {
 	Status  string   `json:"status"`
 	Sources []string `json:"sources"`

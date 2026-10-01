@@ -40,6 +40,7 @@ func (s *Service) publishRuntimeState(ctx context.Context) {
 	state := panel.StatePayload{
 		Alive: s.tracker.FlushAliveIPs(), Online: s.tracker.CurrentOnline(),
 		ConnectionCounts: counts, RelayConnectionCounts: relayCounts,
+		UserSpeeds:     s.userSpeed.rates,
 		RelayUserAlive: s.tracker.RelayUserAlive(), Metrics: metrics,
 		Status: map[string]interface{}{
 			"cpu":           status.CPU,

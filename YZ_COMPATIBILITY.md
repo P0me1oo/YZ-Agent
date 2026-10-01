@@ -1,5 +1,27 @@
 # YZ-Agent 兼容矩阵
 
+## v2.3.0 移除中转来源限制与用户实时网速（发布准备）
+
+本版纳入下方原计划 `v2.2.0` 的全部网速改动；不单独发布 `v2.2.0`。先升级 Node，再升级面板，可由新版 Node 在旧面板下先完成普通端口放行和旧来源规则清理。正式产物来源、验证结果与摘要在发布核验后补充。
+
+面板 `1.37.0`、Node `v2.3.0`、管理端 `0.18.0` 移除自动来源 IP 白名单、出口核对、手动确认和待确认提示，恢复已有自动端口放行。中转绑定、运行开关和端口跳跃不变。
+
+必须配套更新节点程序：只更新面板不能清理旧节点的来源规则。新版 Node 忽略旧面板来源策略；先建立普通放行，再清理本实例旧来源规则，写入失败保留旧规则并重试。保留旧规则格式读取与清理代码，不认领手工或其他实例规则。没有启用 UFW/firewalld 的环境仍不自动安装或启用防火墙。
+
+以下旧版本说明保留为历史记录，不代表新版行为。本次未发布、未操作服务器。
+
+最终本地验证：完整功能标签下服务、模型转换、面板通信、防火墙四个包回归通过；Linux amd64、arm64 构建及 Linux 防火墙测试程序交叉编译通过。固定核心依赖不变，来源为当前提交加原有网速改动与本次删除功能改动（vcs.modified=true）。未执行真实 Linux 防火墙运行验收。配套面板完整回归 431 项、4,682 次断言通过，产物摘要见面板 YZ_COMPATIBILITY.md 本次记录。
+
+## v2.2.0 用户实时网速（未发布）
+
+- 开发基线 `7187f65f4d2772b5dd82f2506b53b44557b3290f`，配套面板 `1.36.0`、管理端 `0.17.0`。正式核心依赖保持 sing-box `v1.14.0-yz.2`、Xray `v0.0.0-20260930033643-7c5728ec7d0f`。
+- 在 Service 中复用累计流量采样，状态新增可选 `user_speeds`，按用户编号对应 `[上传字节/秒, 下载字节/秒]`。省略表示无有效采样，空对象表示全部零速。方向为用户视角，不应用计费倍率，不保存历史。
+- 进程启动、采样失败、计数回退或超过五秒采样间隔后重新建立基准。可靠流量批次、补报、连接数和双核心运行保持原路径。
+- 新 Node 对旧面板仍走既有兼容路径；完整网速显示需要上述配套版本。当前未发布，未连接真实服务器。
+- 本地完整功能标签的服务、面板通信、流量统计包回归通过。Linux amd64、arm64 构建通过，实际产物均为 `CGO_ENABLED=0`，来源为上述基线加本次工作区修改（`vcs.modified=true`），核心固定依赖与前版一致；不是正式发布产物。
+- 最终网速专项和两种核心统计专项通过，覆盖真实采样间隔、新用户、空快照、重复时间、失败恢复、计数回退、计费不被网速采样清空，以及双核心停止/启动、重载后的累计流量连续性。命令为 `go test -p 1 -mod=readonly -timeout 5m -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' -run 'TestUserSpeed|TestXrayGetUserTraffic|TestXrayTrafficKeeps|TestConnTrackerRoutedConnectionTracksTraffic|TestConnTrackerPacketCopyPreservesCounters|TestKernelTrafficSurvivesRestart' ./internal/service ./internal/kernel/xray ./internal/kernel/singbox`，三个包均通过；本轮未运行完整 `./...` 或 Linux 竞态检测。
+- 本地构建 SHA256：amd64 `66a46652eac53086dc0efe86fc7eb93f1943a33509a4d6b0f418319bd218d20d`，arm64 `a9412878c4f2d5e19fe8d7c845015ace6854b113b6c21716acd03bf5a4237b00`。保留在 `D:/codex-tmp/yz-user-speed/`，仅用于本次验证；本功能尚未真实服务器联调或发布。
+
 ## v2.1.0 内置中转来源防火墙
 
 - 开发基线 `574841029367da9fd7e0a999c8b76c74286a4a02`，配套面板 `1.35.0` 和管理端 `0.16.0`。保持当前固定核心依赖和系统 WG 格式。

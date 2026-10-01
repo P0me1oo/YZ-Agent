@@ -38,6 +38,9 @@ func TestRealtimeHTTPPreservesEmptySnapshotsAndUsesFallbackInterval(t *testing.T
 			if _, ok := state["alive"]; !ok {
 				t.Error("空设备快照被省略")
 			}
+			if speeds, ok := state["user_speeds"].(map[string]interface{}); !ok || len(speeds) != 0 {
+				t.Error("空网速快照未保留")
+			}
 			seq := uint64(body["sequence"].(float64))
 			sequence.Store(seq)
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": RPCReceipt{StateVersion: StateVersion{Epoch: body["epoch"].(string), Sequence: seq}, Accepted: true}})
@@ -48,7 +51,7 @@ func TestRealtimeHTTPPreservesEmptySnapshotsAndUsesFallbackInterval(t *testing.T
 	defer server.Close()
 	client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 1})
 	client.realtime.enabled.Store(true)
-	state := StatePayload{Alive: map[int][]string{}, ConnectionCounts: map[int]int{}}
+	state := StatePayload{Alive: map[int][]string{}, ConnectionCounts: map[int]int{}, UserSpeeds: map[int][2]int64{}}
 	if err := client.PublishState(context.Background(), state); err != nil {
 		t.Fatal(err)
 	}

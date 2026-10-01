@@ -87,7 +87,8 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{Restricted: node.IsRelayLanding() && node.Relay.EntryNodeID > 0}
+	// 来源限制已移除；旧策略仅作协议兼容读取，不参与端口放行。
+	plan := Plan{}
 	for _, address := range addresses {
 		for _, protocol := range protocols {
 			rule := address
@@ -95,34 +96,6 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 			rule.Ports = portset.Range{From: node.ServerPort, To: node.ServerPort}
 			plan.Listeners = append(plan.Listeners, rule)
 		}
-	}
-	if plan.Restricted {
-		policy := node.Relay.Firewall
-		if policy == nil || policy.Status != "ready" || len(policy.Sources) == 0 {
-			message := "未收到前置出口来源策略，请确认面板和前置已升级；保留原防火墙规则"
-			if policy != nil && policy.Message != "" {
-				message = policy.Message
-			}
-			return plan, pending(message)
-		}
-		var listeners []Rule
-		for _, source := range policy.Sources {
-			ip, err := netip.ParseAddr(source)
-			if err != nil || ip.Zone() != "" || !ip.IsGlobalUnicast() {
-				return plan, pending("前置出口 IP 无效，请确认来源地址；保留原防火墙规则")
-			}
-			ip = ip.Unmap()
-			for _, rule := range plan.Listeners {
-				if ip.Is4() == (rule.Family == 4) {
-					rule.Source = ip.String()
-					listeners = append(listeners, rule)
-				}
-			}
-		}
-		if len(listeners) == 0 {
-			return plan, pending("前置出口与落地监听的 IP 类型不匹配，请确认监听地址；保留原防火墙规则")
-		}
-		plan.Listeners = mergeRules(listeners)
 	}
 	if strings.TrimSpace(node.PortHopping) == "" {
 		return plan, nil

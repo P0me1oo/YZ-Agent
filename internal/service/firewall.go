@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -18,14 +17,8 @@ func (s *Service) applyFirewall(ctx context.Context, node *model.NodeSpec, users
 		return true
 	}
 	if err := s.firewall.Apply(ctx, s.timeConsumer, node, s.cfg.Kernel.Type); err != nil {
-		var confirmation *firewall.ConfirmationRequired
-		if errors.As(err, &confirmation) {
-			s.firewallNotice.Store(&confirmation.Message)
-			nlog.Core().Warn("落地来源限制待确认", "reason", confirmation.Message)
-			return true
-		}
 		if node.IsRelayLanding() && node.Relay.EntryNodeID > 0 {
-			message := fmt.Sprintf("落地来源规则同步失败，保留现有监听并重试：%v", err)
+			message := fmt.Sprintf("落地端口放行失败，保留现有监听并重试：%v", err)
 			s.firewallNotice.Store(&message)
 			nlog.Core().Warn(message)
 			return true

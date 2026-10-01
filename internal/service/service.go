@@ -41,7 +41,6 @@ type Service struct {
 	firewall          firewall.Controller
 	firewallNotice    atomic.Pointer[string]
 	lastFirewallRetry time.Time
-	relayEgress       atomic.Pointer[relayEgress]
 	tracker           *tracker.Tracker
 	limiter           *limiter.Limiter
 	speedTracker      *limiter.SpeedTracker
@@ -96,6 +95,7 @@ type Service struct {
 	pendingCertReload bool
 	lastDeviceSync    time.Time
 	stateActive       atomic.Bool
+	userSpeed         userSpeedSampler
 	discoveryActive   atomic.Bool
 	discoveryResults  chan discoveryResult
 	machineMailbox    *controlplane.NodeMailbox
@@ -273,9 +273,6 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	if err := s.initialSetup(ctx); err != nil {
 		return fmt.Errorf("initial setup: %w", err)
 	}
-	egressCtx, stopEgress := context.WithCancel(ctx)
-	defer stopEgress()
-	go s.relayEgressLoop(egressCtx)
 
 	// 状态实时采样与流量批次周期分离，累计流量仍沿用原有落盘和确认。
 	trackInterval := time.Duration(s.cfg.Node.TrackInterval) * time.Second
@@ -1211,8 +1208,10 @@ func (s *Service) trackAndEnforce(ctx context.Context) bool {
 func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int, err error) {
 	traffic, aliveIPs, connCount, err := s.kernel.GetUserTraffic(ctx)
 	if err != nil {
+		s.userSpeed = userSpeedSampler{}
 		return 0, 0, err
 	}
+	s.userSpeed.sample(traffic, time.Now())
 	s.tracker.Process(traffic, aliveIPs, connCount)
 	s.trackRelayTraffic(ctx)
 	s.trackRelayAlive(ctx)
@@ -1667,12 +1666,6 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	s.metricsMu.RUnlock()
 
 	m := make(map[string]interface{})
-	if notice := s.firewallNotice.Load(); notice != nil {
-		m["firewall_warning"] = *notice
-	}
-	if egress := s.relayEgress.Load(); egress != nil {
-		m["relay_egress"] = egress
-	}
 	online := s.tracker.CurrentOnline()
 
 	m["uptime"] = status.Uptime

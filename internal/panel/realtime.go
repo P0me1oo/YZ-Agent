@@ -21,6 +21,7 @@ type StatePayload struct {
 	Alive                 map[int][]string         `json:"alive,omitempty"`
 	Online                map[int]int              `json:"online,omitempty"`
 	ConnectionCounts      map[int]int              `json:"connection_counts,omitempty"`
+	UserSpeeds            map[int][2]int64         `json:"user_speeds,omitempty"`
 	RelayUserAlive        map[int]map[int][]string `json:"relay_user_alive,omitempty"`
 	RelayConnectionCounts map[int]map[int]int      `json:"relay_connection_counts,omitempty"`
 	Status                map[string]interface{}   `json:"status,omitempty"`
@@ -38,6 +39,9 @@ func (s StatePayload) mapValue() map[string]interface{} {
 	}
 	if s.ConnectionCounts != nil {
 		out["connection_counts"] = s.ConnectionCounts
+	}
+	if s.UserSpeeds != nil {
+		out["user_speeds"] = s.UserSpeeds
 	}
 	if s.RelayUserAlive != nil {
 		out["relay_user_alive"] = s.RelayUserAlive
