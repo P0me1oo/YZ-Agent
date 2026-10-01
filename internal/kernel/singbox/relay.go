@@ -77,6 +77,9 @@ func configureRelayUsers(inbound M, nc *model.NodeSpec, users []model.UserSpec) 
 	aliases := make([]M, 0, len(users)*len(routes))
 	for _, user := range users {
 		for _, routeID := range routes {
+			if !user.AllowsRelayRoute(routeID) {
+				continue
+			}
 			alias := M{"name": relayUserName(user, routeID)}
 			if nc.Protocol == "vless" {
 				alias["uuid"] = relayCredential(user, routeID)
@@ -100,7 +103,13 @@ func buildRelayRoutingRules(nc *model.NodeSpec, users []model.UserSpec) []M {
 	add := func(routeID int, tag string) {
 		names := make([]string, 0, len(users))
 		for _, user := range users {
+			if !user.AllowsRelayRoute(routeID) {
+				continue
+			}
 			names = append(names, relayUserName(user, routeID))
+		}
+		if len(names) == 0 {
+			return
 		}
 		rules = append(rules, M{"auth_user": names, "action": "route", "outbound": tag})
 	}
@@ -363,6 +372,9 @@ func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpe
 		routes := relayRouteIDs(nc)
 		for _, user := range users {
 			for _, route := range routes {
+				if !user.AllowsRelayRoute(route) {
+					continue
+				}
 				name := relayUserName(user, route)
 				userMap[name] = user.ID
 				identities[name] = relayIdentity{UserID: user.ID, UUID: user.UUID}
@@ -373,7 +385,6 @@ func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpe
 		}
 	}
 	t.usersMu.Lock()
-	defer t.usersMu.Unlock()
 	t.uuidMap, t.identities, t.relayNodes = userMap, identities, nodes
 	t.relayEntry = nc.IsRelayEntry()
 	for _, uid := range userMap {
@@ -381,6 +392,15 @@ func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpe
 			t.users[uid] = &userStats{userTraffic: t.traffic.user(uid), ips: make(map[string]int)}
 		}
 	}
+	t.usersMu.Unlock()
+	var allowed map[string]bool
+	if nc.IsRelayEntry() {
+		allowed = make(map[string]bool, len(userMap))
+		for name := range userMap {
+			allowed[name] = true
+		}
+	}
+	t.relayAccess.Replace(allowed)
 }
 
 // 使用实际选中的出站归属流量；管理员覆盖选路时不能计入原计划的落地。

@@ -234,6 +234,9 @@ func cloneUsers(users []model.UserSpec) []model.UserSpec {
 	}
 	cloned := make([]model.UserSpec, len(users))
 	copy(cloned, users)
+	for i := range cloned {
+		cloned[i].RelayRoutes = model.CloneRelayRoutes(users[i].RelayRoutes)
+	}
 	return cloned
 }
 

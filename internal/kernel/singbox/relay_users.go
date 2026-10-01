@@ -50,12 +50,18 @@ func (s *SingBox) reloadRelayUsersLocked(users []model.UserSpec, next option.Opt
 		return err
 	}
 	combined := append([]model.UserSpec{}, s.users...)
-	seen := make(map[string]bool, len(combined))
-	for _, user := range combined {
-		seen[relayUserName(user, 0)] = true
+	seen := make(map[string]int, len(combined))
+	for i, user := range combined {
+		seen[relayUserName(user, 0)] = i
 	}
 	for _, user := range users {
-		if !seen[relayUserName(user, 0)] {
+		if index, exists := seen[relayUserName(user, 0)]; exists {
+			if combined[index].RelayRoutes == nil || user.RelayRoutes == nil {
+				combined[index].RelayRoutes = nil
+			} else {
+				combined[index].RelayRoutes = append(model.CloneRelayRoutes(combined[index].RelayRoutes), user.RelayRoutes...)
+			}
+		} else {
 			combined = append(combined, user)
 		}
 	}
@@ -92,4 +98,17 @@ func (s *SingBox) reloadRelayUsersLocked(users []model.UserSpec, next option.Opt
 		return rollback(fmt.Errorf("finish relay user routes: %w", err))
 	}
 	return nil
+}
+
+func relayPermissionsChanged(previous, next []model.UserSpec) bool {
+	old := make(map[int]string, len(previous))
+	for _, user := range previous {
+		old[user.ID] = user.RelayRoutesKey()
+	}
+	for _, user := range next {
+		if old[user.ID] != user.RelayRoutesKey() {
+			return true
+		}
+	}
+	return false
 }

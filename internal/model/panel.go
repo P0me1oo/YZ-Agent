@@ -188,6 +188,7 @@ func UserSpecsFromPanel(users []panel.User) []UserSpec {
 			DeviceLimit:   user.DeviceLimit,
 			ConnLimit:     user.ConnLimit,
 			ConnRateLimit: user.ConnRateLimit,
+			RelayRoutes:   CloneRelayRoutes(user.RelayRoutes),
 		})
 	}
 	return out
@@ -400,6 +401,7 @@ func UserSpecsToPanel(users []UserSpec) []panel.User {
 			DeviceLimit:   user.DeviceLimit,
 			ConnLimit:     user.ConnLimit,
 			ConnRateLimit: user.ConnRateLimit,
+			RelayRoutes:   CloneRelayRoutes(user.RelayRoutes),
 		})
 	}
 	return out

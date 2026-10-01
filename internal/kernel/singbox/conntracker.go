@@ -17,6 +17,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
+	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
@@ -136,6 +137,7 @@ func (u *userStats) aliveIPList() map[string]bool {
 //   - Close callback to decrement IP refcounts
 //   - Per-connection rate limit token accumulation (amortized WaitN)
 type ConnTracker struct {
+	relayAccess  kernel.RelayAccess
 	deviceFilter *deviceip.Filter
 	traffic      *trafficTotals
 	usersMu      sync.RWMutex
@@ -321,17 +323,12 @@ func (t *ConnTracker) RoutedConnection(
 
 	connID := t.nextID()
 
-	// Store conn reference for force-close support
-	t.usersMu.Lock()
-	t.connMap[connID] = conn
-	t.usersMu.Unlock()
-
 	var lim *rate.Limiter
 	if slf := t.speedLimitFunc.Load(); slf != nil {
 		lim = (*slf)(uuid)
 	}
 
-	return &trackedConn{
+	wrapped := &trackedConn{
 		Conn:        conn,
 		tracker:     t,
 		us:          us,
@@ -343,6 +340,13 @@ func (t *ConnTracker) RoutedConnection(
 		relay:       relay,
 		relaySource: t.trackRelaySource(uid, outbound, sourceIP),
 	}
+	t.usersMu.Lock()
+	t.connMap[connID] = wrapped
+	t.usersMu.Unlock()
+	if !t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() }) {
+		_ = wrapped.Close()
+	}
+	return wrapped
 }
 
 // RoutedPacketConnection wraps UDP with per-user counting (UDP not in connMap).
@@ -400,7 +404,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 		lim = (*slf)(uuid)
 	}
 
-	return &trackedPacketConn{
+	wrapped := &trackedPacketConn{
 		PacketConn:  conn,
 		tracker:     t,
 		us:          us,
@@ -412,6 +416,10 @@ func (t *ConnTracker) RoutedPacketConnection(
 		relay:       relay,
 		relaySource: t.trackRelaySource(uid, outbound, sourceIP),
 	}
+	if !t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() }) {
+		_ = wrapped.Close()
+	}
+	return wrapped
 }
 
 // checkConnGate 判断新连接是否超过该用户的并发或新建速率上限，
@@ -623,6 +631,7 @@ func (t *ConnTracker) ActiveCount() int {
 
 // removeConnRef removes the connection reference from connMap on close.
 func (t *ConnTracker) removeConnRef(connID string) {
+	t.relayAccess.Remove(connID)
 	t.usersMu.Lock()
 	delete(t.connMap, connID)
 	t.usersMu.Unlock()

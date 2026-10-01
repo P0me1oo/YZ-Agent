@@ -208,12 +208,7 @@ func TestSingBoxRuntimeEmptyUsersRemainClosedAfterRestart(t *testing.T) {
 
 func runtimeNode(t *testing.T, protocol string) *model.NodeSpec {
 	t.Helper()
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
+	port := runtimeDualPort(t)
 	node := &model.NodeSpec{
 		Protocol: protocol, ListenIP: "127.0.0.1", ServerPort: port,
 		Cipher: "aes-128-gcm", Network: "tcp", Transport: "TCP",
@@ -240,6 +235,35 @@ func runtimeNode(t *testing.T, protocol string) *model.NodeSpec {
 		node.ServerKey = base64.StdEncoding.EncodeToString(key)
 	}
 	return node
+}
+
+// 测试节点可能同时监听 TCP/UDP；两者的系统保留端口不同，必须一起检查。
+func runtimeDualPort(t *testing.T) int {
+	t.Helper()
+	listener, packet := runtimeDualListeners(t)
+	defer listener.Close()
+	defer packet.Close()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func runtimeDualListeners(t *testing.T) (net.Listener, net.PacketConn) {
+	t.Helper()
+	var lastErr error
+	for range 128 {
+		packet, err := net.ListenPacket("udp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener, err := net.Listen("tcp4", packet.LocalAddr().String())
+		if err != nil {
+			_ = packet.Close()
+			lastErr = err
+			continue
+		}
+		return listener, packet
+	}
+	t.Fatalf("无法分配 TCP/UDP 共用测试端口: %v", lastErr)
+	return nil, nil
 }
 
 func runtimeUser(t *testing.T, id int) model.UserSpec {

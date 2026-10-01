@@ -195,6 +195,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	setDispatcherLimits(ld, users)
 	if ld != nil {
 		ld.SetRelayRoutes(relayRouteNodes(nodeConfig))
+		ld.SetRelayAccess(nodeConfig, users)
 	}
 	x.mu.Lock()
 	limitFunc := x.speedLimitFunc
@@ -249,6 +250,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	x.mu.Unlock()
 
 	// ── Phase 5: Recycle old (background, non-blocking) ─────────────────
+	x.updateDispatcherLimits(users)
 	x.closeOld(old)
 
 	nlog.Core().Info("xray started",
@@ -579,8 +581,9 @@ func (x *Xray) UpdateUsers(users []model.UserSpec) (added, removed int, err erro
 	toAdd, toRemove := kernel.UserDiff(x.users, users)
 
 	if len(toAdd) == 0 && len(toRemove) == 0 {
-		// Only limits changed — update dispatcher without restart.
+		// 仅限制或线路权限变化时热更新，并记录摘要，避免重复快照重启内核。
 		x.users = users
+		x.lastKernelHash = kernel.ComputeHash(x.nodeConfig, users)
 		x.mu.Unlock()
 		x.updateDispatcherLimits(users)
 		x.updateBandwidthLimits(users)
@@ -907,8 +910,21 @@ func setBandwidthLimits(inst *xrayCore.Instance, fn func(string) *rate.Limiter, 
 func (x *Xray) updateDispatcherLimits(users []model.UserSpec) {
 	x.mu.Lock()
 	ld := x.limitDispatcher
+	node := x.nodeConfig
+	previous := make([]*LimitDispatcher, 0, len(x.retired))
+	for _, instance := range x.retired {
+		previous = append(previous, instance.dispatcher)
+	}
 	x.mu.Unlock()
 	setDispatcherLimits(ld, users)
+	if ld != nil {
+		ld.SetRelayAccess(node, users)
+	}
+	for _, dispatcher := range previous {
+		if dispatcher != nil {
+			dispatcher.SetRelayAccess(node, users)
+		}
+	}
 }
 
 func setDispatcherLimits(ld *LimitDispatcher, users []model.UserSpec) {

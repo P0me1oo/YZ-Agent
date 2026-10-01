@@ -484,7 +484,7 @@ func (s *SingBox) UpdateUsers(users []model.UserSpec) (added, removed int, err e
 	toAdd, toRemove := kernel.UserDiff(s.users, users)
 	added, removed = len(toAdd), len(toRemove)
 
-	if added == 0 && removed == 0 {
+	if added == 0 && removed == 0 && !relayPermissionsChanged(s.users, users) {
 		// Only limits may have changed — update tracker map.
 		if s.connTracker != nil {
 			s.connTracker.setNodeUsers(s.nodeConfig, users)

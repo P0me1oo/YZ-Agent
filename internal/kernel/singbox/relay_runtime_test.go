@@ -240,15 +240,8 @@ func relayStartCore(t *testing.T, kind string, node *model.NodeSpec, users []mod
 
 func relayMarkerEcho(t *testing.T, marker string) string {
 	t.Helper()
-	tcp, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	tcp, udp := runtimeDualListeners(t)
 	t.Cleanup(func() { _ = tcp.Close() })
-	udp, err := net.ListenPacket("udp4", tcp.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() { _ = udp.Close() })
 	respond := func(payload []byte) []byte { return append([]byte(marker+":"), payload...) }
 	go func() {

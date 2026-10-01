@@ -3,6 +3,7 @@ package xray
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"github.com/xtls/xray-core/transport"
 
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
+	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
@@ -74,9 +76,11 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 // intact, so the dispatcher is limited to gate-keeping and safe connection
 // lifecycle bookkeeping.
 type LimitDispatcher struct {
-	inner        interface{}        // original DefaultDispatcher (Feature + Dispatcher)
-	innerDisp    routing.Dispatcher // same object, typed as Dispatcher
-	deviceFilter *deviceip.Filter
+	relayAccess       kernel.RelayAccess
+	relayConnectionID atomic.Uint64
+	inner             interface{}        // original DefaultDispatcher (Feature + Dispatcher)
+	innerDisp         routing.Dispatcher // same object, typed as Dispatcher
+	deviceFilter      *deviceip.Filter
 
 	// 有设备上限的用户由同一把锁保护，检查和登记在锁内完成。
 	mu               sync.RWMutex
@@ -191,8 +195,14 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 		return nil, err
 	}
 
+	cancel := context.CancelFunc(func() {})
+	if d.relayRoutes.Load() != nil {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	access := relayTrackingFor(ctx, cancel)
 	link, err := d.innerDisp.Dispatch(ctx, dest)
 	if err != nil {
+		cancel()
 		if uid > 0 {
 			d.userConnCounter(uid).Add(-1)
 		}
@@ -203,7 +213,7 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	}
 
 	if email != "" {
-		d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email))
+		d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email), access)
 	}
 	return link, nil
 }
@@ -214,14 +224,21 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 		return err
 	}
 
+	cancel := context.CancelFunc(func() {})
+	if d.relayRoutes.Load() != nil {
+		ctx, cancel = context.WithCancel(ctx)
+	}
 	var release func()
 	if email != "" {
-		release = d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email))
+		release = d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email), relayTrackingFor(ctx, cancel))
 	}
 	err = d.innerDisp.DispatchLink(ctx, dest, link)
 	if err != nil && release != nil {
 		// 内层可能已经关闭 writer；与关闭回调共用一次性回收，避免重复扣减。
 		release()
+	}
+	if err != nil {
+		cancel()
 	}
 	return err
 }
@@ -231,6 +248,9 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 // panel user ID, and TCP flag.
 // Returns a non-nil error only when the connection should be rejected.
 func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destination) (email, sourceIP string, uid int, isTCP bool, err error) {
+	if !d.relayAccess.Allows(relayAccessKey(ctx)) {
+		return "", "", 0, false, errors.New("relay route access denied")
+	}
 	si := session.InboundFromContext(ctx)
 	if si == nil || si.User == nil || len(si.User.Email) == 0 {
 		return "", "", 0, false, nil
@@ -346,7 +366,8 @@ func (d *LimitDispatcher) relaySourceSet(ctx context.Context, email string) *rel
 // transport primitives. This keeps mux/XUDP compatible while still allowing
 // the dispatcher to release device-limit state when the link closes.
 // relay 非空时同时登记实际出网节点的来源，关闭时一并回收。
-func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, uid int, isTCP bool, relay *relaySourceSet) func() {
+func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, uid int, isTCP bool, relay *relaySourceSet, access ...relayTracking) func() {
+	accessID := fmt.Sprint(d.relayConnectionID.Add(1))
 	d.connCount.Add(1)
 	if relay != nil {
 		relay.add(sourceIP)
@@ -359,6 +380,10 @@ func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string
 	}
 
 	onClose := func() {
+		if len(access) > 0 {
+			access[0].cancel()
+		}
+		d.relayAccess.Remove(accessID)
 		d.delConn(email, sourceIP)
 		if relay != nil {
 			relay.remove(sourceIP)
@@ -374,6 +399,21 @@ func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string
 		onClose: onClose,
 	}
 	link.Writer = writer
+	if len(access) > 0 {
+		// 保留核心的 Reader 类型；撤权通过其原生中断接口关闭连接。
+		reader := link.Reader
+		closeConnection := func() {
+			access[0].cancel()
+			if access[0].closeTransport != nil {
+				access[0].closeTransport()
+			}
+			common.Interrupt(reader)
+			writer.Interrupt()
+		}
+		if !d.relayAccess.Register(accessID, access[0].key, closeConnection) {
+			closeConnection()
+		}
+	}
 	return writer.release
 }
 

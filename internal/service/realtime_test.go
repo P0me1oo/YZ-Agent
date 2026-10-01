@@ -97,3 +97,33 @@ func TestFullUserSnapshotHashIncludesConnectionLimits(t *testing.T) {
 		t.Fatal("新建连接上限没有参与用户快照比较")
 	}
 }
+
+func TestRelayPermissionOnlySnapshotIsAppliedAndOldSnapshotCannotRestoreAccess(t *testing.T) {
+	k := &fakeKernel{running: true}
+	s := newTestService(k)
+	cfg := &model.NodeSpec{Protocol: "vless", ServerPort: 10001}
+	user := model.UserSpec{ID: 1, UUID: uuid.Must(uuid.NewV4()).String(), RelayRoutes: []int{11, 12}}
+	s.lastConfig, s.lastConfigHash = cfg, computeConfigHash(cfg)
+	s.updateUserState([]model.UserSpec{user})
+	oldHash := computeUserHash([]model.UserSpec{user})
+	user.RelayRoutes = []int{11}
+	if oldHash == computeUserHash([]model.UserSpec{user}) {
+		t.Fatal("权限变化没有改变用户摘要")
+	}
+	apply := func(sequence uint64, current model.UserSpec) {
+		s.handleWSEvent(context.Background(), controlplane.Event{
+			Type: controlplane.EventSyncSnapshot, Version: panel.StateVersion{Epoch: "relay-permission", Sequence: sequence},
+			Config: cfg, Users: []model.UserSpec{current},
+		})
+	}
+	apply(2, user)
+	if k.updateCalls != 1 {
+		t.Fatal("只变化线路权限时没有调用内核更新")
+	}
+	apply(2, user)
+	user.RelayRoutes = []int{11, 12}
+	apply(1, user)
+	if k.updateCalls != 1 || s.lastUsers[0].AllowsRelayRoute(12) {
+		t.Fatal("重复或旧快照恢复了已撤销权限")
+	}
+}

@@ -1784,6 +1784,7 @@ func computeUserHash(users []model.UserSpec) string {
 		h.Write(buf[:])
 		binary.LittleEndian.PutUint64(buf[:], uint64(u.ConnRateLimit))
 		h.Write(buf[:])
+		io.WriteString(h, u.RelayRoutesKey())
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

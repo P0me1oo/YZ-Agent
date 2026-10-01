@@ -367,6 +367,8 @@ type User struct {
 	// 面板旧版本不下发这两个字段，缺省解码为 0，等同于保持原有行为。
 	ConnLimit     int `json:"conn_limit"`
 	ConnRateLimit int `json:"conn_rate_limit"`
+	// nil 兼容旧面板；显式空数组表示没有任何中转线路权限。
+	RelayRoutes []int `json:"relay_routes"`
 }
 
 type UsersResponse struct {

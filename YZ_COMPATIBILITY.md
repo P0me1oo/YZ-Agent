@@ -1,5 +1,17 @@
 # YZ-Agent 兼容矩阵
 
+## v2.3.1 中转线路权限修复（未发布）
+
+- 修改基线 `38448a6b5e19c3d531fa277cf0c42b709fd21b26`，是上一版正式源码后的发布文档提交，业务源码未变；配套面板 `1.37.1`，管理端仍为 `0.18.0`。已核对远程标签，`v2.3.1` 尚未占用。
+- 实现逐用户线路认证与撤权关闭，拒绝旧配置和旧会话越权使用落地。Node 模型、快照摘要、用户同步以及两种核心适配层共同处理线路列表；详情见 [中转线路权限](docs/relay-route-permissions.md)。
+- 核心依赖保持 sing-box `v1.14.0-yz.2`、Xray `v0.0.0-20260930033643-7c5728ec7d0f`；无本地核心替换或核心源码变更。
+- Xray/sing-box、VLESS/HY2 四组本机真实核心及竞态测试通过，验证旧配置重连、旧会话请求、已有 TCP/UDP 撤权关闭、保留线路、恢复、空权限和重启。补测旧 Xray 实例撤权及重复快照不重启。
+- Windows、Go 1.27.0 下执行完整包测试，除 sing-box 测试夹具分配到系统保留的 UDP 端口外，其余包通过。测试节点和回包服务改为同时分配可用 TCP/UDP 端口后，ECH 中转、普通中转、VLESS 传输、路由条件和受影响的 WG 用例全部复测通过；没有跳过或削弱断言。完整功能标签为 `with_quic,with_utls,with_wireguard,with_gvisor,with_acme,with_clash_api`。
+- 竞态检查：`go test -race -p 1 -mod=readonly -tags '<上述完整标签>' ./internal/kernel ./internal/model ./internal/controlplane ./internal/service -count=1 -timeout 10m` 完整通过；两种核心包使用相同选项和 `-run 'TestRelay|TestConnTracker|TestLimitDispatcher|TestXrayUpdateUsers'` 通过。并行链接曾因本机内存不足主动中止，改为串行完成上述检查。
+- 扩展竞态检查未通过：`TestHysteria2ECHRelayRuntime/xray/xray/salamander=true` 在现有依赖 `github.com/sagernet/sing v0.9.0-beta.4` 的 `common/bufio/vectorised_windows.go:83` 触发 `checkptr: converted pointer straddles multiple allocations`。未关闭指针检查、修改依赖或将失败记为通过；对应普通模式全部通过。本轮未执行完整 Linux 竞态检查或真实服务器验收。
+- 本地 Linux amd64、arm64 完整功能构建通过；实际来源为上述基线加工作区修复（`vcs.modified=true`），版本 `v2.3.1`、`CGO_ENABLED=0`，两种核心依赖均与记录一致。这些程序仅用于开发验证，不作为正式发布附件。SHA256：amd64 `465f0b18acb7b55b02b8a339f079e7e790f940e4f6a8cac65fc15dd395c26073`；arm64 `b2129142522f437c7c65b726da35c711f86bc84691f8754aa9c3de8dbdddf168c`。
+- 未发布、未连接或更新服务器。先升级 Node 再升级面板，两端配套才完成修复；旧面板缺省线路字段继续按旧规则工作。
+
 ## v2.3.0 移除中转来源限制与用户实时网速
 
 本版纳入下方原计划 `v2.2.0` 的全部网速改动；不单独发布 `v2.2.0`。先升级 Node，再升级面板，可由新版 Node 在旧面板下先完成普通端口放行和旧来源规则清理。

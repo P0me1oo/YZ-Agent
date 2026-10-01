@@ -167,6 +167,7 @@ func ComputeHash(nc *model.NodeSpec, users []model.UserSpec) string {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	for _, u := range sorted {
 		fmt.Fprintf(h, "%d:%s,", u.ID, u.UUID)
+		fmt.Fprint(h, u.RelayRoutesKey())
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
