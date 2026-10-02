@@ -59,6 +59,8 @@ func (s StatePayload) mapValue() map[string]interface{} {
 }
 
 type realtimeClient struct {
+	telemetry    atomic.Pointer[telemetryLease]
+	lastDetail   atomic.Int64
 	enabled      atomic.Bool
 	stateMu      sync.Mutex
 	run          string
@@ -126,6 +128,13 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 	if ws == nil && time.Since(c.realtime.lastFallback) < realtimeFallbackInterval {
 		return nil
 	}
+	confirmed := false
+	defer func() {
+		if !confirmed {
+			// 面板回滚或拒绝空心跳时立即恢复完整采样，不等旧租约自然过期。
+			c.realtime.telemetry.Store(nil)
+		}
+	}()
 	if c.realtime.version.Epoch == "" {
 		if c.realtime.run == "" {
 			var value [16]byte
@@ -147,7 +156,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 	}
 	c.realtime.version.Sequence++
 	version := c.realtime.version
-	payload := map[string]interface{}{"epoch": version.Epoch, "sequence": version.Sequence, "state": state.mapValue()}
+	payload := map[string]interface{}{"epoch": version.Epoch, "sequence": version.Sequence, "state": state.mapValue(), "telemetry_mode": 1}
 	if ws != nil {
 		event := "runtime.state"
 		if c.nodeID == 0 {
@@ -157,6 +166,8 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 		receipt, err := ws.Request(ackCtx, event, c.nodeID, payload)
 		cancel()
 		if err == nil && receipt.Epoch == version.Epoch && receipt.Sequence >= version.Sequence {
+			c.acceptTelemetry(receipt.Telemetry, state)
+			confirmed = true
 			c.realtime.lastFallback = time.Time{}
 			return nil
 		}
@@ -177,6 +188,8 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 	if response.Data.Epoch != version.Epoch || response.Data.Sequence < version.Sequence {
 		return fmt.Errorf("panel did not confirm the state version")
 	}
+	c.acceptTelemetry(response.Data.Telemetry, state)
+	confirmed = true
 	return nil
 }
 

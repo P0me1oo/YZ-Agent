@@ -33,22 +33,30 @@ func (s *Service) publishRuntimeState(ctx context.Context) {
 	if !ok || !publisher.RealtimeEnabled() || !s.stateActive.CompareAndSwap(false, true) {
 		return
 	}
-	status := monitor.Collect()
+	details, speeds := true, true
+	if demand, ok := publisher.(interface{ TelemetryNeeds() (bool, bool) }); ok {
+		details, speeds = demand.TelemetryNeeds()
+	}
 	counts, relayCounts := s.tracker.CurrentConnectionCounts()
-	metrics := s.buildMetrics(status)
-	metrics["kernel_status"] = s.kernel.IsRunning()
 	state := panel.StatePayload{
 		Alive: s.tracker.FlushAliveIPs(), Online: s.tracker.CurrentOnline(),
 		ConnectionCounts: counts, RelayConnectionCounts: relayCounts,
-		UserSpeeds:     s.userSpeed.rates,
-		RelayUserAlive: s.tracker.RelayUserAlive(), Metrics: metrics,
-		Status: map[string]interface{}{
+		RelayUserAlive: s.tracker.RelayUserAlive(),
+	}
+	if speeds {
+		state.UserSpeeds = s.userSpeed.rates
+	}
+	if details {
+		status := monitor.Collect()
+		state.Metrics = s.buildMetrics(status)
+		state.Metrics["kernel_status"] = s.kernel.IsRunning()
+		state.Status = map[string]interface{}{
 			"cpu":           status.CPU,
 			"mem":           map[string]uint64{"total": status.MemTotal, "used": status.MemUsed},
 			"swap":          map[string]uint64{"total": status.SwapTotal, "used": status.SwapUsed},
 			"disk":          map[string]uint64{"total": status.DiskTotal, "used": status.DiskUsed},
 			"kernel_status": s.kernel.IsRunning(),
-		},
+		}
 	}
 	go func() {
 		defer s.stateActive.Store(false)

@@ -18,11 +18,12 @@ type StateVersion struct {
 
 type RPCReceipt struct {
 	StateVersion
-	RequestID string `json:"request_id"`
-	ReportID  string `json:"report_id"`
-	NodeID    int    `json:"node_id"`
-	Accepted  bool   `json:"accepted"`
-	Code      int    `json:"code"`
+	RequestID string           `json:"request_id"`
+	ReportID  string           `json:"report_id"`
+	NodeID    int              `json:"node_id"`
+	Accepted  bool             `json:"accepted"`
+	Code      int              `json:"code"`
+	Telemetry *TelemetryDemand `json:"telemetry,omitempty"`
 }
 
 type RemoteError struct{ Code int }

@@ -34,3 +34,6 @@ func (p *MachinePanelControlPlane) PublishState(ctx context.Context, state panel
 	return p.client.PublishState(ctx, state)
 }
 func (p *panelPushClient) WebSocket() *panel.WSClient { return p.inner }
+
+func (p *PanelControlPlane) TelemetryNeeds() (bool, bool)        { return p.client.TelemetryNeeds() }
+func (p *MachinePanelControlPlane) TelemetryNeeds() (bool, bool) { return p.client.TelemetryNeeds() }
