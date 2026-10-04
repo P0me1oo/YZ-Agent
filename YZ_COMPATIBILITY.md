@@ -2,14 +2,20 @@
 
 ## v2.4.1 设备计数与快照续期
 
+- 2026-10-04：[Release v2.4.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.4.1) 已正式发布并核对为最新正式版，固定来源 `488d05c3e43c022e41372cce0c19d78459febf5a`，配套面板 `v1.39.1`。
+- [正式流水线 37208479669](https://github.com/P0me1oo/YZ-Agent/actions/runs/37208479669) 全部通过：Linux 完整竞态检查、兼容依赖、安装器、Mihomo 联调、四组原生防火墙、双架构构建、镜像和 Release。
+- 12 个附件已下载，全部匹配 GitHub 大小与 SHA256，11 条 `SHA256SUMS` 一致；同架构兼容名称与主程序字节一致。实际程序构建信息与附件记录一致，均为上述固定来源、`vcs.modified=false`、`CGO_ENABLED=0`、Linux amd64/arm64，两个核心固定依赖与源码一致。流水线实际运行两个架构镜像确认版本与来源。
+- 正式主程序 SHA256：amd64 `0e7436ea1d0768132e17bbf0552cce494d722e2c3027c1404ec460a379146b34`；arm64 `5818c22fa13109e49b9e9cd4136e25905407b36e52429b69f9fea947fd32fd29`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.4.1`、`latest` 和完整来源提交标签均为清单 `sha256:0227d1383f88ff3cc11ac4fd4d12622960a189b8cd5743ba5640c044c1207e0f`；amd64 为 `sha256:72edc1fefed0f789ceaefcaee64ff41c2c728e0fff48b10b7f8fdb53ce07ee36`，arm64 为 `sha256:3dfd37450945ceb0bac5989a18b2236ecc1468bfd4b56ad6d31bae4894bb0186`。三个标签、两个架构的 OCI 来源和版本及镜像层已匿名核验。
+- 上一版 `v2.4.0` 的 Release 与镜像仍可获取，镜像清单 `sha256:fffe4623b38ba8f3fdb8b00f5e448654a6ec5b56edce0c99a1f39bde1b5654f2`；两个架构及镜像层已匿名核验。未连接或更新服务器；部署时先更新面板，再更新 Node，用户无需强制刷新或重新导入订阅。
+
 - 修改基线 `ce92fc0290387e46584d7c4fdc75263f599466f0`，配套面板修改基线 `abde6eb1dd99e9d64837efb39520245d86ec1f22`。修改前已核对远程标签，`v2.4.1`、面板 `v1.39.1` 未占用。
 - Xray 统一实际连接记录，修复设备上限变更后的漏算与关闭残留；记录按用户独立加锁，保持准入与登记连续。三个新增回归在旧代码上失败，包含并发变更后的残留计数。
 - 配套面板 `1.39.1` 每十秒续期稳定设备名单，Node 保留相同有效版本续期、旧版本拒绝和三十五秒失联过期。详见 [设备计数](docs/device-counting.md)。
 - 管理端和两个核心固定依赖不变，无核心源码、通信格式或流量结算变更；程序入口与构建默认版本均为 `v2.4.1`。
 - Go 1.27.0、Windows amd64、完整功能标签下，普通全库及 Xray、服务、控制平面、面板通信和机器管理五包完整竞态检查全部通过。首次普通全库检查在 sing-box 包触发五分钟时限；单独复测 VLESS/Hysteria2 与两种落地核心的四组中转通过。普通全库按仓库既有二十分钟时限复跑通过，sing-box 包用时 `567.732` 秒，包含双核心中转、用户与路由热更新、重载、重启恢复及流量检查。准确命令与环境见 [设备计数](docs/device-counting.md#本地检查命令与环境)。
 - Linux amd64/arm64 完整功能构建通过，实际产物均为 `CGO_ENABLED=0`、对应 Linux 架构，固定核心来源为 `YZ-sing-box v1.14.0-yz.2` 和 `YZ-Xray-core v0.0.0-20260930033643-7c5728ec7d0f`。本地构建记录的源码提交为上述 Node 基线，`vcs.modified=true`，包含未提交修复，不作为正式发布来源。程序位于 `D:/codex-tmp/yz-device-resume-20261004/build/`。
-- 本地验证程序 SHA256：amd64 `217b907d818b4eb43db91edb5a3fc7ca3711a8c0e29437b5973e2d0aeb6b252f`；arm64 `7ae2ae7f338d598a379b8518bb0225fa0792c2162b6377a505d86eee936d4bba`。本次为 Windows 本地测试及 Linux 交叉构建，未执行 Linux 实机测试。
-- 发布前本地验证已完成，正式流水线与发布核验结果在发布后补充。未连接或更新服务器；部署时先更新面板，再更新 Node。
+- 发布前本地验证程序 SHA256：amd64 `217b907d818b4eb43db91edb5a3fc7ca3711a8c0e29437b5973e2d0aeb6b252f`；arm64 `7ae2ae7f338d598a379b8518bb0225fa0792c2162b6377a505d86eee936d4bba`。本地阶段为 Windows 测试及 Linux 交叉构建，正式 Linux CI 与发布产物以上方记录为准，未执行真实服务器测试。
 
 ## v2.4.0 展示状态按需上报
 
