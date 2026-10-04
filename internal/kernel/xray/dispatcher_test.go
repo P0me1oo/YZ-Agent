@@ -3,7 +3,6 @@ package xray
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,9 +14,7 @@ import (
 )
 
 func newTestDispatcher() *LimitDispatcher {
-	return &LimitDispatcher{
-		limitedIPs: make(map[string]map[string]int),
-	}
+	return &LimitDispatcher{}
 }
 
 type nopReader struct{}
@@ -220,20 +217,9 @@ func TestLimitDispatcher_GetConnectionState(t *testing.T) {
 	email2 := userEmail(2)
 	ld.UpdateLimits(map[string]int{email1: 1, email2: 2}, nil, nil)
 
-	ic1 := &ipCounter{}
-	r1 := &atomic.Int64{}
-	r1.Store(1)
-	ic1.ips.Store("1.1.1.1", r1)
-	r2 := &atomic.Int64{}
-	r2.Store(1)
-	ic1.ips.Store("2.2.2.2", r2)
-	ld.unlimitedIPs.Store(email1, ic1)
-
-	ic2 := &ipCounter{}
-	r3 := &atomic.Int64{}
-	r3.Store(1)
-	ic2.ips.Store("3.3.3.3", r3)
-	ld.unlimitedIPs.Store(email2, ic2)
+	ld.checkDeviceLimit(email1, "1.1.1.1", true)
+	ld.checkDeviceLimit(email1, "2.2.2.2", true)
+	ld.checkDeviceLimit(email2, "3.3.3.3", true)
 
 	ld.connCount.Store(5)
 
@@ -253,33 +239,30 @@ func TestLimitDispatcher_GetConnectionState(t *testing.T) {
 func TestLimitDispatcher_ResetConns(t *testing.T) {
 	ld := newTestDispatcher()
 
-	ld.mu.Lock()
-	ld.limitedIPs["user@1"] = map[string]int{"1.1.1.1": 1}
-	ld.mu.Unlock()
+	ld.UpdateLimits(map[string]int{userEmail(1): 1}, map[string]int{userEmail(1): 1}, nil)
+	ld.checkDeviceLimit(userEmail(1), "1.1.1.1", true)
 	ld.connCount.Store(3)
 
 	ld.ResetConns()
 
-	ld.mu.RLock()
-	ipCount := len(ld.limitedIPs)
-	ld.mu.RUnlock()
-	if ipCount != 0 {
-		t.Error("limitedIPs should be empty after reset")
-	}
+	ld.userIPs.Range(func(_, _ interface{}) bool {
+		t.Error("重置后不应残留用户设备记录")
+		return false
+	})
 
 	if ld.connCount.Load() != 0 {
 		t.Error("connCount should be 0 after reset")
 	}
 }
 
-func TestLimitDispatcher_UnlimitedUserFastPath(t *testing.T) {
+func TestLimitDispatcher_UnlimitedUserTracking(t *testing.T) {
 	ld := newTestDispatcher()
 
 	email := userEmail(1)
 	// No device limit set for this user
 	ld.UpdateLimits(map[string]int{email: 1}, nil, nil)
 
-	// Should use fast path (sync.Map), no lock needed
+	// 不限设备仍须登记真实来源和连接数。
 	for i := 0; i < 100; i++ {
 		ip := "8.8.8." + string(rune('0'+i%10))
 		if ld.checkDeviceLimit(email, ip, true) {
@@ -287,15 +270,14 @@ func TestLimitDispatcher_UnlimitedUserFastPath(t *testing.T) {
 		}
 	}
 
-	// Verify IPs are tracked in unlimitedIPs
-	v, ok := ld.unlimitedIPs.Load(email)
+	v, ok := ld.userIPs.Load(email)
 	if !ok {
-		t.Error("unlimited user should have entry in unlimitedIPs")
+		t.Fatal("不限设备的用户也应保留连接记录")
 	}
 	ic := v.(*ipCounter)
 	ips := ic.aliveIPs()
-	if len(ips) == 0 {
-		t.Error("should have tracked some IPs")
+	if len(ips) != 10 || ic.connectionCount() != 100 {
+		t.Error("不限设备时来源去重或连接条数错误")
 	}
 }
 

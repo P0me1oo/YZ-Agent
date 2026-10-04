@@ -75,3 +75,11 @@ func (s *Service) applyDeviceSnapshot(version panel.StateVersion, users map[int]
 	s.kernel.UpdateGlobalDevices(users)
 	s.lastDeviceSync = time.Now()
 }
+
+// 稳定名单由面板重复发送以续期；只有超过三十五秒没有有效快照才清除。
+func (s *Service) expireDeviceSnapshot(now time.Time) {
+	if !s.lastDeviceSync.IsZero() && now.Sub(s.lastDeviceSync) > 35*time.Second {
+		s.kernel.ClearGlobalDevices()
+		s.lastDeviceSync = time.Time{}
+	}
+}

@@ -55,9 +55,8 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 		return orig, nil
 	}
 	ld := &LimitDispatcher{
-		inner:      orig,
-		innerDisp:  inner,
-		limitedIPs: make(map[string]map[string]int),
+		inner:     orig,
+		innerDisp: inner,
 	}
 	ld.deviceFilter, _ = ctx.Value(deviceFilterContextKey{}).(*deviceip.Filter)
 	if ld.deviceFilter == nil {
@@ -82,17 +81,15 @@ type LimitDispatcher struct {
 	innerDisp         routing.Dispatcher // same object, typed as Dispatcher
 	deviceFilter      *deviceip.Filter
 
-	// 有设备上限的用户由同一把锁保护，检查和登记在锁内完成。
+	// 限制和身份映射由读写锁保护，变更上限不迁移或清空已有连接。
 	mu               sync.RWMutex
-	limitedIPs       map[string]map[string]int // email → sourceIP → refcount
-	deviceLimits     map[string]int            // email → max devices
-	emailToUID       map[string]int            // email → panel user ID
-	globalDevices    map[int]map[string]bool   // 面板汇总的来源 IP 快照
+	deviceLimits     map[string]int          // email → max devices
+	emailToUID       map[string]int          // email → panel user ID
+	globalDevices    map[int]map[string]bool // 面板汇总的来源 IP 快照
 	globalLastUpdate time.Time
 
-	// unlimitedIPs: users without device limit — sync.Map for lock-free access.
-	// Each entry is *ipCounter{ips sync.Map}.
-	unlimitedIPs sync.Map // email → *ipCounter
+	// 所有用户共用同一种连接记录；每个用户独立加锁，准入和关闭始终操作同一份计数。
+	userIPs sync.Map // email → *ipCounter
 
 	connCount atomic.Int64 // total active connections tracked by dispatcher
 
@@ -170,21 +167,31 @@ func (d *LimitDispatcher) countKey(raw string) string {
 	return deviceip.CountKey(raw)
 }
 
-// ipCounter tracks IPs for unlimited users without any lock.
+// ipCounter 保存用户的实际连接引用数，不随是否设置设备上限而变化。
 type ipCounter struct {
-	ips sync.Map // sourceIP → *atomic.Int64 (refcount)
+	mu  sync.Mutex
+	ips map[string]int
 }
 
 // aliveIPs returns a snapshot of distinct IPs.
 func (ic *ipCounter) aliveIPs() map[string]bool {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
 	result := make(map[string]bool)
-	ic.ips.Range(func(key, _ interface{}) bool {
-		if rv, ok := ic.ips.Load(key); ok && rv.(*atomic.Int64).Load() > 0 {
-			result[key.(string)] = true
-		}
-		return true
-	})
+	for ip := range ic.ips {
+		result[ip] = true
+	}
 	return result
+}
+
+func (ic *ipCounter) connectionCount() int {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	count := 0
+	for _, n := range ic.ips {
+		count += n
+	}
+	return count
 }
 
 // ─── routing.Dispatcher ──────────────────────────────────────────────────────
@@ -510,29 +517,17 @@ func (d *LimitDispatcher) ConnectionSnapshot() (map[int]int, map[int]map[int]int
 	d.mu.RLock()
 	emailToUID := d.emailToUID
 	counts := make(map[int]int)
-	for email, ips := range d.limitedIPs {
-		uid := emailToUID[email]
-		if uid <= 0 {
-			continue
-		}
-		for _, n := range ips {
-			counts[uid] += n
-		}
-	}
-	d.mu.RUnlock()
-	d.unlimitedIPs.Range(func(key, value interface{}) bool {
+	d.userIPs.Range(func(key, value interface{}) bool {
 		uid := emailToUID[key.(string)]
 		if uid <= 0 {
 			return true
 		}
-		value.(*ipCounter).ips.Range(func(_, counter interface{}) bool {
-			if n := counter.(*atomic.Int64).Load(); n > 0 {
-				counts[uid] += int(n)
-			}
-			return true
-		})
+		if n := value.(*ipCounter).connectionCount(); n > 0 {
+			counts[uid] += n
+		}
 		return true
 	})
+	d.mu.RUnlock()
 	relay := make(map[int]map[int]int)
 	d.relaySources.Range(func(key, value interface{}) bool {
 		k := key.(relaySourceKey)
@@ -562,14 +557,8 @@ func (d *LimitDispatcher) SetConnLimiter(limiter model.ConnLimiter) {
 
 func (d *LimitDispatcher) ResetConns() {
 	d.mu.Lock()
-	d.limitedIPs = make(map[string]map[string]int)
+	d.userIPs.Clear()
 	d.mu.Unlock()
-
-	// Clear unlimited IPs
-	d.unlimitedIPs.Range(func(key, _ interface{}) bool {
-		d.unlimitedIPs.Delete(key)
-		return true
-	})
 
 	d.userConns.Range(func(key, _ interface{}) bool {
 		d.userConns.Delete(key)
@@ -588,29 +577,11 @@ func (d *LimitDispatcher) ResetConns() {
 // Traffic bytes are intentionally left to xray's built-in stats pipeline.
 func (d *LimitDispatcher) GetConnectionState() (aliveIPs map[int]map[string]bool, connCount int) {
 	d.mu.RLock()
+	defer d.mu.RUnlock()
 	emailToUID := d.emailToUID
-	limitedIPs := d.limitedIPs
 
 	aliveIPs = make(map[int]map[string]bool)
-
-	// 持有读锁直到嵌套 map 复制完成，连接增删会同时修改外层和内层 map。
-	for email, ipsMap := range limitedIPs {
-		uid := emailToUID[email]
-		if uid == 0 {
-			continue
-		}
-		ipSet := make(map[string]bool, len(ipsMap))
-		for ip := range ipsMap {
-			ipSet[ip] = true
-		}
-		if len(ipSet) > 0 {
-			aliveIPs[uid] = ipSet
-		}
-	}
-	d.mu.RUnlock()
-
-	// Collect IPs from unlimited users (lock-free).
-	d.unlimitedIPs.Range(func(key, value interface{}) bool {
+	d.userIPs.Range(func(key, value interface{}) bool {
 		email := key.(string)
 		uid := emailToUID[email]
 		if uid == 0 {
@@ -618,7 +589,7 @@ func (d *LimitDispatcher) GetConnectionState() (aliveIPs map[int]map[string]bool
 		}
 		ic := value.(*ipCounter)
 		if ips := ic.aliveIPs(); len(ips) > 0 {
-			// Merge with limited IPs if any
+			// 普通入口和中转认证身份可能对应同一面板用户，按来源合并。
 			if existing, ok := aliveIPs[uid]; ok {
 				for ip := range ips {
 					existing[ip] = true
@@ -636,33 +607,26 @@ func (d *LimitDispatcher) GetConnectionState() (aliveIPs map[int]map[string]bool
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
 
-// checkDeviceLimit enforces per-user device limits.
-// Fast path: unlimited users use lock-free sync.Map.
-// 有上限的用户在同一把锁内完成检查和登记。
+// checkDeviceLimit 在用户自己的锁内完成设备检查与连接登记。
 // 所有来源都登记，供在线人数统计；非公网或名单内的来源不占名额，也不参与计数。
 func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool {
 	d.mu.RLock()
+	defer d.mu.RUnlock()
 	limit, hasLimit := d.deviceLimits[email]
-	d.mu.RUnlock()
-
-	// Fast path: no device limit — use lock-free sync.Map.
-	if !hasLimit || limit <= 0 {
-		v, _ := d.unlimitedIPs.LoadOrStore(email, &ipCounter{})
-		ic := v.(*ipCounter)
-		rv, _ := ic.ips.LoadOrStore(sourceIP, &atomic.Int64{})
-		rv.(*atomic.Int64).Add(1)
+	v, _ := d.userIPs.LoadOrStore(email, &ipCounter{})
+	ic := v.(*ipCounter)
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	if ic.ips == nil {
+		ic.ips = make(map[string]int)
+	}
+	ips := ic.ips
+	if !hasLimit || limit <= 0 || ips[sourceIP] > 0 {
+		ips[sourceIP]++
 		return false
 	}
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	ips := d.limitedIPs[email]
-	if ips == nil {
-		ips = make(map[string]int)
-		d.limitedIPs[email] = ips
-	}
 	newKey := d.countKey(sourceIP)
-	if ips[sourceIP] > 0 || newKey == "" {
+	if newKey == "" {
 		ips[sourceIP]++
 		return false
 	}
@@ -701,28 +665,16 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 
 // delConn decrements the IP refcount when a connection closes.
 func (d *LimitDispatcher) delConn(email, sourceIP string) {
-	// Check if this is an unlimited user first (lock-free).
-	if v, ok := d.unlimitedIPs.Load(email); ok {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if v, ok := d.userIPs.Load(email); ok {
 		ic := v.(*ipCounter)
-		if rv, ok := ic.ips.Load(sourceIP); ok {
-			counter := rv.(*atomic.Int64)
-			if counter.Add(-1) <= 0 {
-				ic.ips.Delete(sourceIP)
-			}
-		}
-		return
-	}
-
-	// Limited user — use write lock.
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if ips, ok := d.limitedIPs[email]; ok {
-		ips[sourceIP]--
-		if ips[sourceIP] <= 0 {
-			delete(ips, sourceIP)
-		}
-		if len(ips) == 0 {
-			delete(d.limitedIPs, email)
+		ic.mu.Lock()
+		defer ic.mu.Unlock()
+		if n := ic.ips[sourceIP]; n > 1 {
+			ic.ips[sourceIP] = n - 1
+		} else {
+			delete(ic.ips, sourceIP)
 		}
 	}
 }

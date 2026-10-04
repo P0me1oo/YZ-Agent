@@ -319,9 +319,8 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			if s.trackAndEnforce(ctx) {
 				s.publishRuntimeState(ctx)
 			}
-			if s.realtimeEnabled() && !s.lastDeviceSync.IsZero() && time.Since(s.lastDeviceSync) > 35*time.Second {
-				s.kernel.ClearGlobalDevices()
-				s.lastDeviceSync = time.Time{}
+			if s.realtimeEnabled() {
+				s.expireDeviceSnapshot(time.Now())
 			}
 
 		case <-reportTicker.C:
