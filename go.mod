@@ -2,6 +2,10 @@ module github.com/P0me1oo/YZ-Agent
 
 go 1.27
 
+// 保持普通 TCP 监听默认值，避免 Go 1.27 自动使用不支持 TCP_USER_TIMEOUT 的 MPTCP。
+// 核心显式启用多路径 TCP 时仍可覆盖此默认值。
+godebug multipathtcp=0
+
 require (
 	github.com/caddyserver/certmagic v0.25.3-0.20260421143802-60d9d8b415d6
 	github.com/fsnotify/fsnotify v1.9.0

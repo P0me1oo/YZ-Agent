@@ -2,6 +2,7 @@ package xray
 
 import (
 	"bytes"
+	"net"
 	"testing"
 
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
@@ -10,6 +11,18 @@ import (
 	"github.com/xtls/xray-core/infra/conf/serial"
 	"github.com/xtls/xray-core/transport/internet"
 )
+
+func TestTCPListenerDefaultPreservesExplicitMultipathChoice(t *testing.T) {
+	t.Setenv("GODEBUG", "")
+	var listener net.ListenConfig
+	if listener.MultipathTCP() {
+		t.Fatal("Node 默认监听不应自动开启多路径 TCP")
+	}
+	listener.SetMultipathTCP(true)
+	if !listener.MultipathTCP() {
+		t.Fatal("核心显式开启多路径 TCP 的选择应继续生效")
+	}
+}
 
 func TestVLESSInboundTCPHealthParsedByXray(t *testing.T) {
 	for _, network := range []string{"", "tcp", "raw", "ws", "grpc", "httpupgrade", "xhttp"} {

@@ -30,4 +30,4 @@ jobs:
           go-version: '1.27.1'
           cache: true
       - name: Check actual socket options
-        run: go test -mod=readonly -race -count=1 -timeout 2m -v -run '^TestVLESSInbound' ./internal/kernel/xray
+        run: go test -mod=readonly -race -tags "with_quic,with_utls,with_wireguard,with_gvisor,with_acme,with_clash_api" -count=1 -timeout 2m -v -run '^Test(VLESSInbound|TCPListenerDefault)' ./internal/kernel/xray

@@ -26,6 +26,16 @@ func TestVLESSInboundTCPHealthAppliedToLinuxSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var protocol int
+	var protocolErr error
+	if err := listenRaw.Control(func(fd uintptr) {
+		protocol, protocolErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PROTOCOL)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if protocolErr != nil || protocol != unix.IPPROTO_TCP {
+		t.Fatalf("默认监听必须使用普通 TCP：protocol=%d，error=%v", protocol, protocolErr)
+	}
 	logTCPTimeout := func(stage string, raw syscall.RawConn) {
 		t.Helper()
 		var value int
