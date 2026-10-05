@@ -467,7 +467,7 @@ func validateRelayWireGuard(w *RelayWireGuardConfig) error {
 	if _, err = key.ECDH(public); err != nil || key.PublicKey().Equal(public) {
 		return fmt.Errorf("invalid wireguard peer public key")
 	}
-	if w.MTU < 1280 || w.MTU > 1420 || w.Keepalive < 0 || w.Keepalive > 65535 {
+	if w.MTU < 1280 || w.MTU > 1500 || w.Keepalive < 0 || w.Keepalive > 65535 {
 		return fmt.Errorf("invalid wireguard MTU or keepalive")
 	}
 	if len(w.Address) == 0 || len(w.AllowedIPs) == 0 {

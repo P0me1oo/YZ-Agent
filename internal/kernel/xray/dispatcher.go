@@ -55,8 +55,9 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 		return orig, nil
 	}
 	ld := &LimitDispatcher{
-		inner:     orig,
-		innerDisp: inner,
+		inner:       orig,
+		innerDisp:   inner,
+		coreContext: ctx,
 	}
 	ld.deviceFilter, _ = ctx.Value(deviceFilterContextKey{}).(*deviceip.Filter)
 	if ld.deviceFilter == nil {
@@ -75,6 +76,8 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 // intact, so the dispatcher is limited to gate-keeping and safe connection
 // lifecycle bookkeeping.
 type LimitDispatcher struct {
+	// 核心创建时的上下文供 WG 入站复用，保留实例级调度与带宽管理。
+	coreContext       context.Context
 	relayAccess       kernel.RelayAccess
 	relayConnectionID atomic.Uint64
 	inner             interface{}        // original DefaultDispatcher (Feature + Dispatcher)

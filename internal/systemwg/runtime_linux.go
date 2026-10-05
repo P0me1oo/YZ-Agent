@@ -4,9 +4,6 @@ package systemwg
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -14,19 +11,19 @@ import (
 	"sync"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
-	box "github.com/sagernet/sing-box"
-	"github.com/sagernet/sing-box/include"
-	"github.com/sagernet/sing-box/option"
-	singJSON "github.com/sagernet/sing/common/json"
 )
 
 type M = map[string]any
 
 // Runtime 跟随一次核心实例生存；构造失败、启动失败和正常退出使用同一回收路径。
 type Runtime struct {
-	tunnels []*tunnel
-	bridges []*box.Box
-	once    sync.Once
+	tunnels       []*tunnel
+	once          sync.Once
+	mu            sync.RWMutex
+	closed        bool
+	started       bool
+	xrayLanding   string
+	xrayOutbounds map[string]string
 }
 
 func (r *Runtime) Close() {
@@ -34,9 +31,9 @@ func (r *Runtime) Close() {
 		return
 	}
 	r.once.Do(func() {
-		for _, b := range r.bridges {
-			_ = b.Close()
-		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.closed = true
 		for _, t := range r.tunnels {
 			t.close()
 		}
@@ -47,24 +44,33 @@ func (r *Runtime) Start() error {
 	if r == nil {
 		return nil
 	}
-	for _, b := range r.bridges {
-		if err := b.Start(); err != nil {
-			r.Close()
-			return fmt.Errorf("启动系统 WG 转接失败: %w", err)
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return errors.New("WG 线路已经关闭")
+	}
+	if r.started {
+		r.mu.Unlock()
+		return nil
+	}
+	var err error
+	for _, t := range r.tunnels {
+		if err = t.start(); err != nil {
+			break
 		}
 	}
-	for _, t := range r.tunnels {
-		if err := t.start(); err != nil {
-			r.Close()
-			return fmt.Errorf("启动系统 WG 失败: %w", err)
-		}
+	r.started = err == nil
+	r.mu.Unlock()
+	if err != nil {
+		r.Close()
+		return fmt.Errorf("启动系统 WG 失败: %w", err)
 	}
 	return nil
 }
 
 // Prepare 仅改写本次生成的核心配置，不修改面板状态，也不把运行凭据写入磁盘。
 func Prepare(nc *model.NodeSpec, kind string, cfg M) (_ *Runtime, err error) {
-	r := &Runtime{}
+	r := &Runtime{xrayOutbounds: make(map[string]string)}
 	defer func() {
 		if err != nil {
 			r.Close()
@@ -95,15 +101,9 @@ func Prepare(nc *model.NodeSpec, kind string, cfg M) (_ *Runtime, err error) {
 			cfg["inbounds"] = []M{in}
 			removeEndpoint(cfg, "relay-in")
 		} else {
-			port, secret, err := localEndpoint()
-			if err != nil {
-				return nil, err
-			}
-			cfg["inbounds"] = []M{xraySocksInbound(port, secret)}
-			out := M{"type": "socks", "server": "127.0.0.1", "server_port": port, "version": "5", "username": "wg", "password": secret}
-			if err := r.bridge(in, out); err != nil {
-				return nil, err
-			}
+			// Xray 的落地监听由 Node 直接注册到核心，不再经过本机代理。
+			cfg["inbounds"] = []M{}
+			r.xrayLanding = t.path()
 		}
 	}
 	if nc.IsRelayEntry() {
@@ -124,18 +124,11 @@ func Prepare(nc *model.NodeSpec, kind string, cfg M) (_ *Runtime, err error) {
 				removeEndpoint(cfg, child.Tag)
 				cfg["outbounds"] = append(cfg["outbounds"].([]M), out)
 			} else {
-				port, secret, err := localEndpoint()
-				if err != nil {
-					return nil, err
-				}
-				in := M{"type": "socks", "listen": "127.0.0.1", "listen_port": port, "users": []M{{"username": "wg", "password": secret}}}
-				if err := r.bridge(in, out); err != nil {
-					return nil, err
-				}
+				r.xrayOutbounds[child.Tag] = t.path()
 				outs := cfg["outbounds"].([]M)
 				for i, old := range outs {
 					if old["tag"] == child.Tag {
-						outs[i] = xraySocksOutbound(child.Tag, port, secret)
+						outs[i] = M{"tag": child.Tag, "protocol": "socks", "settings": M{"servers": []M{{"address": "10.253.0.2", "port": 1080}}}}
 					}
 				}
 			}
@@ -179,43 +172,22 @@ func checkAddresses(w *model.RelayWireGuardConfig, entry bool) error {
 	return errors.New("系统 WG 地址与面板分配规则不一致")
 }
 
-func localEndpoint() (int, string, error) {
-	l, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return 0, "", err
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return 0, "", err
-	}
-	return port, hex.EncodeToString(b[:]), nil
-}
+func (r *Runtime) XrayLandingNamespace() string            { return r.xrayLanding }
+func (r *Runtime) XrayOutboundNamespace(tag string) string { return r.xrayOutbounds[tag] }
 
-func xraySocksInbound(port int, secret string) M {
-	return M{"tag": "relay-in", "protocol": "socks", "listen": "127.0.0.1", "port": port,
-		"settings": M{"auth": "password", "accounts": []M{{"user": "wg", "pass": secret}}, "udp": true, "ip": "127.0.0.1"}}
-}
-
-func xraySocksOutbound(tag string, port int, secret string) M {
-	return M{"tag": tag, "protocol": "socks", "settings": M{"servers": []M{{"address": "127.0.0.1", "port": port, "users": []M{{"user": "wg", "pass": secret}}}}}}
-}
-
-func (r *Runtime) bridge(in, out M) error {
-	ctx := include.Context(context.Background())
-	b, err := json.Marshal(M{"log": M{"disabled": true}, "inbounds": []M{in}, "outbounds": []M{out}})
-	if err != nil {
-		return err
+// 持锁直到套接字创建结束，避免关闭后复用的描述符指向另一条线路。
+func (r *Runtime) XrayNamespaceCall(ctx context.Context, tag string, action func() error) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed {
+		return errors.New("WG 线路已经关闭")
 	}
-	opts, err := singJSON.UnmarshalExtendedContext[option.Options](ctx, b)
-	if err != nil {
-		return err
+	path := r.xrayLanding
+	if tag != "" {
+		path = r.xrayOutbounds[tag]
 	}
-	instance, err := box.New(box.Options{Context: ctx, Options: opts})
-	if err != nil {
-		return err
+	if path == "" {
+		return errors.New("WG 网络空间不存在")
 	}
-	r.bridges = append(r.bridges, instance)
-	return nil
+	return InNamespace(ctx, path, action)
 }

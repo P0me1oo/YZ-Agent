@@ -26,6 +26,11 @@ func TestWireGuardValidationAndPanelRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, mtu := range []int{1280, 1380, 1420, 1500} {
+		candidate := cloneRelayWireGuard(w)
+		candidate.MTU = mtu
+		if err := validateRelayWireGuard(candidate); err != nil { t.Fatalf("合法 MTU %d 被拒绝: %v", mtu, err) }
+	}
 	if err := ValidateNodeSpec(&NodeSpec{Protocol: "wireguard"}, config.KernelConfig{Type: "xray"}); err == nil {
 		t.Fatal("未绑定入口的 WG 被接受")
 	}
@@ -36,6 +41,7 @@ func TestWireGuardValidationAndPanelRoundTrip(t *testing.T) {
 			w.PeerPublicKey = base64.StdEncoding.EncodeToString(a.PublicKey().Bytes())
 		},
 		"mtu":       func(w *RelayWireGuardConfig) { w.MTU = 1279 },
+		"mtu_upper": func(w *RelayWireGuardConfig) { w.MTU = 1501 },
 		"keepalive": func(w *RelayWireGuardConfig) { w.Keepalive = -1 },
 		"address":   func(w *RelayWireGuardConfig) { w.Address = []string{"bad"} },
 		"allowed":   func(w *RelayWireGuardConfig) { w.AllowedIPs = nil },

@@ -75,7 +75,7 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 	if err != nil {
 		return nil, err
 	}
-	if w.MTU < 1280 || w.MTU > 65535 || port < 0 || port > 65535 || w.Keepalive < 0 || w.Keepalive > 65535 {
+	if w.MTU < 1280 || w.MTU > 1500 || port < 0 || port > 65535 || w.Keepalive < 0 || w.Keepalive > 65535 {
 		return nil, errors.New("系统 WG 的 MTU 或监听端口无效")
 	}
 	var addresses []*netlink.Addr

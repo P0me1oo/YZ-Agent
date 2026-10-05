@@ -180,6 +180,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 
 	// ── Phase 2: Create instance (global lock for LD capture) ───────────
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = systemWGContext(ctx, wgRuntime)
 	ctx = internet.ContextWithProxyProtocolTrust(ctx, x.proxyTrust)
 	ctx = context.WithValue(ctx, deviceFilterContextKey{}, x.deviceFilter)
 	ctx = singService.ContextWithDefaultRegistry(ctx)
@@ -191,6 +192,11 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	if err != nil {
 		cancel()
 		return fmt.Errorf("create xray: %w", err)
+	}
+	if err := attachSystemWG(ctx, inst, wgRuntime); err != nil {
+		cancel()
+		_ = inst.Close()
+		return fmt.Errorf("接入 Xray WG 隧道失败: %w", err)
 	}
 	setDispatcherLimits(ld, users)
 	if ld != nil {

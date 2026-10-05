@@ -8,6 +8,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"strconv"
@@ -15,7 +16,11 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/common/listener"
+	"github.com/sagernet/sing-box/include"
+	"github.com/sagernet/sing-box/option"
+	singJSON "github.com/sagernet/sing/common/json"
 	Mtd "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 	"github.com/sagernet/sing/protocol/socks"
@@ -59,11 +64,12 @@ func TestSystemTCPAndUDP(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.tunnels = append(r.tunnels, a)
-	if err := r.bridge(M{"type": "socks", "listen": "10.253.0.2", "listen_port": 1080, "netns": b.path()}, M{"type": "direct"}); err != nil {
+	startTestSocks(t, M{"type": "socks", "listen": "10.253.0.2", "listen_port": 1080, "netns": b.path()})
+	if err := r.Start(); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Start(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("重复启动失败: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -168,25 +174,21 @@ func TestInvalidKeyDoesNotAllocateNamespace(t *testing.T) {
 	}
 }
 
-// 模拟转接端口被占用：启动失败必须回收网络空间，释放端口后同配置可恢复。
+// 模拟 WG 端口被占用：启动失败必须回收网络空间，释放端口后同配置可恢复。
 func TestStartFailureClosesNamespaceAndCanRecover(t *testing.T) {
 	_, landing := testPair(t)
-	occupied, err := net.Listen("tcp4", "127.0.0.1:0")
+	occupied, err := net.ListenPacket("udp4", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer occupied.Close()
-	port := occupied.Addr().(*net.TCPAddr).Port
-	failed, err := newTunnel(landing, "", 0)
+	port := occupied.LocalAddr().(*net.UDPAddr).Port
+	failed, err := newTunnel(landing, "", port)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := &Runtime{tunnels: []*tunnel{failed}}
 	defer r.Close()
-	in := M{"type": "socks", "listen": "127.0.0.1", "listen_port": port}
-	if err := r.bridge(in, M{"type": "direct"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := r.Start(); err == nil {
 		t.Fatal("端口被占用时未拒绝启动")
 	}
@@ -197,16 +199,35 @@ func TestStartFailureClosesNamespaceAndCanRecover(t *testing.T) {
 	if err := occupied.Close(); err != nil {
 		t.Fatal(err)
 	}
-	recovered, err := newTunnel(landing, "", 0)
+	recovered, err := newTunnel(landing, "", port)
 	if err != nil {
 		t.Fatal(err)
 	}
 	next := &Runtime{tunnels: []*tunnel{recovered}}
 	defer next.Close()
-	if err := next.bridge(in, M{"type": "direct"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := next.Start(); err != nil {
 		t.Fatalf("释放端口后未恢复: %v", err)
+	}
+}
+
+// 隧道层测试使用独立 SOCKS 对端；生产 Runtime 不包含第二个核心。
+func startTestSocks(t *testing.T, in M) {
+	t.Helper()
+	ctx := include.Context(context.Background())
+	b, err := json.Marshal(M{"log": M{"disabled": true}, "inbounds": []M{in}, "outbounds": []M{{"type": "direct"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, err := singJSON.UnmarshalExtendedContext[option.Options](ctx, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := box.New(box.Options{Context: ctx, Options: opts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = instance.Close() })
+	if err := instance.Start(); err != nil {
+		t.Fatal(err)
 	}
 }
