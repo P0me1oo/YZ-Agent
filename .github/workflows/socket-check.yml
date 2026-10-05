@@ -1,0 +1,33 @@
+name: Linux socket check
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: "要验证的完整源码提交"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  socket-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+      - name: Verify fixed source
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - name: Check actual socket options
+        run: go test -mod=readonly -race -count=1 -timeout 2m -v -run '^TestVLESSInbound' ./internal/kernel/xray
