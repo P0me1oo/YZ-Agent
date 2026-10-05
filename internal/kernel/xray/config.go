@@ -604,7 +604,30 @@ func applyStreamSettings(base M, kcfg config.KernelConfig, nc *model.NodeSpec, t
 		ss["sockopt"] = sockopt
 	}
 
+	applyVLESSInboundTCPHealth(ss, nc)
 	base["streamSettings"] = ss
+}
+
+// 用户侧 TCP 连接通过保活确认存活，避免换网后的失效来源长时间占用设备名额。
+// 无业务流量但仍能回应探测的连接继续保留，名额仍由原有关闭回调回收。
+func applyVLESSInboundTCPHealth(stream M, node *model.NodeSpec) {
+	if node.Protocol != "vless" || node.IsRelayLanding() {
+		return
+	}
+	switch stream["network"] {
+	case "tcp", "ws", "grpc", "httpupgrade", "xhttp":
+	default:
+		return
+	}
+	socket, _ := stream["sockopt"].(M)
+	if socket == nil {
+		socket = M{}
+	}
+	socket["tcpKeepAliveIdle"] = 30
+	socket["tcpKeepAliveInterval"] = 10
+	// Xray 将此值按毫秒交给 Linux，约束未确认数据及保活失败的等待。
+	socket["tcpUserTimeout"] = 60000
+	stream["sockopt"] = socket
 }
 
 func buildRealitySettings(kcfg config.KernelConfig, nc *model.NodeSpec) M {
