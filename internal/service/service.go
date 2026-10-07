@@ -20,6 +20,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
+	"github.com/P0me1oo/YZ-Agent/internal/directwg"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel/singbox"
@@ -41,10 +42,11 @@ type Service struct {
 	firewall          firewall.Controller
 	firewallNotice    atomic.Pointer[string]
 	lastFirewallRetry time.Time
-	tracker           *tracker.Tracker
-	limiter           *limiter.Limiter
-	speedTracker      *limiter.SpeedTracker
-	cert              *cert.Manager
+	sourcePolicyState
+	tracker      *tracker.Tracker
+	limiter      *limiter.Limiter
+	speedTracker *limiter.SpeedTracker
+	cert         *cert.Manager
 
 	// 保存面板最新要求的状态；实际成功运行的状态单独记录在 appliedState。
 	lastConfig *model.NodeSpec
@@ -221,6 +223,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 		k = xray.New(cfg.Kernel)
 	}
 
+	k = directwg.Wrap(k)
 	l := limiter.New()
 	st := limiter.NewSpeedTracker(l)
 
@@ -316,6 +319,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			return nil
 
 		case <-trackTicker.C:
+			s.refreshSourcePolicyAsync(ctx)
 			if s.trackAndEnforce(ctx) {
 				s.publishRuntimeState(ctx)
 			}
@@ -345,6 +349,9 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 
 		case result := <-s.pullResults:
 			s.applyPullResult(ctx, result)
+
+		case result := <-s.sourcePolicyResults:
+			s.applySourcePolicyRefresh(ctx, result)
 
 		case <-wsDiscoveryTicker.C:
 			s.wsDiscovery(ctx)
@@ -919,7 +926,13 @@ func (s *Service) startKernel(ctx context.Context, nc *model.NodeSpec, users []m
 	if !s.prepareRuntime(ctx, nc, users) {
 		return false
 	}
-	if err := s.kernel.Start(nc, users, s.tlsCert()); err != nil {
+	prepared, err := s.prepareSourcePolicy(ctx, nc)
+	if err != nil {
+		s.failRuntime("准备来源拦截失败", nc, users, err)
+		s.sourcePolicyFailureHash = s.failedRuntimeHash
+		return false
+	}
+	if err := s.kernel.Start(prepared, users, s.tlsCert()); err != nil {
 		s.failRuntime("启动内核失败", nc, users, err)
 		return false
 	}
@@ -1163,7 +1176,13 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 
 	// If config changed, delegate to kernel.Reload. The kernel implementation
 	// decides whether to hot-swap users, reconstruct inbounds, or restart itself.
-	if err := s.kernel.Reload(s.lastConfig, s.lastUsers, s.tlsCert()); err != nil {
+	prepared, err := s.prepareSourcePolicy(ctx, s.lastConfig)
+	if err != nil {
+		s.failRuntime("准备来源拦截失败", s.lastConfig, s.lastUsers, err)
+		s.sourcePolicyFailureHash = s.failedRuntimeHash
+		return false
+	}
+	if err := s.kernel.Reload(prepared, s.lastUsers, s.tlsCert()); err != nil {
 		s.failRuntime("重载内核失败", s.lastConfig, s.lastUsers, err)
 		return false
 	}
@@ -1784,6 +1803,10 @@ func computeUserHash(users []model.UserSpec) string {
 		binary.LittleEndian.PutUint64(buf[:], uint64(u.ConnRateLimit))
 		h.Write(buf[:])
 		io.WriteString(h, u.RelayRoutesKey())
+		if u.WireGuard != nil {
+			data, _ := json.Marshal(u.WireGuard)
+			h.Write(data)
+		}
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

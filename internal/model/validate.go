@@ -12,8 +12,14 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if n == nil {
 		return nil
 	}
-	if n.Protocol == "wireguard" && !n.IsRelayLanding() {
-		return fmt.Errorf("wireguard requires a relay landing configuration")
+	if err := n.SourcePolicy.Validate(); err != nil {
+		return err
+	}
+	if n.SourcePolicy.Enabled() && n.IsRelayLanding() && n.Relay.Protocol == "wireguard" {
+		return fmt.Errorf("WireGuard 暂不支持大陆来源拦截")
+	}
+	if err := ValidateDirectWireGuard(n); err != nil {
+		return err
 	}
 	if strings.TrimSpace(n.PortHopping) != "" {
 		if n.Protocol != "hysteria" || n.Version != 2 || n.IsRelayLanding() {

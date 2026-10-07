@@ -19,6 +19,9 @@ import (
 type M = map[string]interface{}
 
 func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TLSCert) (M, error) {
+	if err := kernel.ValidateSourcePolicy(nc); err != nil {
+		return nil, err
+	}
 	var outbounds []M
 	tags := make(map[string]bool)
 
@@ -93,6 +96,7 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	}
 
 	mergeCustomSingbox(cfg, kcfg)
+	applySourcePolicy(cfg, nc)
 	return cfg, nil
 }
 

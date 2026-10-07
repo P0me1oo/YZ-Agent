@@ -92,7 +92,7 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 			guardRules = guard.rules
 		}
 		cfg["inbounds"] = inbounds
-	} else {
+	} else if !nc.IsDirectWireGuard() {
 		nlog.Core().Warn("xray: unsupported protocol, no inbound configured — node will not accept connections",
 			"protocol", nc.Protocol,
 			"supported", "vmess, vless, trojan, shadowsocks, hysteria, socks, http")
@@ -103,6 +103,7 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	cfg["routing"] = buildRouting(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute), relayRules, guardRules, relayEntryRules...)
 
 	mergeCustomXray(cfg, kcfg)
+	applySourcePolicy(cfg, nc)
 	return cfg
 }
 

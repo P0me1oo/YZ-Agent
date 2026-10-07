@@ -5,9 +5,11 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
 )
 
 type NodeSpec struct {
+	WireGuard       *panel.WireGuardConfig
 	Protocol        string
 	ListenIP        string
 	ServerPort      int
@@ -15,6 +17,10 @@ type NodeSpec struct {
 	Network         string
 	NetworkSettings map[string]any
 	Routes          []RouteRule
+	SourcePolicy    *sourcepolicy.Policy
+	// 仅由运行层从已校验的本地网段库生成，不接受面板直接填写网段。
+	SourceBlockCIDRs  []string
+	SourcePolicyReady bool
 
 	KernelType       string
 	KernelLogLevel   string
@@ -232,6 +238,7 @@ type BrutalConfig struct {
 }
 
 type UserSpec struct {
+	WireGuard   *panel.WireGuardPeer
 	ID          int
 	UUID        string
 	SpeedLimit  int

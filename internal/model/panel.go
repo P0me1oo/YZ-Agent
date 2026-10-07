@@ -5,6 +5,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
 )
 
 func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
@@ -164,6 +165,8 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 		AcceptProxyProtocol: nc.AcceptProxyProtocol,
 		Relay:               relay,
 		DeviceIPExclude:     append([]string(nil), nc.DeviceIPExclude...),
+		SourcePolicy:        sourcepolicy.Clone(nc.SourcePolicy),
+		WireGuard:           CloneWireGuardConfig(nc.WireGuard),
 	}
 }
 
@@ -189,6 +192,7 @@ func UserSpecsFromPanel(users []panel.User) []UserSpec {
 			ConnLimit:     user.ConnLimit,
 			ConnRateLimit: user.ConnRateLimit,
 			RelayRoutes:   CloneRelayRoutes(user.RelayRoutes),
+			WireGuard:     CloneWireGuardPeer(user.WireGuard),
 		})
 	}
 	return out
@@ -351,6 +355,8 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 		AcceptProxyProtocol: n.AcceptProxyProtocol,
 		Relay:               relay,
 		DeviceIPExclude:     append([]string(nil), n.DeviceIPExclude...),
+		SourcePolicy:        sourcepolicy.Clone(n.SourcePolicy),
+		WireGuard:           CloneWireGuardConfig(n.WireGuard),
 	}
 }
 
@@ -402,6 +408,7 @@ func UserSpecsToPanel(users []UserSpec) []panel.User {
 			ConnLimit:     user.ConnLimit,
 			ConnRateLimit: user.ConnRateLimit,
 			RelayRoutes:   CloneRelayRoutes(user.RelayRoutes),
+			WireGuard:     CloneWireGuardPeer(user.WireGuard),
 		})
 	}
 	return out

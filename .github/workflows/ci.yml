@@ -71,6 +71,7 @@ jobs:
           gzip -dc "$RUNNER_TEMP/mihomo.gz" > "$RUNNER_TEMP/mihomo"
           chmod 700 "$RUNNER_TEMP/mihomo"
           WG_MIHOMO_BIN="$RUNNER_TEMP/mihomo" go test -mod=readonly -v -race -count=1 -timeout 2m -exec "sudo -E" -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration" -run '^TestWireGuardRealityClients$' ./internal/kernel/singbox
+          WG_MIHOMO_BIN="$RUNNER_TEMP/mihomo" go test -mod=readonly -v -race -count=1 -timeout 3m -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration" -run '^TestDirectWireGuardMihomo$' ./internal/directwg
 
       - name: Validate installer syntax
         run: |

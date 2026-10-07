@@ -29,10 +29,12 @@ func TestWireGuardValidationAndPanelRoundTrip(t *testing.T) {
 	for _, mtu := range []int{1280, 1380, 1420, 1500} {
 		candidate := cloneRelayWireGuard(w)
 		candidate.MTU = mtu
-		if err := validateRelayWireGuard(candidate); err != nil { t.Fatalf("合法 MTU %d 被拒绝: %v", mtu, err) }
+		if err := validateRelayWireGuard(candidate); err != nil {
+			t.Fatalf("合法 MTU %d 被拒绝: %v", mtu, err)
+		}
 	}
 	if err := ValidateNodeSpec(&NodeSpec{Protocol: "wireguard"}, config.KernelConfig{Type: "xray"}); err == nil {
-		t.Fatal("未绑定入口的 WG 被接受")
+		t.Fatal("缺少直连身份或中转配置的 WG 被接受")
 	}
 	for name, change := range map[string]func(*RelayWireGuardConfig){
 		"private": func(w *RelayWireGuardConfig) { w.PrivateKey = "invalid" },

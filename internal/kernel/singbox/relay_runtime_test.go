@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/directwg"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel/xray"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -230,6 +231,17 @@ func relayStartCore(t *testing.T, kind string, node *model.NodeSpec, users []mod
 	}
 	if err := model.ValidateNodeSpec(node, cfg); err != nil {
 		t.Fatal(err)
+	}
+	// WG 中转也通过服务层使用的包装器，验证新增普通 WG 后原中转能力仍完整透传。
+	if node.Protocol == "wireguard" {
+		core = directwg.Wrap(core)
+	} else if node.Relay != nil {
+		for _, child := range node.Relay.Children {
+			if child.Protocol == "wireguard" {
+				core = directwg.Wrap(core)
+				break
+			}
+		}
 	}
 	if err := core.Start(node, users, cert); err != nil {
 		t.Fatal(err)

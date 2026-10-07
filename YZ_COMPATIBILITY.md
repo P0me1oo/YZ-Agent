@@ -1,5 +1,27 @@
 # YZ-Agent 兼容矩阵
 
+## v2.7.0 普通 WireGuard（本地开发，未发布）
+
+- 基线 `8bf0b8e29de18838397f936ffc722312d2ad22ed`，保留原未提交的来源策略；配套面板 `1.53.0`、管理端 `0.30.0`。sing-box 固定 `v1.14.0-yz.2`，Xray 固定 `v0.0.0-20260930033643-7c5728ec7d0f`，没有修改核心 fork。
+- `internal/directwg` 承担普通 WG 的身份、用户态收发、真实来源准入和 TCP/UDP 转发；所选核心负责路由与出站，原 WG 中转仍用已有路径。计费是有效负载字节，IP 额度复用既有规则。运行限制与版本条件见 [普通 WG](docs/wireguard-direct.md)。
+- Windows amd64、Go 1.27、本机 LLVM MinGW 下，普通 WG 的竞态专项通过，覆盖两种核心 TCP/UDP、精确有效负载计数、实际限速、删除恢复、密钥轮换、到期拒绝、来源拦截、重复同端口重载及端口占用失败后恢复；状态测试覆盖全局设备额度、IPv6 /64、排除名单与并发准入。
+- 测试曾暴露关闭限速后向底层转交空函数的问题，已修复；旧 sing-box outbound 不支持保活字段的问题在面板订阅生成中修复。上述通过结果来自修正后的重跑，不将首轮失败记为通过。
+- 独立 Mihomo `v1.19.32` 对两种核心的普通 WG TCP 实连通过。首轮将本地监听存在误当成转发就绪，修正为实际回传就绪后再验证独立连接；没有修改客户端或跳过连接断言。正式流水线继续验证固定 Mihomo `v1.19.31`，增加普通 WG 场景。
+- Windows 全量竞态回归中，除 sing-box 包外其余包通过。sing-box 两次在固定依赖 `github.com/sagernet/sing v0.9.0-beta.4` 的 `common/bufio/vectorised_windows.go:83` 触发 `checkptr: converted pointer straddles multiple allocations`，调用来自 Hysteria2 的 UDP 混淆发送，非普通 WG 接入堆栈。未关闭竞态检查或修改依赖规避，正式发布以 Linux 完整回归为门槛。
+- Linux amd64/arm64 本地构建通过，已核对完整功能标签、固定依赖、架构、基线来源及 `vcs.modified=true`。临时产物仅用于验证，不作为正式发布附件；正式附件由固定提交的流水线生成。
+- 用户已授权在确认原中转无回归后发布；发布前须通过 Linux 完整测试、固定 Mihomo、原 WG 多组合与流量归属验证。没有执行真实服务器操作。
+
+## v2.6.0 大陆来源拦截（开发记录，纳入 v2.7.0）
+
+- 修改基线为 `8bf0b8e29de18838397f936ffc722312d2ad22ed`，配套面板 `1.52.0`、管理端 `0.29.0`。实际仓库为 `P0me1oo/YZ-Agent`，本地目录沿用 `YZboard-Node`；两个核心 fork 与固定依赖不变。
+- 普通代理入口、中转入口和非 WG 落地独立限制大陆来源，例外不绕过认证、线路权限与后续路由。WireGuard 暂不接入，不修改系统防火墙。网段缓存、更新失败和恢复规则见 [来源拦截](docs/source-policy.md)。
+- 模型与来源数据专项通过，涵盖 IPv4/IPv6 例外、损坏数据拒绝、并发下载复用、更新失败保留旧库及重启缓存。服务层专项通过，覆盖首次缺库停止、恢复后启动、相同数据不重载、更新失败保留运行状态及关闭后的迟到响应。
+- 两种核心的来源专项通过（Go 1.27.0、Windows amd64、完整功能标签）：VLESS、Shadowsocks、Hysteria2 的 TCP/UDP 拦截、例外放行、重复重载、恢复拦截及关闭；中转入口同时限制直出与中转，落地独立限制，例外仍遵守原线路与业务路由。最终专项用时 39.829 秒。
+- 首轮 Xray Hysteria2 在重载后复用旧客户端会话时出现超时。测试调整为每次重载后建立新客户端，完整来源专项通过；未修改核心来保证旧会话无中断，也不承诺已有连接立即服从新策略。
+- 2026-10-07：来源数据、模型、服务、面板通信、Xray 和 sing-box 共 6 个受影响包的完整回归通过；sing-box 用时 645.474 秒。执行命令为 `go test -p 2 -mod=readonly -count=1 -timeout 20m -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api" ./internal/sourcepolicy ./internal/model ./internal/service ./internal/panel ./internal/kernel/xray ./internal/kernel/singbox`。这是 Windows 本地回归，不代表 Linux 运行测试或真实服务器联调。
+- Linux amd64/arm64 完整功能构建通过，产物位于 `D:/codex-tmp/yz-source-policy-20261006/`。已核对两个程序的目标架构、`CGO_ENABLED=0`、完整功能标签、固定核心依赖及来源提交；均为上述基线加未提交修改（`vcs.modified=true`），仅用于本地验证，不作为正式发布来源。amd64 SHA256 为 `942707bc7482d257c8804ad5e5c4c83b34f3430bd94bd5f817afaca023935f9b`，arm64 为 `62731aa60966c1fe6c44a861b0be5dd52af77197ee364e8e19bb17d8e50d1543`。
+- 当前未提交、未发布；本地测试使用回环监听、临时身份与文档保留网段，未连接真实服务器。测试进程已退出，保留构建产物供复核；自动审批拒绝了本次 Go 临时目录的递归清理，临时目录与诊断日志暂时保留，不记为已清理。
+
 ## v2.5.0 Xray 直接接入系统 WG
 
 - 2026-10-05：[Release v2.5.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.5.0) 已发布并核对为最新正式版，固定来源 `a706a22ca0ffc4ef6268a987718b9f870b7c3c4f`。[正式流水线 37273692140](https://github.com/P0me1oo/YZ-Agent/actions/runs/37273692140) 完整 Linux 竞态回归、Mihomo 联调、四组防火墙、安装器、双架构构建、镜像实际版本与 Release 全部通过。

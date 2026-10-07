@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
 )
 
 // StringOrArray is a type that can unmarshal from either a JSON string or an array of strings.
@@ -92,6 +94,7 @@ type MachineBaseConfig struct {
 
 // NodeConfig is the response from GET /api/v1/server/UniProxy/config
 type NodeConfig struct {
+	WireGuard *WireGuardConfig `json:"wireguard,omitempty"`
 	// NodeID is populated in machine-mode WS events for routing.
 	NodeID          int                    `json:"node_id,omitempty"`
 	Protocol        string                 `json:"protocol"`
@@ -102,6 +105,7 @@ type NodeConfig struct {
 	NetworkSettings map[string]interface{} `json:"networkSettings"`
 	BaseConfig      BaseConfig             `json:"base_config"`
 	Routes          []RouteRule            `json:"routes"`
+	SourcePolicy    *sourcepolicy.Policy   `json:"source_policy,omitempty"`
 
 	// Kernel settings (Xboard extension)
 	KernelType       string            `json:"kernel_type,omitempty"`      // "singbox" or "xray"
@@ -359,10 +363,11 @@ type RouteAction struct {
 
 // User represents a user returned by the panel
 type User struct {
-	ID          int    `json:"id"`
-	UUID        string `json:"uuid"`
-	SpeedLimit  int    `json:"speed_limit"`  // Mbps, 0 = unlimited
-	DeviceLimit int    `json:"device_limit"` // max devices, 0 = unlimited
+	WireGuard   *WireGuardPeer `json:"wireguard,omitempty"`
+	ID          int            `json:"id"`
+	UUID        string         `json:"uuid"`
+	SpeedLimit  int            `json:"speed_limit"`  // Mbps, 0 = unlimited
+	DeviceLimit int            `json:"device_limit"` // max devices, 0 = unlimited
 	// ConnLimit 是并发连接数上限，ConnRateLimit 是每秒新建连接数上限，0 都表示不限制。
 	// 面板旧版本不下发这两个字段，缺省解码为 0，等同于保持原有行为。
 	ConnLimit     int `json:"conn_limit"`
@@ -373,6 +378,19 @@ type User struct {
 
 type UsersResponse struct {
 	Users []User `json:"users"`
+}
+
+// 普通 WG 节点下发服务端身份，用户列表只携带客户端公钥。
+type WireGuardConfig struct {
+	PrivateKey string   `json:"private_key"`
+	Address    []string `json:"address"`
+	MTU        int      `json:"mtu"`
+}
+
+type WireGuardPeer struct {
+	PublicKey string   `json:"public_key"`
+	Address   []string `json:"address"`
+	ExpiresAt int64    `json:"expires_at"`
 }
 
 // LimitEvent 是一个上报周期内某个用户触发连接限制的汇总。
