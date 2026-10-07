@@ -1,6 +1,22 @@
 # YZ-Agent 兼容矩阵
 
-## v2.7.1 普通 WireGuard（候选验证中）
+## v2.7.1 普通 WireGuard（已发布）
+
+- 2026-10-07：[Release v2.7.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.7.1) 已发布，固定来源 `68dd499736780dec9c23198050775b3d58ea7cc8`。[正式流水线 37573559871](https://github.com/P0me1oo/YZ-Agent/actions/runs/37573559871) 完整 Linux 竞态检测、独立兼容包、安装器、固定 Mihomo `v1.19.31`、四组原生防火墙、双架构构建和镜像实际版本检查全部通过。
+- 原 WG 八种核心/前置组合全部通过（268.75 秒），多落地与流量归属通过（1.37 秒）；这些 WG 回归经过新增管理包装层。sing-box 全包 582.518 秒；普通 WG 全包 7.022 秒、独立 Mihomo 两核心测试 3.191 秒。没有执行跨机测速，不把回归通过解释为所有环境的速度完全无波动。
+- Release 的 12 个附件已实际下载，SHA256SUMS 的 11 项及 GitHub 附件摘要一致；四个实际程序的 Go 构建信息均为 Go 1.27.1、Linux 对应架构、`CGO_ENABLED=0`、上述完整提交和 `vcs.modified=false`。两个核心仍固定为下方版本；历史 `xboard-node` 附件与对应 `yz-agent` 附件完全一致。
+- `ghcr.io/p0me1oo/yz-agent:v2.7.1`、完整提交标签和 `latest` 均指向 `sha256:1283e7a566caf0c2793191270be87dd738a6c8c953b001a6e134381cb7d3c60e`。amd64 清单为 `sha256:982f664c9da9819198bc644d020b0413a11f8ce6e9d8b34742c58cea41b609c6`，arm64 为 `sha256:1f05a78a3235c6c793110dec1eac9fe57662b0c485805915ab005e01da6b6710`；两个架构的来源、版本及各 5 个镜像层已匿名核验可获取。
+- 回滚基线 `v2.5.0`（来源 `a706a22ca0ffc4ef6268a987718b9f870b7c3c4f`）仍可获取，清单 `sha256:7e7d688c41a522dc5f2ab165dab4d02e17cc1a4a5681c53fa23fcb6c1e945275`。回退前停用新增普通 WG 节点。未连接或更新生产服务器。
+
+| 正式附件 | SHA256 |
+| --- | --- |
+| yz-agent-linux-amd64（与 xboard-node 同架构附件一致） | `a3f82d14d5e719e6af7a663b941d350b3d5aeed621007a613c71244d91453f5a` |
+| yz-agent-linux-arm64（与 xboard-node 同架构附件一致） | `7583cc74e23e036ce0a2f811c05875bd5e22432eb1da9c562541b71af0b6e83b` |
+| xbctl-linux-amd64 | `d873b71acee5d9b0382611513f1a8bd02c82938fba6b8e27804528d1ccc8c700` |
+| xbctl-linux-arm64 | `0185370b9e1651e941930d95769812542317f4d51c2286f44e6c4059691eb5ea` |
+| install.sh | `01948ac91482e83bcd71ec450a513f2bd8778d907770164641b779cfd68222c1` |
+
+### 候选修正记录
 
 - 纳入下方普通 WG 与来源策略功能，配套面板 `1.53.0`、管理端 `0.30.0`。仅修正测试客户端 UDP Bind 的选择，不修改产品转发逻辑、核心 fork 或固定依赖。
 - `v2.7.0` 固定提交 `9ef99c5c123b0fa4db7e47b96cc7c768a1bb1ca4` 的 [Linux 流水线 37571609918](https://github.com/P0me1oo/YZ-Agent/actions/runs/37571609918) 在普通 WG 测试客户端备用 `ClientBind` 内发现数据竞争。该流水线失败，未生成 Release 或更新 latest；保留原标签，不覆盖。
