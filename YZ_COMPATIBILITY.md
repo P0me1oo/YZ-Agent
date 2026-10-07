@@ -1,6 +1,13 @@
 # YZ-Agent 兼容矩阵
 
-## v2.7.0 普通 WireGuard（本地开发，未发布）
+## v2.7.1 普通 WireGuard（候选验证中）
+
+- 纳入下方普通 WG 与来源策略功能，配套面板 `1.53.0`、管理端 `0.30.0`。仅修正测试客户端 UDP Bind 的选择，不修改产品转发逻辑、核心 fork 或固定依赖。
+- `v2.7.0` 固定提交 `9ef99c5c123b0fa4db7e47b96cc7c768a1bb1ca4` 的 [Linux 流水线 37571609918](https://github.com/P0me1oo/YZ-Agent/actions/runs/37571609918) 在普通 WG 测试客户端备用 `ClientBind` 内发现数据竞争。该流水线失败，未生成 Release 或更新 latest；保留原标签，不覆盖。
+- 上述失败流水线中，原 WG 八种中转组合、多落地流量归属及 sing-box 全包均通过，四组原生防火墙检查通过。普通 WG 测试改用标准 UDP Bind 后继续执行完整竞态检查与固定 Mihomo 实连。
+- 修正后 Windows 本地 `go test -mod=readonly -race -count=2 -timeout 4m -tags "with_quic,with_utls,with_wireguard,with_gvisor,with_acme,with_clash_api" ./internal/directwg` 通过，两轮完整普通 WG 专项共 16.572 秒；未关闭竞态或指针检查。
+
+## v2.7.0 普通 WireGuard（开发记录，纳入 v2.7.1）
 
 - 基线 `8bf0b8e29de18838397f936ffc722312d2ad22ed`，保留原未提交的来源策略；配套面板 `1.53.0`、管理端 `0.30.0`。sing-box 固定 `v1.14.0-yz.2`，Xray 固定 `v0.0.0-20260930033643-7c5728ec7d0f`，没有修改核心 fork。
 - `internal/directwg` 承担普通 WG 的身份、用户态收发、真实来源准入和 TCP/UDP 转发；所选核心负责路由与出站，原 WG 中转仍用已有路径。计费是有效负载字节，IP 额度复用既有规则。运行限制与版本条件见 [普通 WG](docs/wireguard-direct.md)。
@@ -11,7 +18,7 @@
 - Linux amd64/arm64 本地构建通过，已核对完整功能标签、固定依赖、架构、基线来源及 `vcs.modified=true`。临时产物仅用于验证，不作为正式发布附件；正式附件由固定提交的流水线生成。
 - 用户已授权在确认原中转无回归后发布；发布前须通过 Linux 完整测试、固定 Mihomo、原 WG 多组合与流量归属验证。没有执行真实服务器操作。
 
-## v2.6.0 大陆来源拦截（开发记录，纳入 v2.7.0）
+## v2.6.0 大陆来源拦截（开发记录，纳入 v2.7.1）
 
 - 修改基线为 `8bf0b8e29de18838397f936ffc722312d2ad22ed`，配套面板 `1.52.0`、管理端 `0.29.0`。实际仓库为 `P0me1oo/YZ-Agent`，本地目录沿用 `YZboard-Node`；两个核心 fork 与固定依赖不变。
 - 普通代理入口、中转入口和非 WG 落地独立限制大陆来源，例外不绕过认证、线路权限与后续路由。WireGuard 暂不接入，不修改系统防火墙。网段缓存、更新失败和恢复规则见 [来源拦截](docs/source-policy.md)。

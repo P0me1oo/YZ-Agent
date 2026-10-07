@@ -21,7 +21,9 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
+	"github.com/sagernet/sing-box/common/dialer"
 	wg "github.com/sagernet/sing-box/transport/wireguard"
+	"github.com/sagernet/sing/common/control"
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	"golang.org/x/time/rate"
@@ -37,6 +39,13 @@ func keys(t *testing.T) (string, string) {
 }
 
 type localDialer struct{}
+
+var _ dialer.UDPListener = localDialer{}
+
+// 与普通直连客户端保持一致，使用标准 UDP Bind。
+func (localDialer) UDPListenerControl() (control.Func, bool) {
+	return nil, false
+}
 
 func (localDialer) DialContext(ctx context.Context, network string, d M.Socksaddr) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, network, d.String())
