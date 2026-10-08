@@ -1,16 +1,29 @@
 # YZ-Agent 兼容矩阵
 
-## v2.9.0 设备同步与运行开销优化
+## v2.9.0 设备同步与运行开销优化（已发布）
 
 - 修改基线 `dev` / `f38ccd029c0972e4448b9242504ba1faa79ed9a5`，实际远程 `P0me1oo/YZ-Agent`。配套面板 `1.57.0`、管理端 `0.32.0`。仅修改 Node 与面板，Komari 主控作为固定源码设计参考，未修改两个核心 fork。
 - 设备会话、申请和同步复用已有长连接；已确认的稳定来源轻量续期，变化及实际关闭仍完整同步。保留按请求、节点、操作及业务序号匹配，断线补偿、旧面板与回滚兼容。系统采样每进程共享一秒结果，心跳合并和控制优先，队列与等待确认均有限额。见 [运行开销优化](docs/runtime-optimization.md)。
 - sing-box 仍为 `v1.14.0-yz.2`，Xray 仍为 `v0.0.0-20260930033643-7c5728ec7d0f`；`go.mod`、`go.sum` 与基线规范化比较一致，未留下本地替换。
 - Windows / Go `1.27.0` / LLVM MinGW 下，最终设备通信、来源管理、共享采样竞态专项通过，覆盖确认丢失后的相同内容补发、格式错误响应隔离、按节点及操作匹配、旧能力与回滚、基线补发、真实关闭、会话重建、100 个并发调用共享一次采样、队列字节限制及取消恢复。使用与正式构建一致的完整功能标签。
 - Windows 全量竞态命令 `go test -mod=readonly -json -race -count=1 -timeout 20m -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api" ./...` 中，25 个有测试的包完整通过，包括面板通信、机器调度、服务、Xray 和普通 WireGuard；sing-box 的配置、来源关闭、并发准入等测试也通过，但该包随后在 Hysteria2 混淆组合触发 `checkptr: converted pointer straddles multiple allocations`，因此整轮结果为失败。
-- 失败位置为未修改的 `github.com/sagernet/sing@v0.9.0-beta.4/common/bufio/vectorised_windows.go:83`。将上述完整 Node 基线导出到独立目录后，以同样功能标签和竞态检查单独运行 `TestHysteria2ECHRelayRuntime/xray/xray/salamander=true`，复现相同错误。没有关闭指针检查、修改依赖或删改测试来消除该失败。本机没有已安装的 WSL 发行版，Linux 运行验证仍需正式检查环境完成。
+- 失败位置为未修改的 `github.com/sagernet/sing@v0.9.0-beta.4/common/bufio/vectorised_windows.go:83`。将上述完整 Node 基线导出到独立目录后，以同样功能标签和竞态检查单独运行 `TestHysteria2ECHRelayRuntime/xray/xray/salamander=true`，复现相同错误。没有关闭指针检查、修改依赖或删改测试来消除该失败。本机没有已安装的 WSL 发行版，Linux 运行验证由下方正式流程完成。
 - 补充执行 sing-box 包内两个核心的重载、恢复、路由回退、关闭旧监听和流量累计生命周期竞态检查，全部通过（15.627 秒），没有关闭指针检查或调整核心依赖。
 - Linux amd64、arm64 均使用完整功能标签交叉构建成功，实际元数据为 Go `1.27.0`、`CGO_ENABLED=0`、对应 Linux 架构、上述固定核心依赖和开发基线提交，`vcs.modified=true`。这是未提交源码的本地验证产物，不用于正式发布；amd64 SHA256 为 `3bf9186a033edfc3a5d679d3aeb1e4af7d97af4e91cfdafed34af19041b66bc5`，arm64 为 `ca8df7a7c95444b9e9cb0ddf0b37a84c7539d6811d21ce69ef84e2b497b7964a`。
-- 本节记录发布前验证；正式流程要求 Linux 完整竞态、原生防火墙、双架构构建与镜像实际版本检查通过，固定来源与产物核验完成后补记。服务器更新由用户执行，先更新面板再更新 Node。
+- 2026-10-08：[Release v2.9.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.9.0) 已发布并核对为最新正式版，固定来源 `3b63709439d1923ef1c48c6e767a55137c1c0cda`。[正式流水线 37794712295](https://github.com/P0me1oo/YZ-Agent/actions/runs/37794712295) 的 Linux 完整竞态、独立兼容包、固定 Mihomo 客户端联调、安装器、四组原生防火墙、双架构构建、镜像实际版本检查及 Release 全部通过。
+- sing-box 完整包通过（578.267 秒），包括上述 Windows 失败用例在 Linux 的全部八种核心和混淆组合；Xray、来源管理、面板通信、采样和普通 WireGuard 回归通过。固定 Mihomo 的 WG 中转测试通过（6.24 秒），普通 WG 两种核心测试通过（2.15 秒）。本次没有进行跨机生产联调或测量生产 CPU 降幅。
+- 12 个 Release 附件已实际下载，全部匹配 GitHub 大小和 SHA256，`SHA256SUMS` 的 11 项一致；同架构 `xboard-node` 兼容附件与 `yz-agent` 字节相同，安装器与固定提交一致。四个实际程序与构建信息附件一致，均为 Go `1.27.1`、Linux 对应架构、`CGO_ENABLED=0`、上述完整提交和 `vcs.modified=false`；两个核心固定依赖正确。
+- `ghcr.io/p0me1oo/yz-agent:v2.9.0`、完整来源提交标签和 `latest` 均指向 `sha256:d143e1ce8ecb8574aa9bf91b35aab49e567db8d452b06d28a6a3fd028a22b3f1`。amd64 清单为 `sha256:9d5d76b2238f0ee5494a5d0fbc41d33d7c5be96122ed212ebb9816899d51b5fa`，arm64 为 `sha256:06a0fdd9fb7add9f0e2888aa86a2686c589232e46fa2fcc1bb52c5c0d43fac73`；两个架构的 OCI 来源、版本、配置摘要和各 5 个镜像层均已匿名核验可获取。正式流程实际运行两个架构镜像，均报告 `v2.9.0` 和上述完整提交。
+- 配套面板 [v1.57.0](https://github.com/P0me1oo/YZboard/releases/tag/v1.57.0) 来源 `ae7ab77a4a5f2566d59554b315afc2ef172c89ee`；回滚参考为 Node `v2.8.0`，来源 `7f9e8b429935780e23574fbd638159214fbb20f4`，清单 `sha256:fa77f810dd4c90b548e761937549de33f7c57251745046d8a367c5d2bb7d84fb`，双架构和全部镜像层已再次核验可获取。服务器更新由用户执行，先更新面板再更新全部相关 Node。
+
+| 正式附件 | SHA256 |
+| --- | --- |
+| yz-agent-linux-amd64（与 xboard-node 同架构附件一致） | `18ddddd02474a5de2455578e4a079f3d49b0158dee739ebb606ee58bf6fc8627` |
+| yz-agent-linux-arm64（与 xboard-node 同架构附件一致） | `953f858a78c36d22768337bf0329d429a62cd26ac6835979023acc5e66051d8f` |
+| xbctl-linux-amd64 | `4a267f9d87bf7500fa49d1f3daa7823fa9f5180cbce5bccdbb54e4503e8bd091` |
+| xbctl-linux-arm64 | `118a51c95ab1fefad96b325b799b40e39688e4810ce592f31bc0924b0cf4d960` |
+| install.sh | `01948ac91482e83bcd71ec450a513f2bd8778d907770164641b779cfd68222c1` |
+| SHA256SUMS | `6db121ee76b83d941934abf882eabf681c1c3df42e2d61ed19ac9a4d3c6fff22` |
 
 ## v2.8.0 设备来源替换（已发布）
 
