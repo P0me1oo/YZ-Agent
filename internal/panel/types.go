@@ -34,11 +34,13 @@ type HandshakeResponse struct {
 }
 
 type RealtimeCapability struct {
-	Version          int  `json:"version"`
-	StateInterval    int  `json:"state_interval"`
-	FallbackInterval int  `json:"fallback_interval"`
-	TrafficAck       bool `json:"traffic_ack"`
-	DeviceHandover   int  `json:"device_handover"`
+	Version               int  `json:"version"`
+	StateInterval         int  `json:"state_interval"`
+	FallbackInterval      int  `json:"fallback_interval"`
+	TrafficAck            bool `json:"traffic_ack"`
+	DeviceHandover        int  `json:"device_handover"`
+	DeviceHandoverWS      int  `json:"device_handover_ws"`
+	DeviceHandoverRenewal int  `json:"device_handover_renewal"`
 }
 
 func (h *HandshakeResponse) UnmarshalJSON(data []byte) error {

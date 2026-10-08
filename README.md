@@ -1,5 +1,7 @@
 # YZ-Agent
 
+版本 `v2.9.0` 配套面板 `1.57.0`：设备协调复用长连接、稳定来源轻量续期、系统采样共享，并为发送积压设置限额。实现、验证与发布记录见 [运行开销优化](docs/runtime-optimization.md) 与 [兼容矩阵](YZ_COMPATIBILITY.md)。
+
 正式版本 [`v2.8.0`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.8.0) 已发布，配套面板 `1.56.0`：设备名额满时替换最久没有发起新连接的旧来源，实际关闭后再放行新 IP；旧来源冷却 60 秒，有空位可提前恢复。两个核心与普通 WireGuard 共用跨节点协调，先更新面板，再更新全部相关 Node。Linux 完整竞态回归、双架构附件、镜像和 `latest` 已核验，规则与固定来源见 [设备计数](docs/device-counting.md) 和 [兼容矩阵](YZ_COMPATIBILITY.md)。
 
 正式版本 [`v2.7.1`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.7.1) 新增普通 WireGuard 接入，配套面板 `1.53.0`、管理端 `0.30.0`。两种核心均支持用户权限、流量、限速、到期停用、按公网 IP 计算的设备限制和大陆来源拦截。保留原 WG 中转，包含原 `v2.6.0` 的来源策略改动；固定核心依赖不变。双架构附件、镜像和 latest 已核验，详见 [兼容矩阵](YZ_COMPATIBILITY.md)、[普通 WG](docs/wireguard-direct.md) 与 [来源拦截](docs/source-policy.md)。

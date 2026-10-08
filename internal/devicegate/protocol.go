@@ -6,9 +6,10 @@ import (
 )
 
 var (
-	ErrSessionLost = errors.New("设备来源会话已失效")
-	ErrNotReady    = errors.New("设备来源协调尚未就绪")
-	ErrRevoked     = errors.New("设备来源已被替换")
+	ErrSessionLost      = errors.New("设备来源会话已失效")
+	ErrSnapshotRequired = errors.New("设备来源需要完整快照")
+	ErrNotReady         = errors.New("设备来源协调尚未就绪")
+	ErrRevoked          = errors.New("设备来源已被替换")
 )
 
 type BeginReply struct {
@@ -41,11 +42,13 @@ type Source struct {
 }
 
 type Snapshot struct {
-	Run      string       `json:"run"`
-	Sequence uint64       `json:"sequence"`
-	Pending  []uint64     `json:"pending"`
-	Sources  []Source     `json:"sources"`
-	Retired  []Revocation `json:"retired"`
+	Unchanged    bool         `json:"unchanged,omitempty"`
+	BaseSequence uint64       `json:"base_sequence,omitempty"`
+	Run          string       `json:"run"`
+	Sequence     uint64       `json:"sequence"`
+	Pending      []uint64     `json:"pending"`
+	Sources      []Source     `json:"sources"`
+	Retired      []Revocation `json:"retired"`
 }
 
 type SyncReply struct {
@@ -65,6 +68,11 @@ type Remote interface {
 	BeginDeviceSession(context.Context, string) (BeginReply, error)
 	AdmitDeviceSource(context.Context, AdmissionRequest) (AdmissionReply, error)
 	SyncDeviceSession(context.Context, Snapshot) (SyncReply, error)
+}
+
+// RenewalRemote 是可选能力，旧主控和原有协调实现继续使用完整快照。
+type RenewalRemote interface {
+	DeviceRenewalSupported() bool
 }
 
 type DeniedError struct {

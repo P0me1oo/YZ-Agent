@@ -52,6 +52,8 @@ type WSStatusChange struct {
 
 // wsMessage is the JSON envelope for all WS messages.
 type wsMessage struct {
+	encoded   []byte
+	requestID string
 	Event     string          `json:"event"`
 	Data      json.RawMessage `json:"data,omitempty"`
 	Timestamp int64           `json:"timestamp,omitempty"`
@@ -172,7 +174,9 @@ type WSClient struct {
 	rpcSeq     atomic.Uint64
 
 	// 写队列和确认等待表由 mu 保护，连接退出时一起移除。
-	writeCh chan wsMessage
+	writeCh     chan wsMessage
+	controlCh   chan wsMessage
+	queuedBytes int
 }
 
 // NewWSClient creates a new WebSocket client.
@@ -303,8 +307,12 @@ func (w *WSClient) connect(ctx context.Context) error {
 	}
 
 	writeCh := make(chan wsMessage, 64)
+	controlCh := make(chan wsMessage, 16)
+	pongCh := make(chan struct{}, 1)
 	w.mu.Lock()
 	w.writeCh = writeCh
+	w.controlCh = controlCh
+	w.queuedBytes = 0
 	w.mu.Unlock()
 	if !w.cfg.Realtime {
 		w.generation.Add(1)
@@ -326,10 +334,9 @@ func (w *WSClient) connect(ctx context.Context) error {
 			w.handleMessage(msg)
 			if msg.Event == "ping" {
 				select {
-				case writeCh <- wsMessage{Event: "pong"}:
+				case pongCh <- struct{}{}:
 				default:
-					errCh <- fmt.Errorf("websocket heartbeat queue is full")
-					return
+					// 已排队的心跳足以确认存活，重复 ping 合并，读循环继续接收确认。
 				}
 			}
 		}
@@ -339,6 +346,8 @@ func (w *WSClient) connect(ctx context.Context) error {
 		<-done
 		w.mu.Lock()
 		w.writeCh = nil
+		w.controlCh = nil
+		w.queuedBytes = 0
 		for id, waiter := range w.pending {
 			select {
 			case waiter.result <- wsReply{err: ErrWSUnavailable}:
@@ -353,14 +362,40 @@ func (w *WSClient) connect(ctx context.Context) error {
 	defer reportTicker.Stop()
 	write := func(msg wsMessage) error {
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if msg.encoded != nil {
+			return conn.WriteMessage(websocket.TextMessage, msg.encoded)
+		}
 		return conn.WriteJSON(msg)
 	}
+	writeQueued := func(msg wsMessage) error {
+		if !w.beginWrite(msg) {
+			return nil
+		}
+		return write(msg)
+	}
 	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if msg, ok := priorityMessage(pongCh, controlCh); ok {
+			if err := writeQueued(msg); err != nil {
+				return fmt.Errorf("write: %w", err)
+			}
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case err := <-errCh:
 			return fmt.Errorf("read: %w", err)
+		case <-pongCh:
+			if err := write(wsMessage{Event: "pong"}); err != nil {
+				return fmt.Errorf("write: %w", err)
+			}
+		case msg := <-controlCh:
+			if err := writeQueued(msg); err != nil {
+				return fmt.Errorf("write: %w", err)
+			}
 		case <-reportTicker.C:
 			if !w.cfg.Realtime && w.onPing != nil {
 				if stats := w.onPing(); stats != nil {
@@ -374,7 +409,7 @@ func (w *WSClient) connect(ctx context.Context) error {
 				}
 			}
 		case msg := <-writeCh:
-			if err := write(msg); err != nil {
+			if err := writeQueued(msg); err != nil {
 				return fmt.Errorf("write: %w", err)
 			}
 		}
@@ -398,6 +433,8 @@ func (w *WSClient) handleMessage(msg wsMessage) {
 		}
 
 	case "traffic.ack", "traffic.error", "state.ack", "state.error":
+		w.receiveReceipt(msg)
+	case "device.begin.ack", "device.begin.error", "device.admit.ack", "device.admit.error", "device.sync.ack", "device.sync.error":
 		w.receiveReceipt(msg)
 
 	case WSEventSyncSnapshot:

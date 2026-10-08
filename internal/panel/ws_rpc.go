@@ -24,6 +24,7 @@ type RPCReceipt struct {
 	Accepted  bool             `json:"accepted"`
 	Code      int              `json:"code"`
 	Telemetry *TelemetryDemand `json:"telemetry,omitempty"`
+	Result    json.RawMessage  `json:"result,omitempty"`
 }
 
 type RemoteError struct{ Code int }
@@ -54,6 +55,10 @@ func (w *WSClient) Request(ctx context.Context, event string, nodeID int, data m
 	if err != nil {
 		return RPCReceipt{}, err
 	}
+	msg, err := prepareWSMessage(wsMessage{Event: event, Data: body, requestID: requestID})
+	if err != nil {
+		return RPCReceipt{}, err
+	}
 	waiter := wsPending{nodeID: nodeID, event: event, result: make(chan wsReply, 1)}
 	w.mu.Lock()
 	if !w.connected.Load() || w.writeCh == nil {
@@ -63,15 +68,17 @@ func (w *WSClient) Request(ctx context.Context, event string, nodeID int, data m
 	if w.pending == nil {
 		w.pending = make(map[string]wsPending)
 	}
-	w.pending[requestID] = waiter
-	select {
-	case w.writeCh <- wsMessage{Event: event, Data: body}:
+	if len(w.pending) >= wsPendingLimit {
 		w.mu.Unlock()
-	default:
+		return RPCReceipt{}, fmt.Errorf("websocket pending request limit reached")
+	}
+	w.pending[requestID] = waiter
+	if !w.enqueueLocked(msg) {
 		delete(w.pending, requestID)
 		w.mu.Unlock()
 		return RPCReceipt{}, fmt.Errorf("websocket write queue is full")
 	}
+	w.mu.Unlock()
 	defer func() {
 		w.mu.Lock()
 		delete(w.pending, requestID)
@@ -98,6 +105,9 @@ func (w *WSClient) receiveReceipt(msg wsMessage) {
 	}
 	valid := (waiter.event == "report.traffic" && (msg.Event == "traffic.ack" || msg.Event == "traffic.error")) ||
 		((waiter.event == "runtime.state" || waiter.event == "machine.state") && (msg.Event == "state.ack" || msg.Event == "state.error"))
+	if waiter.event == "device.begin" || waiter.event == "device.admit" || waiter.event == "device.sync" {
+		valid = msg.Event == waiter.event+".ack" || msg.Event == waiter.event+".error"
+	}
 	if !valid {
 		return
 	}
@@ -110,18 +120,4 @@ func (w *WSClient) receiveReceipt(msg wsMessage) {
 	default:
 	}
 	delete(w.pending, receipt.RequestID)
-}
-
-func (w *WSClient) enqueue(msg wsMessage) bool {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	if !w.connected.Load() || w.writeCh == nil {
-		return false
-	}
-	select {
-	case w.writeCh <- msg:
-		return true
-	default:
-		return false
-	}
 }

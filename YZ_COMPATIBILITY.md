@@ -1,5 +1,17 @@
 # YZ-Agent 兼容矩阵
 
+## v2.9.0 设备同步与运行开销优化
+
+- 修改基线 `dev` / `f38ccd029c0972e4448b9242504ba1faa79ed9a5`，实际远程 `P0me1oo/YZ-Agent`。配套面板 `1.57.0`、管理端 `0.32.0`。仅修改 Node 与面板，Komari 主控作为固定源码设计参考，未修改两个核心 fork。
+- 设备会话、申请和同步复用已有长连接；已确认的稳定来源轻量续期，变化及实际关闭仍完整同步。保留按请求、节点、操作及业务序号匹配，断线补偿、旧面板与回滚兼容。系统采样每进程共享一秒结果，心跳合并和控制优先，队列与等待确认均有限额。见 [运行开销优化](docs/runtime-optimization.md)。
+- sing-box 仍为 `v1.14.0-yz.2`，Xray 仍为 `v0.0.0-20260930033643-7c5728ec7d0f`；`go.mod`、`go.sum` 与基线规范化比较一致，未留下本地替换。
+- Windows / Go `1.27.0` / LLVM MinGW 下，最终设备通信、来源管理、共享采样竞态专项通过，覆盖确认丢失后的相同内容补发、格式错误响应隔离、按节点及操作匹配、旧能力与回滚、基线补发、真实关闭、会话重建、100 个并发调用共享一次采样、队列字节限制及取消恢复。使用与正式构建一致的完整功能标签。
+- Windows 全量竞态命令 `go test -mod=readonly -json -race -count=1 -timeout 20m -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api" ./...` 中，25 个有测试的包完整通过，包括面板通信、机器调度、服务、Xray 和普通 WireGuard；sing-box 的配置、来源关闭、并发准入等测试也通过，但该包随后在 Hysteria2 混淆组合触发 `checkptr: converted pointer straddles multiple allocations`，因此整轮结果为失败。
+- 失败位置为未修改的 `github.com/sagernet/sing@v0.9.0-beta.4/common/bufio/vectorised_windows.go:83`。将上述完整 Node 基线导出到独立目录后，以同样功能标签和竞态检查单独运行 `TestHysteria2ECHRelayRuntime/xray/xray/salamander=true`，复现相同错误。没有关闭指针检查、修改依赖或删改测试来消除该失败。本机没有已安装的 WSL 发行版，Linux 运行验证仍需正式检查环境完成。
+- 补充执行 sing-box 包内两个核心的重载、恢复、路由回退、关闭旧监听和流量累计生命周期竞态检查，全部通过（15.627 秒），没有关闭指针检查或调整核心依赖。
+- Linux amd64、arm64 均使用完整功能标签交叉构建成功，实际元数据为 Go `1.27.0`、`CGO_ENABLED=0`、对应 Linux 架构、上述固定核心依赖和开发基线提交，`vcs.modified=true`。这是未提交源码的本地验证产物，不用于正式发布；amd64 SHA256 为 `3bf9186a033edfc3a5d679d3aeb1e4af7d97af4e91cfdafed34af19041b66bc5`，arm64 为 `ca8df7a7c95444b9e9cb0ddf0b37a84c7539d6811d21ce69ef84e2b497b7964a`。
+- 本节记录发布前验证；正式流程要求 Linux 完整竞态、原生防火墙、双架构构建与镜像实际版本检查通过，固定来源与产物核验完成后补记。服务器更新由用户执行，先更新面板再更新 Node。
+
 ## v2.8.0 设备来源替换（已发布）
 
 - 基线 `dev` / `53904f12192cba7ec9209f5eb94f08a406a43061`，实际远程 `P0me1oo/YZ-Agent`，本地目录保留 `YZboard-Node`。配套面板 `1.56.0`、管理端 `0.32.0`。

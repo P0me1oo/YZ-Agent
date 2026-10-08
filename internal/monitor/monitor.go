@@ -117,8 +117,12 @@ func collectNetSpeed() (inSpeed, outSpeed float64) {
 	return inSpeed, outSpeed
 }
 
-// Collect gathers current system metrics
+// Collect 返回全进程共用的最近一秒系统采样；用户连接和计费仍由各节点独立统计。
 func Collect() Status {
+	return systemSampler.sample()
+}
+
+func collect() Status {
 	var s Status
 
 	s.Uptime = uint64(time.Since(startTime).Seconds())

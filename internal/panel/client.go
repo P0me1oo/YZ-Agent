@@ -42,10 +42,12 @@ type Client struct {
 	userETag   string
 	etagMu     sync.Mutex
 
-	apiSuccess     atomic.Uint64
-	apiFailure     atomic.Uint64
-	realtime       realtimeClient
-	deviceHandover atomic.Bool
+	apiSuccess            atomic.Uint64
+	apiFailure            atomic.Uint64
+	realtime              realtimeClient
+	deviceHandover        atomic.Bool
+	deviceHandoverWS      atomic.Bool
+	deviceHandoverRenewal atomic.Bool
 }
 
 // NewClient creates a new panel API client.
@@ -129,6 +131,8 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 	}
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
 	c.deviceHandover.Store(hs.Realtime.DeviceHandover == 1)
+	c.deviceHandoverWS.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverWS == 1)
+	c.deviceHandoverRenewal.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverRenewal == 1)
 	return &hs, nil
 }
 

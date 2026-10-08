@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -41,24 +42,26 @@ type retiredSource struct {
 
 // Manager 持有实际连接的来源引用，只有关闭回调释放后才向面板确认来源离线。
 type Manager struct {
-	remote  Remote
-	enabled atomic.Bool
-	mu      sync.Mutex
-	syncMu  sync.Mutex
-	run     string
-	ready   bool
-	closing bool
-	seq     uint64
-	synced  uint64
-	ctx     context.Context
-	cancel  context.CancelFunc
-	sources map[sourceKey]*sourceState
-	flights map[sourceKey]*flight
-	revoked map[string]time.Time
-	retired map[string]retiredSource
-	loopWG  sync.WaitGroup
-	callWG  sync.WaitGroup
-	onError func(error)
+	remote       Remote
+	enabled      atomic.Bool
+	mu           sync.Mutex
+	syncMu       sync.Mutex
+	run          string
+	ready        bool
+	closing      bool
+	seq          uint64
+	synced       uint64
+	confirmed    *Snapshot // 由 syncMu 保护，只保存已经确认的来源内容。
+	baseSequence uint64
+	ctx          context.Context
+	cancel       context.CancelFunc
+	sources      map[sourceKey]*sourceState
+	flights      map[sourceKey]*flight
+	revoked      map[string]time.Time
+	retired      map[string]retiredSource
+	loopWG       sync.WaitGroup
+	callWG       sync.WaitGroup
+	onError      func(error)
 }
 
 func New(remote Remote, onError func(error)) *Manager {
@@ -289,6 +292,7 @@ func (m *Manager) Snapshot() Snapshot {
 	}
 	sort.Slice(snapshot.Pending, func(i, j int) bool { return snapshot.Pending[i] < snapshot.Pending[j] })
 	sort.Slice(snapshot.Sources, func(i, j int) bool { return snapshot.Sources[i].Lease < snapshot.Sources[j].Lease })
+	sort.Slice(snapshot.Retired, func(i, j int) bool { return snapshot.Retired[i].Lease < snapshot.Retired[j].Lease })
 	return snapshot
 }
 
@@ -309,12 +313,22 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 		return nil
 	}
 	snapshot := m.Snapshot()
-	reply, err := m.remote.SyncDeviceSession(ctx, snapshot)
+	wire := snapshot
+	if capability, ok := m.remote.(RenewalRemote); ok && capability.DeviceRenewalSupported() && m.baseSequence > 0 && sameSnapshot(m.confirmed, snapshot) {
+		wire = Snapshot{Run: snapshot.Run, Sequence: snapshot.Sequence, Unchanged: true, BaseSequence: m.baseSequence}
+	}
+	reply, err := m.remote.SyncDeviceSession(ctx, wire)
+	if wire.Unchanged && errors.Is(err, ErrSnapshotRequired) {
+		wire = snapshot
+		reply, err = m.remote.SyncDeviceSession(ctx, wire)
+	}
 	if errors.Is(err, ErrSessionLost) {
 		m.mu.Lock()
 		m.ready = false
 		m.run = ""
 		m.synced = 0
+		m.confirmed = nil
+		m.baseSequence = 0
 		m.mu.Unlock()
 		m.closeAll()
 	}
@@ -323,6 +337,10 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	}
 	if reply.Run != snapshot.Run || reply.Sequence != snapshot.Sequence {
 		return fmt.Errorf("设备来源快照未被确认")
+	}
+	m.confirmed = &snapshot
+	if !wire.Unchanged {
+		m.baseSequence = snapshot.Sequence
 	}
 	m.mu.Lock()
 	m.synced = snapshot.Sequence
@@ -334,6 +352,15 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	m.mu.Unlock()
 	m.ApplyRevocations(reply.Revoked)
 	return nil
+}
+
+func sameSnapshot(previous *Snapshot, current Snapshot) bool {
+	return previous != nil && previous.Run == current.Run && slices.Equal(previous.Pending, current.Pending) &&
+		slices.Equal(previous.Retired, current.Retired) && slices.EqualFunc(previous.Sources, current.Sources, func(a, b Source) bool {
+		// 来源年龄自然增长不算新连接；新连接序号必须参与比较，保持替换顺序。
+		a.AgeMS, b.AgeMS = 0, 0
+		return a == b
+	})
 }
 
 func (m *Manager) ApplyRevocations(items []Revocation) {
