@@ -1,12 +1,24 @@
 # YZ-Agent 兼容矩阵
 
-## v2.8.0 设备来源替换（待发布）
+## v2.8.0 设备来源替换（已发布）
 
 - 基线 `dev` / `53904f12192cba7ec9209f5eb94f08a406a43061`，实际远程 `P0me1oo/YZ-Agent`，本地目录保留 `YZboard-Node`。配套面板 `1.56.0`、管理端 `0.32.0`。
 - 按账号协调跨节点来源，满额时替换最久没有新建连接的旧来源；实际连接全部关闭后归还名额，旧来源冷却 60 秒且允许空位提前恢复。两个核心及普通 WireGuard 的连接关闭、迟到请求和重载路径共用来源管理。
 - sing-box 固定 `v1.14.0-yz.2`，Xray 固定 `v0.0.0-20260930033643-7c5728ec7d0f`。没有修改核心 fork、固定依赖、原 WG 中转协议或安装器；具体规则见 [设备计数](docs/device-counting.md)。
 - Windows、Go 1.27.0、LLVM MinGW 和完整功能标签下，来源管理、面板通信、Xray、sing-box、普通 WireGuard 的换网竞态专项通过，覆盖真实 TCP/UDP 关闭、账号隔离、迟到授权、会话恢复和关闭确认。新增 Xray 关闭顺序测试在修正前两条路径均失败；修正后整个 Xray 包竞态回归通过（10.994 秒），并覆盖调度失败后关闭底层连接。
-- 正式 Linux 完整竞态回归、构建和发布核验由固定标签的工作流继续完成；本地结果不等同正式 Linux 或跨机测试。发布后补充固定来源、构建信息、校验值及镜像摘要。
+- 2026-10-08：[Release v2.8.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.8.0) 已发布并核对为最新正式版，固定来源 `7f9e8b429935780e23574fbd638159214fbb20f4`。[正式流水线 37751274187](https://github.com/P0me1oo/YZ-Agent/actions/runs/37751274187) 的 Linux 完整竞态检查、独立兼容包、固定 Mihomo 联调、安装器、四组原生防火墙、双架构构建、镜像实际版本检查和 Release 全部通过。
+- 新增 Xray 真实关闭顺序、调度失败清理、sing-box TCP/UDP 关闭、普通 WG 来源切换与账号隔离检查均通过。原 WG 八种核心/前置组合通过（271.11 秒），多落地及流量归属通过（1.33 秒）；sing-box 全包 583.216 秒，普通 WG 全包 6.907 秒、独立 Mihomo 两核心测试 3.178 秒。本次未进行跨机或真实手机切网测试。
+- Release 的 12 个附件已实际下载，全部匹配 GitHub 大小与 SHA256，`SHA256SUMS` 的 11 项一致；同架构历史 `xboard-node` 附件与 `yz-agent` 字节一致。四个实际程序的构建信息与附件记录一致，均为 Go 1.27.1、Linux 对应架构、`CGO_ENABLED=0`、上述完整提交和 `vcs.modified=false`；两个核心的固定依赖正确。
+- `ghcr.io/p0me1oo/yz-agent:v2.8.0`、完整来源提交标签和 `latest` 均指向 `sha256:fa77f810dd4c90b548e761937549de33f7c57251745046d8a367c5d2bb7d84fb`。amd64 清单为 `sha256:2edd6ded34e253383a8d494ba2aaff90fe5efb9c4bb3954ebd085a35feba0fa1`，arm64 为 `sha256:efb67d002e8b4a46ad036d12260866dfc70d65e8854a800992aeb00c2e853a67`；两个架构的 OCI 来源、版本、配置摘要及各 5 个镜像层已匿名核验可获取。
+- 回滚基线 `v2.7.1`，固定来源 `68dd499736780dec9c23198050775b3d58ea7cc8`，镜像清单 `sha256:1283e7a566caf0c2793191270be87dd738a6c8c953b001a6e134381cb7d3c60e`，两个架构及镜像层已再次核验可获取。先更新面板 `1.56.0`，再更新全部相关 Node；服务器更新由用户执行。
+
+| 正式附件 | SHA256 |
+| --- | --- |
+| yz-agent-linux-amd64（与 xboard-node 同架构附件一致） | `bce2f5fcb7357bd07314091dcc73842b410b7d124dc4a9324e8e2b351b99b391` |
+| yz-agent-linux-arm64（与 xboard-node 同架构附件一致） | `039c897d76ab91b33aad100aee3ee0cb20b113522c117b52335c03de95a6dda0` |
+| xbctl-linux-amd64 | `c45d46a6a8c606083ff6486110a3f89e929292ca8c23674b66e62ef7515844ea` |
+| xbctl-linux-arm64 | `6b73e74078084c66fbf022fb6558e69c327b79701f2b34574b28b32c15f8be4d` |
+| install.sh | `01948ac91482e83bcd71ec450a513f2bd8778d907770164641b779cfd68222c1` |
 
 ## v2.7.1 普通 WireGuard（已发布）
 
