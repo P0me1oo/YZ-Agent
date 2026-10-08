@@ -18,6 +18,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -62,6 +63,7 @@ type SingBox struct {
 
 	// connLimiter 做连接数和新建速率准入，同样转发给每个新建的 ConnTracker。
 	connLimiter      model.ConnLimiter
+	deviceGate       *devicegate.Manager
 	deviceFilter     *deviceip.Filter
 	ownsDeviceFilter bool
 }
@@ -160,6 +162,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 
 	// 在开放监听前注册统计器，首个连接也必须纳入同一份用户统计。
 	tracker := NewConnTracker(0)
+	tracker.deviceGate.Store(s.deviceGate)
 	tracker.deviceFilter = s.deviceFilter
 	tracker.traffic = s.traffic
 	if previous := s.connTracker; previous != nil {
@@ -370,6 +373,15 @@ func (s *SingBox) SetDeviceLimitFunc(fn func(uuid string) (int, bool)) {
 	s.deviceLimitFunc = fn
 	if s.connTracker != nil {
 		s.connTracker.SetDeviceLimitFunc(fn)
+	}
+}
+
+func (s *SingBox) SetDeviceGate(gate *devicegate.Manager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deviceGate = gate
+	if s.connTracker != nil {
+		s.connTracker.deviceGate.Store(gate)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"golang.org/x/time/rate"
 )
@@ -111,6 +112,11 @@ type Kernel interface {
 // 套餐限速变化后调用，已建立的连接立即按新设置执行。
 type SpeedLimitRefresher interface {
 	RefreshSpeedLimits()
+}
+
+// DeviceGateConsumer 把实际连接的准入和关闭交给面板协调器。
+type DeviceGateConsumer interface {
+	SetDeviceGate(*devicegate.Manager)
 }
 
 // StableSpeedLimiterConsumer 由在连接建立时固定持有限速器对象的内核实现。

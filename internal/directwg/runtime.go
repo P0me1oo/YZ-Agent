@@ -209,7 +209,7 @@ func (r *Runtime) NewDNSPacket([]byte, M.Socksaddr, M.Socksaddr, N.PacketWriter)
 
 func (r *Runtime) NewConnectionEx(_ context.Context, c net.Conn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
 	id, public := r.state.userForAddress(source.Addr)
-	owner, release, ok := r.state.track(id, c)
+	owner, release, ok := r.state.track(id, c, public)
 	if !ok {
 		c.Close()
 		if onClose != nil {
@@ -233,7 +233,7 @@ func (r *Runtime) NewConnectionEx(_ context.Context, c net.Conn, source, destina
 }
 func (r *Runtime) NewPacketConnectionEx(_ context.Context, c N.PacketConn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
 	id, public := r.state.userForAddress(source.Addr)
-	owner, release, ok := r.state.track(id, c)
+	owner, release, ok := r.state.track(id, c, public)
 	if !ok {
 		c.Close()
 		if onClose != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/transport"
 
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -83,6 +84,7 @@ type LimitDispatcher struct {
 	inner             interface{}        // original DefaultDispatcher (Feature + Dispatcher)
 	innerDisp         routing.Dispatcher // same object, typed as Dispatcher
 	deviceFilter      *deviceip.Filter
+	deviceGate        atomic.Pointer[devicegate.Manager]
 
 	// 限制和身份映射由读写锁保护，变更上限不迁移或清空已有连接。
 	mu               sync.RWMutex
@@ -204,12 +206,21 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	if err != nil {
 		return nil, err
 	}
+	permit, err := d.acquireDevice(ctx, email, sourceIP)
+	if err != nil {
+		if uid > 0 {
+			d.userConnCounter(uid).Add(-1)
+		}
+		return nil, err
+	}
 
 	cancel := context.CancelFunc(func() {})
-	if d.relayRoutes.Load() != nil {
+	if d.relayRoutes.Load() != nil || permit != nil {
 		ctx, cancel = context.WithCancel(ctx)
 	}
 	access := relayTrackingFor(ctx, cancel)
+	access.devicePermit = permit
+	permit.Bind(cancel)
 	link, err := d.innerDisp.Dispatch(ctx, dest)
 	if err != nil {
 		cancel()
@@ -219,11 +230,15 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 		if email != "" {
 			d.delConn(email, sourceIP)
 		}
+		permit.Release()
 		return nil, err
 	}
 
 	if email != "" {
 		d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email), access)
+	}
+	if !permit.Valid() {
+		return nil, devicegate.ErrRevoked
 	}
 	return link, nil
 }
@@ -233,14 +248,26 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 	if err != nil {
 		return err
 	}
+	permit, err := d.acquireDevice(ctx, email, sourceIP)
+	if err != nil {
+		if uid > 0 {
+			d.userConnCounter(uid).Add(-1)
+		}
+		return err
+	}
 
 	cancel := context.CancelFunc(func() {})
-	if d.relayRoutes.Load() != nil {
+	if d.relayRoutes.Load() != nil || permit != nil {
 		ctx, cancel = context.WithCancel(ctx)
 	}
 	var release func()
 	if email != "" {
-		release = d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email), relayTrackingFor(ctx, cancel))
+		access := relayTrackingFor(ctx, cancel)
+		access.devicePermit = permit
+		release = d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email), access)
+	}
+	if !permit.Valid() {
+		return devicegate.ErrRevoked
 	}
 	err = d.innerDisp.DispatchLink(ctx, dest, link)
 	if err != nil && release != nil {
@@ -271,7 +298,8 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 
 	// 超限拒绝属于运营需要看到的事件，用 Info 级别，与 sing-box 侧保持一致；
 	// 默认日志级别是 Info，用 Debug 会导致节点上完全看不到超限记录。
-	if d.checkDeviceLimit(email, sourceIP, isTCP) {
+	managed := d.deviceGate.Load().Enabled()
+	if !managed && d.checkDeviceLimit(email, sourceIP, isTCP) {
 		nlog.Core().Info("xray: device limit exceeded", "email", email, "ip", sourceIP)
 		return "", "", 0, false, errors.New("device limit exceeded for " + email)
 	}
@@ -281,10 +309,49 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 		nlog.Core().Info("xray: conn limit exceeded",
 			"email", email, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
 		// 设备检查已经登记了来源，拒绝前必须回退。
-		d.delConn(email, sourceIP)
+		if !managed {
+			d.delConn(email, sourceIP)
+		}
 		return "", "", 0, false, errors.New("connection limit exceeded for " + email)
 	}
 	return email, sourceIP, uid, isTCP, nil
+}
+
+func (d *LimitDispatcher) acquireDevice(ctx context.Context, email, sourceIP string) (*devicegate.Permit, error) {
+	gate := d.deviceGate.Load()
+	if !gate.Enabled() || email == "" {
+		return nil, nil
+	}
+	d.mu.RLock()
+	uid := d.emailToUID[email]
+	d.mu.RUnlock()
+	if uid <= 0 {
+		return nil, errors.New("设备来源用户已失效")
+	}
+	permit, err := gate.Acquire(ctx, uid, sourceIP)
+	if err != nil {
+		var denied *devicegate.DeniedError
+		if errors.As(err, &denied) {
+			d.reportDeviceLimited(uid, denied.Limit, denied.Observed, sourceIP)
+		}
+		return nil, err
+	}
+	d.mu.RLock()
+	if d.emailToUID[email] != uid {
+		d.mu.RUnlock()
+		permit.Release()
+		return nil, errors.New("设备来源用户已变更")
+	}
+	v, _ := d.userIPs.LoadOrStore(email, &ipCounter{})
+	ic := v.(*ipCounter)
+	ic.mu.Lock()
+	if ic.ips == nil {
+		ic.ips = make(map[string]int)
+	}
+	ic.ips[sourceIP]++
+	ic.mu.Unlock()
+	d.mu.RUnlock()
+	return permit, nil
 }
 
 // checkConnGate 判断新连接是否超过该用户的并发或新建速率上限，
@@ -402,6 +469,9 @@ func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string
 			userConns.Add(-1)
 		}
 		d.connCount.Add(-1)
+		if len(access) > 0 {
+			access[0].devicePermit.Release()
+		}
 	}
 
 	writer := &closeTrackingWriter{
@@ -423,6 +493,8 @@ func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string
 		if !d.relayAccess.Register(accessID, access[0].key, closeConnection) {
 			closeConnection()
 		}
+		access[0].devicePermit.Bind(closeConnection)
+		return closeConnection
 	}
 	return writer.release
 }
@@ -695,11 +767,12 @@ func (w *closeTrackingWriter) release() {
 }
 
 func (w *closeTrackingWriter) Close() error {
+	err := common.Close(w.Writer)
 	w.release()
-	return common.Close(w.Writer)
+	return err
 }
 
 func (w *closeTrackingWriter) Interrupt() {
-	w.release()
 	common.Interrupt(w.Writer)
+	w.release()
 }

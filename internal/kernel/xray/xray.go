@@ -33,6 +33,7 @@ import (
 	_ "github.com/xtls/xray-core/main/distro/all"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel/geodata"
@@ -83,6 +84,7 @@ type Xray struct {
 
 	// connLimiter 做连接数和新建速率准入，每次重启后转发给新的 LimitDispatcher。
 	connLimiter        model.ConnLimiter
+	deviceGate         *devicegate.Manager
 	deviceFilter       *deviceip.Filter
 	proxyTrust         *internet.ProxyProtocolTrust
 	ownsDeviceFilter   bool
@@ -247,6 +249,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	x.limitDispatcher = ld
 	if ld != nil {
 		ld.SetConnLimiter(x.connLimiter)
+		ld.deviceGate.Store(x.deviceGate)
 		ld.UpdateGlobalDevices(x.globalDevices, x.globalDeviceUpdate)
 	}
 	x.users = users
@@ -388,6 +391,15 @@ func (x *Xray) SetSpeedLimitFunc(fn func(string) *rate.Limiter) {
 // SetDeviceLimitFunc is a no-op for xray — device limits are already
 // gate-kept by LimitDispatcher.checkDeviceLimit at Dispatch time.
 func (x *Xray) SetDeviceLimitFunc(_ func(string) (int, bool)) {}
+
+func (x *Xray) SetDeviceGate(gate *devicegate.Manager) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.deviceGate = gate
+	if x.limitDispatcher != nil {
+		x.limitDispatcher.deviceGate.Store(gate)
+	}
+}
 
 // SetConnLimiter 配置每用户的连接数与新建速率准入，传 nil 表示关闭。
 func (x *Xray) SetConnLimiter(limiter model.ConnLimiter) {

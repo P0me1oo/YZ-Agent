@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/xtls/xray-core/common/session"
 )
@@ -12,6 +13,7 @@ type relayTracking struct {
 	key            string
 	cancel         context.CancelFunc
 	closeTransport func()
+	devicePermit   *devicegate.Permit
 }
 
 func relayTrackingFor(ctx context.Context, cancel context.CancelFunc) relayTracking {

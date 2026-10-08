@@ -1,5 +1,7 @@
 # YZ-Agent
 
+`v2.8.0` 配套面板 `1.56.0`：设备名额满时替换最久没有发起新连接的旧来源，实际关闭后再放行新 IP；旧来源冷却 60 秒，有空位可提前恢复。两个核心与普通 WireGuard 共用跨节点协调，先更新面板，再更新相关 Node。规则及正式发布核验状态见 [设备计数](docs/device-counting.md) 与 [兼容矩阵](YZ_COMPATIBILITY.md)。
+
 正式版本 [`v2.7.1`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.7.1) 新增普通 WireGuard 接入，配套面板 `1.53.0`、管理端 `0.30.0`。两种核心均支持用户权限、流量、限速、到期停用、按公网 IP 计算的设备限制和大陆来源拦截。保留原 WG 中转，包含原 `v2.6.0` 的来源策略改动；固定核心依赖不变。双架构附件、镜像和 latest 已核验，详见 [兼容矩阵](YZ_COMPATIBILITY.md)、[普通 WG](docs/wireguard-direct.md) 与 [来源拦截](docs/source-policy.md)。
 
 `v2.5.0` 让 Linux Xray 直接接入已有 WG 隧道，移除额外的本机转接，保留 BBR 和线路隔离。MTU 支持 1280–1500，配套面板 `1.46.0`、管理端 `0.23.0` 默认使用 1420；已有值不覆盖。固定核心依赖不变，两种核心可混用。测试和发布记录见 [兼容矩阵](YZ_COMPATIBILITY.md)。

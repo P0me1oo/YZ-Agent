@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"golang.org/x/time/rate"
 
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -37,10 +39,11 @@ var ipPool = sync.Pool{
 type userStats struct {
 	*userTraffic
 
-	admissionMu sync.Mutex     // 同一用户的设备检查和连接登记必须连续完成。
-	mu          sync.RWMutex   // RWMutex for concurrent reads
-	ips         map[string]int // sourceIP → refcount (number of active conns from that IP)
-	connCount   int            // total active connections
+	admissionMu  sync.Mutex     // 同一用户的设备检查和连接登记必须连续完成。
+	mu           sync.RWMutex   // RWMutex for concurrent reads
+	ips          map[string]int // sourceIP → refcount (number of active conns from that IP)
+	connCount    int            // total active connections
+	pendingConns int            // 等待跨节点准入的连接只占并发额度，不上报为活跃连接。
 	// rate 是该用户当前的共享限速器，nil 表示不限速。连接每次收发都读取它，
 	// 面板调整或取消限速后，已建立的连接立即按新设置执行。
 	rate atomic.Pointer[rate.Limiter]
@@ -139,6 +142,7 @@ func (u *userStats) aliveIPList() map[string]bool {
 type ConnTracker struct {
 	relayAccess  kernel.RelayAccess
 	deviceFilter *deviceip.Filter
+	deviceGate   atomic.Pointer[devicegate.Manager]
 	traffic      *trafficTotals
 	usersMu      sync.RWMutex
 	users        map[int]*userStats  // userID → stats
@@ -321,6 +325,11 @@ func (t *ConnTracker) RoutedConnection(
 		us.admissionMu.Unlock()
 	}
 
+	permit, err := t.acquireDevice(ctx, uid, sourceIP, us)
+	if err != nil {
+		_ = conn.Close()
+		return conn
+	}
 	connID := t.nextID()
 
 	var lim *rate.Limiter
@@ -329,16 +338,17 @@ func (t *ConnTracker) RoutedConnection(
 	}
 
 	wrapped := &trackedConn{
-		Conn:        conn,
-		tracker:     t,
-		us:          us,
-		userID:      uid,
-		connID:      connID,
-		sourceIP:    sourceIP,
-		limiter:     lim,
-		ctx:         ctx,
-		relay:       relay,
-		relaySource: t.trackRelaySource(uid, outbound, sourceIP),
+		Conn:         conn,
+		tracker:      t,
+		us:           us,
+		userID:       uid,
+		connID:       connID,
+		devicePermit: permit,
+		sourceIP:     sourceIP,
+		limiter:      lim,
+		ctx:          ctx,
+		relay:        relay,
+		relaySource:  t.trackRelaySource(uid, outbound, sourceIP),
 	}
 	t.usersMu.Lock()
 	t.connMap[connID] = wrapped
@@ -346,6 +356,7 @@ func (t *ConnTracker) RoutedConnection(
 	if !t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() }) {
 		_ = wrapped.Close()
 	}
+	permit.Bind(func() { _ = wrapped.Close() })
 	return wrapped
 }
 
@@ -397,6 +408,11 @@ func (t *ConnTracker) RoutedPacketConnection(
 		us.admissionMu.Unlock()
 	}
 
+	permit, err := t.acquireDevice(ctx, uid, sourceIP, us)
+	if err != nil {
+		_ = conn.Close()
+		return conn
+	}
 	connID := t.nextID()
 
 	var lim *rate.Limiter
@@ -405,20 +421,22 @@ func (t *ConnTracker) RoutedPacketConnection(
 	}
 
 	wrapped := &trackedPacketConn{
-		PacketConn:  conn,
-		tracker:     t,
-		us:          us,
-		userID:      uid,
-		connID:      connID,
-		sourceIP:    sourceIP,
-		limiter:     lim,
-		ctx:         ctx,
-		relay:       relay,
-		relaySource: t.trackRelaySource(uid, outbound, sourceIP),
+		PacketConn:   conn,
+		tracker:      t,
+		us:           us,
+		userID:       uid,
+		connID:       connID,
+		devicePermit: permit,
+		sourceIP:     sourceIP,
+		limiter:      lim,
+		ctx:          ctx,
+		relay:        relay,
+		relaySource:  t.trackRelaySource(uid, outbound, sourceIP),
 	}
 	if !t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() }) {
 		_ = wrapped.Close()
 	}
+	permit.Bind(func() { _ = wrapped.Close() })
 	return wrapped
 }
 
@@ -439,14 +457,18 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 	}
 	if cl == nil {
 		if us != nil {
-			us.connCount++
-			us.ips[sourceIP]++
+			if t.deviceGate.Load().Enabled() {
+				us.pendingConns++
+			} else {
+				us.connCount++
+				us.ips[sourceIP]++
+			}
 		}
 		return "", 0, 0, false
 	}
 
 	if limit, ok := cl.MaxConnByUserID(userID); ok && us != nil {
-		if current := us.connCount; current >= limit {
+		if current := us.connCount + us.pendingConns; current >= limit {
 			cl.ReportLimited(userID, model.ConnLimitKindConcurrent, limit, current)
 			return model.ConnLimitKindConcurrent, limit, current, true
 		}
@@ -459,8 +481,12 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 	}
 
 	if us != nil {
-		us.connCount++
-		us.ips[sourceIP]++
+		if t.deviceGate.Load().Enabled() {
+			us.pendingConns++
+		} else {
+			us.connCount++
+			us.ips[sourceIP]++
+		}
 	}
 	return "", 0, 0, false
 }
@@ -469,6 +495,9 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 // Strategy: merge local + global state when fresh; local-only when stale.
 // 本地登记包含所有来源；非公网或名单内的来源不占名额，按当前名单现场筛选。
 func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string, limit int) bool {
+	if t.deviceGate.Load().Enabled() {
+		return false
+	}
 	newKey := t.deviceFilter.CountKey(sourceIP)
 	if us == nil || limit <= 0 || newKey == "" {
 		return false
@@ -531,6 +560,39 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 		"userID", userID, "ip", sourceIP, "totalIPs", len(allIPs), "limit", limit)
 	t.reportDeviceLimited(userID, limit, len(allIPs), sourceIP)
 	return true
+}
+
+func (t *ConnTracker) acquireDevice(ctx context.Context, userID int, sourceIP string, us *userStats) (*devicegate.Permit, error) {
+	gate := t.deviceGate.Load()
+	if !gate.Enabled() {
+		return nil, nil
+	}
+	permit, err := gate.Acquire(ctx, userID, sourceIP)
+	if err == nil && us != nil {
+		t.usersMu.RLock()
+		valid := t.users[userID] == us
+		t.usersMu.RUnlock()
+		if !valid {
+			permit.Release()
+			err = errors.New("设备来源用户已变更")
+		}
+	}
+	if us != nil {
+		us.mu.Lock()
+		us.pendingConns--
+		if err == nil {
+			us.connCount++
+			us.ips[sourceIP]++
+		}
+		us.mu.Unlock()
+	}
+	if err != nil {
+		var denied *devicegate.DeniedError
+		if errors.As(err, &denied) {
+			t.reportDeviceLimited(userID, denied.Limit, denied.Observed, sourceIP)
+		}
+	}
+	return permit, err
 }
 
 // reportDeviceLimited 把设备数超限记入本周期统计，随状态上报面板。
@@ -714,15 +776,16 @@ func (r *RateLimitedReadCloser) Read(b []byte) (int, error) {
 
 type trackedConn struct {
 	net.Conn
-	tracker  *ConnTracker
-	us       *userStats // per-user stats (upload/download atomics + IP tracking)
-	userID   int        // user ID for device tracking
-	connID   string
-	sourceIP string
-	limiter  *rate.Limiter
-	ctx      context.Context
-	closed   atomic.Bool
-	relay    relayCounters
+	tracker      *ConnTracker
+	us           *userStats // per-user stats (upload/download atomics + IP tracking)
+	userID       int        // user ID for device tracking
+	connID       string
+	devicePermit *devicegate.Permit
+	sourceIP     string
+	limiter      *rate.Limiter
+	ctx          context.Context
+	closed       atomic.Bool
+	relay        relayCounters
 	// relaySource 回收中转入口按实际出网节点登记的来源，非入口连接为 nil。
 	relaySource func()
 }
@@ -816,7 +879,8 @@ func (c *trackedConn) Write(b []byte) (int, error) {
 }
 
 func (c *trackedConn) Close() error {
-	if c.closed.CompareAndSwap(false, true) {
+	first := c.closed.CompareAndSwap(false, true)
+	if first {
 		if c.us != nil {
 			c.us.removeConn(c.sourceIP)
 		}
@@ -825,7 +889,11 @@ func (c *trackedConn) Close() error {
 		}
 		c.tracker.removeConnRef(c.connID)
 	}
-	return c.Conn.Close()
+	err := c.Conn.Close()
+	if first {
+		c.devicePermit.Release()
+	}
+	return err
 }
 
 // makeCountFunc builds a CountFunc for zero-copy byte counting via sing's
@@ -859,15 +927,16 @@ func (c *trackedConn) WriterReplaceable() bool { return true }
 
 type trackedPacketConn struct {
 	N.PacketConn
-	tracker  *ConnTracker
-	us       *userStats
-	userID   int
-	connID   string
-	sourceIP string
-	limiter  *rate.Limiter
-	ctx      context.Context
-	closed   atomic.Bool
-	relay    relayCounters
+	tracker      *ConnTracker
+	us           *userStats
+	userID       int
+	connID       string
+	devicePermit *devicegate.Permit
+	sourceIP     string
+	limiter      *rate.Limiter
+	ctx          context.Context
+	closed       atomic.Bool
+	relay        relayCounters
 	// relaySource 回收中转入口按实际出网节点登记的来源，非入口连接为 nil。
 	relaySource func()
 }
@@ -913,7 +982,8 @@ func (c *trackedPacketConn) WritePacket(buffer *buf.Buffer, dest singM.Socksaddr
 }
 
 func (c *trackedPacketConn) Close() error {
-	if c.closed.CompareAndSwap(false, true) {
+	first := c.closed.CompareAndSwap(false, true)
+	if first {
 		if c.us != nil {
 			c.us.removeConn(c.sourceIP)
 		}
@@ -922,7 +992,11 @@ func (c *trackedPacketConn) Close() error {
 		}
 		c.tracker.removeConnRef(c.connID)
 	}
-	return c.PacketConn.Close()
+	err := c.PacketConn.Close()
+	if first {
+		c.devicePermit.Release()
+	}
+	return err
 }
 
 func (c *trackedPacketConn) makeCountFunc(counter *atomic.Int64) N.CountFunc {

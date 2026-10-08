@@ -42,9 +42,10 @@ type Client struct {
 	userETag   string
 	etagMu     sync.Mutex
 
-	apiSuccess atomic.Uint64
-	apiFailure atomic.Uint64
-	realtime   realtimeClient
+	apiSuccess     atomic.Uint64
+	apiFailure     atomic.Uint64
+	realtime       realtimeClient
+	deviceHandover atomic.Bool
 }
 
 // NewClient creates a new panel API client.
@@ -105,7 +106,13 @@ func (c *Client) RestoreETags(configETag, userETag string) {
 
 // Handshake calls the new v2 API to get WS config + initial data in one shot.
 func (c *Client) Handshake() (*HandshakeResponse, error) {
-	resp, err := c.doRequest("POST", "/api/v2/server/handshake", nil, "")
+	payload := map[string]interface{}{"device_handover": 1}
+	c.injectAuth(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.doRequest("POST", "/api/v2/server/handshake", body, "")
 	if err != nil {
 		return nil, fmt.Errorf("handshake: %w", err)
 	}
@@ -121,6 +128,7 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 		return nil, fmt.Errorf("decode handshake: %w", err)
 	}
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
+	c.deviceHandover.Store(hs.Realtime.DeviceHandover == 1)
 	return &hs, nil
 }
 

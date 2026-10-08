@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"golang.org/x/time/rate"
@@ -187,6 +188,15 @@ func (m *Managed) SetConnLimiter(l model.ConnLimiter) {
 	m.state.connLimiter = l
 	m.state.mu.Unlock()
 	m.Kernel.SetConnLimiter(l)
+}
+
+func (m *Managed) SetDeviceGate(gate *devicegate.Manager) {
+	m.state.mu.Lock()
+	m.state.deviceGate = gate
+	m.state.mu.Unlock()
+	if consumer, ok := m.Kernel.(kernel.DeviceGateConsumer); ok {
+		consumer.SetDeviceGate(gate)
+	}
 }
 func (m *Managed) UpdateGlobalDevices(users map[int][]string) {
 	copyUsers := make(map[int][]string, len(users))

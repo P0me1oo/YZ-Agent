@@ -1,4 +1,4 @@
-VERSION ?= v2.7.1
+VERSION ?= v2.8.0
 TEST_EXEC ?=
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)

@@ -38,6 +38,7 @@ type RealtimeCapability struct {
 	StateInterval    int  `json:"state_interval"`
 	FallbackInterval int  `json:"fallback_interval"`
 	TrafficAck       bool `json:"traffic_ack"`
+	DeviceHandover   int  `json:"device_handover"`
 }
 
 func (h *HandshakeResponse) UnmarshalJSON(data []byte) error {

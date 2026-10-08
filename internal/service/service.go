@@ -20,6 +20,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/directwg"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
@@ -96,6 +97,7 @@ type Service struct {
 	controlGeneration uint64
 	pendingCertReload bool
 	lastDeviceSync    time.Time
+	deviceGate        *devicegate.Manager
 	stateActive       atomic.Bool
 	userSpeed         userSpeedSampler
 	discoveryActive   atomic.Bool
@@ -267,7 +269,16 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 
 	// 证书与节点配置一起应用，失败时保留控制通道接收修正。
 	defer s.cert.Stop()
-	defer s.stopKernel()
+	defer func() {
+		s.stopKernel()
+		if s.deviceGate != nil {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := s.deviceGate.Stop(closeCtx); err != nil {
+				nlog.Core().Warn("设备来源退出确认失败", "error", err)
+			}
+		}
+	}()
 
 	// 先恢复上次未确认的流量，再开始新的采集和上报。
 	s.restorePendingReports()
@@ -390,6 +401,17 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	bootstrap, err := s.source.Initial(ctx, s.wsMetrics, s.wsEvents, s.wsStatusCh)
 	if err != nil {
 		return err
+	}
+	if provider, ok := s.source.(interface{ DeviceHandoverClient() devicegate.Remote }); ok {
+		if consumer, supported := s.kernel.(kernel.DeviceGateConsumer); supported {
+			s.deviceGate = devicegate.New(provider.DeviceHandoverClient(), func(err error) {
+				nlog.Core().Warn("设备来源协调失败", "error", err)
+			})
+			consumer.SetDeviceGate(s.deviceGate)
+			if err := s.deviceGate.Start(ctx); err != nil {
+				nlog.Core().Warn("设备来源协调等待恢复", "error", err)
+			}
+		}
 	}
 
 	if s.cfg.Node.PushInterval == 0 && bootstrap.PushInterval > 0 {

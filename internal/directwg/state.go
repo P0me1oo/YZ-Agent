@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"golang.org/x/time/rate"
@@ -19,12 +20,16 @@ const sourceTTL = 90 * time.Second
 const globalTTL = 35 * time.Second
 
 type userState struct {
-	spec        model.UserSpec
-	ctx         context.Context
-	cancel      context.CancelFunc
-	sources     map[string]time.Time
-	latest      netip.Addr
-	connections map[io.Closer]struct{}
+	spec              model.UserSpec
+	ctx               context.Context
+	cancel            context.CancelFunc
+	sources           map[string]time.Time
+	latest            netip.Addr
+	connections       map[io.Closer]struct{}
+	sourcePermits     map[string]*devicegate.Permit
+	pendingSources    map[string]bool
+	retrySources      map[string]time.Time
+	connectionSources map[io.Closer]*devicegate.Permit
 }
 
 type State struct {
@@ -38,6 +43,7 @@ type State struct {
 	globalAt    time.Time
 	speed       func(string) *rate.Limiter
 	connLimiter model.ConnLimiter
+	deviceGate  *devicegate.Manager
 }
 
 func newState() *State {
@@ -112,14 +118,21 @@ func (s *State) replaceUsers(users []model.UserSpec) {
 		}
 	}
 	var connections []io.Closer
+	var permits []*devicegate.Permit
 	for _, u := range closeUsers {
 		for c := range u.connections {
 			connections = append(connections, c)
+		}
+		for _, p := range u.sourcePermits {
+			permits = append(permits, p)
 		}
 	}
 	s.mu.Unlock()
 	for _, c := range connections {
 		_ = c.Close()
+	}
+	for _, p := range permits {
+		p.Release()
 	}
 }
 
@@ -136,10 +149,9 @@ func (s *State) admitLocked(key string, source netip.Addr, payload bool, now tim
 		return false
 	}
 	raw := source.Unmap().String()
-	for ip, last := range u.sources {
-		if now.Sub(last) >= sourceTTL {
-			delete(u.sources, ip)
-		}
+	s.pruneSourcesLocked(u, now)
+	if s.deviceGate.Enabled() && deviceip.PublicAddress(raw) != "" {
+		return s.admitManagedSourceLocked(u, raw, payload, now)
 	}
 	if !payload {
 		if _, ok := u.sources[raw]; ok {
@@ -228,12 +240,24 @@ func (s *State) userForAddress(a netip.Addr) (int, netip.Addr) {
 	return id, u.latest
 }
 
-func (s *State) track(id int, conn io.Closer) (*userState, func(), bool) {
+func (s *State) track(id int, conn io.Closer, sources ...netip.Addr) (*userState, func(), bool) {
 	s.mu.Lock()
 	u := s.users[id]
 	if !validAt(u, time.Now()) {
 		s.mu.Unlock()
 		return nil, nil, false
+	}
+	var permit *devicegate.Permit
+	public := u.latest
+	if len(sources) > 0 {
+		public = sources[0]
+	}
+	if s.deviceGate.Enabled() && deviceip.PublicAddress(public.String()) != "" {
+		permit = u.sourcePermits[public.String()]
+		if permit == nil || !permit.Valid() {
+			s.mu.Unlock()
+			return nil, nil, false
+		}
 	}
 	if l := s.connLimiter; l != nil {
 		if limit, ok := l.MaxConnByUserID(id); ok && len(u.connections) >= limit {
@@ -248,13 +272,25 @@ func (s *State) track(id int, conn io.Closer) (*userState, func(), bool) {
 		}
 	}
 	u.connections[conn] = struct{}{}
+	if permit != nil {
+		if !permit.NewConnection() {
+			delete(u.connections, conn)
+			s.mu.Unlock()
+			return nil, nil, false
+		}
+		if u.connectionSources == nil {
+			u.connectionSources = make(map[io.Closer]*devicegate.Permit)
+		}
+		u.connectionSources[conn] = permit
+	}
 	s.mu.Unlock()
-	return u, func() { s.mu.Lock(); delete(u.connections, conn); s.mu.Unlock() }, true
+	return u, func() { s.mu.Lock(); delete(u.connections, conn); delete(u.connectionSources, conn); s.mu.Unlock() }, true
 }
 
 func (s *State) closeUser(uuid string) {
 	s.mu.Lock()
 	var conns []io.Closer
+	var permits []*devicegate.Permit
 	for _, u := range s.users {
 		if uuid != "" && u.spec.UUID != uuid {
 			continue
@@ -263,10 +299,17 @@ func (s *State) closeUser(uuid string) {
 			conns = append(conns, c)
 		}
 		u.sources = make(map[string]time.Time)
+		for _, p := range u.sourcePermits {
+			permits = append(permits, p)
+		}
+		u.sourcePermits = nil
 	}
 	s.mu.Unlock()
 	for _, c := range conns {
 		_ = c.Close()
+	}
+	for _, p := range permits {
+		p.Release()
 	}
 }
 
@@ -285,6 +328,7 @@ func (s *State) snapshot() (map[int][2]int64, map[int]map[string]bool, int) {
 		if !validAt(u, now) {
 			continue
 		}
+		s.pruneSourcesLocked(u, now)
 		for ip, last := range u.sources {
 			if now.Sub(last) >= sourceTTL {
 				delete(u.sources, ip)
