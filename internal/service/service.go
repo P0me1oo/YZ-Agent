@@ -1543,14 +1543,16 @@ func (s *Service) collectLimitEvents() []panel.LimitEvent {
 				Limit:    stat.ConnLimit,
 				Observed: stat.PeakConn,
 				Count:    stat.ConnHits,
+				Snapshot: stat.ConnSnapshot,
 			})
 		}
 		if stat.RateHits > 0 {
 			events = append(events, panel.LimitEvent{
-				UserID: userID,
-				Kind:   model.ConnLimitKindRate,
-				Limit:  stat.RateLimit,
-				Count:  stat.RateHits,
+				UserID:   userID,
+				Kind:     model.ConnLimitKindRate,
+				Limit:    stat.RateLimit,
+				Count:    stat.RateHits,
+				Snapshot: stat.RateSnapshot,
 			})
 		}
 		if stat.DeviceHits > 0 {
@@ -1561,6 +1563,7 @@ func (s *Service) collectLimitEvents() []panel.LimitEvent {
 				Observed: stat.PeakDevices,
 				Count:    stat.DeviceHits,
 				IPs:      stat.DeviceIPs,
+				Snapshot: stat.DeviceSnapshot,
 			})
 		}
 	}

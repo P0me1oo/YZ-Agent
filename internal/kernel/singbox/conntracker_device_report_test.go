@@ -42,6 +42,9 @@ func TestConnTrackerReportsDeviceLimit(t *testing.T) {
 	if stat.DeviceHits != 3 || stat.DeviceLimit != 1 || stat.PeakDevices != 1 {
 		t.Fatalf("设备超限统计 = (%d, %d, %d)，期望 (3, 1, 1)", stat.DeviceHits, stat.DeviceLimit, stat.PeakDevices)
 	}
+	if stat.DeviceSnapshot == nil || stat.DeviceSnapshot.SourceIP != "2.2.2.2" || !slices.Equal(stat.DeviceSnapshot.ActiveIPs, []string{"1.1.1.1"}) {
+		t.Fatalf("设备快照不匹配首次拒绝：%+v", stat.DeviceSnapshot)
+	}
 	if !slices.Equal(stat.DeviceIPs, []string{"2.2.2.2", "3.3.3.3"}) {
 		t.Fatalf("被拒来源 = %v", stat.DeviceIPs)
 	}

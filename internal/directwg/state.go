@@ -30,6 +30,7 @@ type userState struct {
 	pendingSources    map[string]bool
 	retrySources      map[string]time.Time
 	connectionSources map[io.Closer]*devicegate.Permit
+	connectionIPs     map[io.Closer]string
 }
 
 type State struct {
@@ -176,9 +177,7 @@ func (s *State) admitLocked(key string, source netip.Addr, payload bool, now tim
 			}
 		}
 		if !keys[counted] && len(keys) >= u.spec.DeviceLimit {
-			if reporter, ok := s.connLimiter.(model.DeviceLimitReporter); ok {
-				reporter.ReportDeviceLimited(u.spec.ID, u.spec.DeviceLimit, len(keys), raw)
-			}
+			model.ReportLimit(s.connLimiter, u.spec.ID, model.ConnLimitKindDevice, u.spec.DeviceLimit, len(keys), raw, func() *model.LimitSnapshot { return model.NewLimitSnapshot(raw, model.DeviceLimitSources(keys), true) })
 			return false
 		}
 	}
@@ -261,12 +260,12 @@ func (s *State) track(id int, conn io.Closer, sources ...netip.Addr) (*userState
 	}
 	if l := s.connLimiter; l != nil {
 		if limit, ok := l.MaxConnByUserID(id); ok && len(u.connections) >= limit {
-			l.ReportLimited(id, model.ConnLimitKindConcurrent, limit, len(u.connections))
+			model.ReportLimit(l, id, model.ConnLimitKindConcurrent, limit, len(u.connections), public.String(), func() *model.LimitSnapshot { return connectionLimitSnapshot(u, public.String()) })
 			s.mu.Unlock()
 			return nil, nil, false
 		}
 		if !l.AllowNewConn(id) {
-			l.ReportLimited(id, model.ConnLimitKindRate, 0, 0)
+			model.ReportLimit(l, id, model.ConnLimitKindRate, 0, 0, public.String(), func() *model.LimitSnapshot { return connectionLimitSnapshot(u, public.String()) })
 			s.mu.Unlock()
 			return nil, nil, false
 		}
@@ -283,8 +282,27 @@ func (s *State) track(id int, conn io.Closer, sources ...netip.Addr) (*userState
 		}
 		u.connectionSources[conn] = permit
 	}
+	if u.connectionIPs == nil {
+		u.connectionIPs = make(map[io.Closer]string)
+	}
+	u.connectionIPs[conn] = public.String()
 	s.mu.Unlock()
-	return u, func() { s.mu.Lock(); delete(u.connections, conn); delete(u.connectionSources, conn); s.mu.Unlock() }, true
+	return u, func() {
+		s.mu.Lock()
+		delete(u.connections, conn)
+		delete(u.connectionSources, conn)
+		delete(u.connectionIPs, conn)
+		s.mu.Unlock()
+	}, true
+}
+
+// 调用方持有状态锁，来源随连接关闭删除，不使用最近出现 IP 推断连接归属。
+func connectionLimitSnapshot(u *userState, source string) *model.LimitSnapshot {
+	ips := make([]string, 0, len(u.connectionIPs))
+	for _, ip := range u.connectionIPs {
+		ips = append(ips, ip)
+	}
+	return model.NewLimitSnapshot(source, ips, true)
 }
 
 func (s *State) closeUser(uuid string) {

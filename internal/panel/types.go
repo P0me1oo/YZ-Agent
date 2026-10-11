@@ -3,6 +3,7 @@ package panel
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/limitreport"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
@@ -407,5 +408,6 @@ type LimitEvent struct {
 	Observed int    `json:"observed"`
 	Count    uint64 `json:"count"` // 本周期内被拒次数
 	// IPs 只在设备数超限时出现，是本周期被拒的来源地址，去重后最多 5 个。
-	IPs []string `json:"ips,omitempty"`
+	IPs      []string              `json:"ips,omitempty"`
+	Snapshot *limitreport.Snapshot `json:"snapshot,omitempty"`
 }

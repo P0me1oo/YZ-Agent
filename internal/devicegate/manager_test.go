@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/limitreport"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -174,6 +175,18 @@ func TestDeniedAndMalformedAdmissionsNeverCreateSource(t *testing.T) {
 				t.Fatal("失败请求遗留了名额")
 			}
 		})
+	}
+}
+
+func TestDeniedAdmissionCarriesPanelSnapshot(t *testing.T) {
+	expected := &limitreport.Snapshot{OccurredAt: time.Now().Unix(), SourceIP: "8.8.8.8", ActiveIPs: []string{"1.1.1.1"}, ActiveKnown: true, ActiveTotal: 1}
+	m := testManager(t, &testRemote{admit: func(context.Context, AdmissionRequest) (AdmissionReply, error) {
+		return AdmissionReply{Status: "denied", Limit: 1, Observed: 1, Reason: "cooldown", LimitSnapshot: expected}, nil
+	}})
+	_, err := m.Acquire(t.Context(), 1, "8.8.8.8")
+	var denied *DeniedError
+	if !errors.As(err, &denied) || denied.Snapshot != expected {
+		t.Fatalf("拒绝快照未传递：%v", err)
 	}
 }
 

@@ -23,10 +23,13 @@ type LimitEventStat struct {
 	RateLimit int    // 触发时生效的速率上限
 	PeakConn  int    // 本周期触发并发拒绝时，已占用连接名额的最大值
 
-	DeviceHits  uint64   // 设备数超限被拒次数
-	DeviceLimit int      // 触发时生效的设备上限
-	PeakDevices int      // 本周期拒绝新来源时，已计入来源数的最大值
-	DeviceIPs   []string // 本周期被拒的来源地址，去重后最多 MaxDeviceEventIPs 个
+	DeviceHits     uint64   // 设备数超限被拒次数
+	DeviceLimit    int      // 触发时生效的设备上限
+	PeakDevices    int      // 本周期拒绝新来源时，已计入来源数的最大值
+	DeviceIPs      []string // 本周期被拒的来源地址，去重后最多 MaxDeviceEventIPs 个
+	ConnSnapshot   *model.LimitSnapshot
+	RateSnapshot   *model.LimitSnapshot
+	DeviceSnapshot *model.LimitSnapshot
 }
 
 // rebuildConnLimitsLocked 依据最新用户列表重建限制索引和令牌桶。
@@ -103,8 +106,17 @@ func (l *Limiter) AllowNewConn(userID int) bool {
 // ReportLimited 记录一次拒绝，供上报面板和指标统计使用。
 // limit 传 0 时由 limiter 自己补全配置值，内核不需要知道速率上限。
 func (l *Limiter) ReportLimited(userID int, kind string, limit, observed int) {
-	if kind != model.ConnLimitKindConcurrent && kind != model.ConnLimitKindRate {
+	l.ReportLimitedSnapshot(userID, kind, limit, observed, "", nil)
+}
+
+func (l *Limiter) ReportLimitedSnapshot(userID int, kind string, limit, observed int, sourceIP string, build func() *model.LimitSnapshot) {
+	if kind != model.ConnLimitKindConcurrent && kind != model.ConnLimitKindRate && kind != model.ConnLimitKindDevice {
 		return
+	}
+	// 来源快照可能持有内核用户锁，不能在统计锁内回调，避免与设备拒绝形成锁反转。
+	var captured *model.LimitSnapshot
+	if build != nil {
+		captured = build()
 	}
 	// 与用户刷新串行，避免删号后迟到的拒绝事件重新创建记录。
 	l.mu.RLock()
@@ -113,6 +125,9 @@ func (l *Limiter) ReportLimited(userID int, kind string, limit, observed int) {
 		return
 	}
 	if limit <= 0 {
+		if kind == model.ConnLimitKindDevice {
+			limit = l.users[userID].DeviceLimit
+		}
 		spec, ok := l.connLimits[userID]
 		if ok {
 			switch kind {
@@ -127,19 +142,53 @@ func (l *Limiter) ReportLimited(userID int, kind string, limit, observed int) {
 	l.limitEventsMu.Lock()
 	defer l.limitEventsMu.Unlock()
 	stat := l.limitEvents[userID]
+	var snapshot **model.LimitSnapshot
 	switch kind {
 	case model.ConnLimitKindConcurrent:
+		snapshot = &stat.ConnSnapshot
 		stat.ConnHits++
 		stat.ConnLimit = limit
 		if observed > stat.PeakConn {
 			stat.PeakConn = observed
 		}
 	case model.ConnLimitKindRate:
+		snapshot = &stat.RateSnapshot
 		stat.RateHits++
 		stat.RateLimit = limit
+	case model.ConnLimitKindDevice:
+		snapshot = &stat.DeviceSnapshot
+		stat.DeviceHits++
+		stat.DeviceLimit = limit
+		if observed > stat.PeakDevices {
+			stat.PeakDevices = observed
+		}
+		if sourceIP != "" && len(stat.DeviceIPs) < MaxDeviceEventIPs {
+			found := false
+			for _, ip := range stat.DeviceIPs {
+				if ip == sourceIP {
+					found = true
+					break
+				}
+			}
+			if !found {
+				stat.DeviceIPs = append(stat.DeviceIPs, sourceIP)
+			}
+		}
+	}
+	if snapshot != nil && *snapshot == nil {
+		if value := captured; value != nil {
+			copy := *value
+			copy.ActiveIPs = append([]string(nil), value.ActiveIPs...)
+			copy.Limit, copy.Observed = limit, observed
+			*snapshot = &copy
+		}
 	}
 	l.limitEvents[userID] = stat
-	l.connLimitEvents.Add(1)
+	if kind == model.ConnLimitKindDevice {
+		l.deviceLimitEvents.Add(1)
+	} else {
+		l.connLimitEvents.Add(1)
+	}
 }
 
 // SnapshotLimitEvents 取出并清理本周期的超限统计，供上报面板使用。

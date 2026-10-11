@@ -37,3 +37,26 @@ func TestCollectLimitEventsIncludesDeviceEvents(t *testing.T) {
 		t.Fatalf("events[2] = %#v", events[2])
 	}
 }
+
+func TestCollectLimitEventsPreservesSnapshotsForEveryKind(t *testing.T) {
+	l := limiter.New()
+	l.UpdateUsers([]model.UserSpec{{ID: 1, DeviceLimit: 2, ConnLimit: 8, ConnRateLimit: 1}})
+	for _, kind := range []string{model.ConnLimitKindConcurrent, model.ConnLimitKindRate, model.ConnLimitKindDevice} {
+		l.ReportLimitedSnapshot(1, kind, 0, 2, "203.0.113.1", func() *model.LimitSnapshot {
+			return model.NewLimitSnapshot("203.0.113.1", []string{"198.51.100.1"}, true)
+		})
+	}
+	s := &Service{limiter: l}
+	events := s.collectLimitEvents()
+	if len(events) != 3 {
+		t.Fatalf("期望三种事件，实际 %d", len(events))
+	}
+	for _, event := range events {
+		if event.Snapshot == nil || event.Snapshot.SourceIP != "203.0.113.1" || !slices.Equal(event.Snapshot.ActiveIPs, []string{"198.51.100.1"}) {
+			t.Fatalf("事件快照丢失：%+v", event)
+		}
+	}
+	if len(s.collectLimitEvents()) != 0 {
+		t.Fatal("重复采集重复发送")
+	}
+}

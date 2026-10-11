@@ -304,7 +304,7 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 		return "", "", 0, false, errors.New("device limit exceeded for " + email)
 	}
 
-	uid, kind, limit, observed, reject := d.checkConnGate(email)
+	uid, kind, limit, observed, reject := d.checkConnGate(email, sourceIP)
 	if reject {
 		nlog.Core().Info("xray: conn limit exceeded",
 			"email", email, "ip", sourceIP, "kind", kind, "limit", limit, "observed", observed)
@@ -332,7 +332,12 @@ func (d *LimitDispatcher) acquireDevice(ctx context.Context, email, sourceIP str
 	if err != nil {
 		var denied *devicegate.DeniedError
 		if errors.As(err, &denied) {
-			d.reportDeviceLimited(uid, denied.Limit, denied.Observed, sourceIP)
+			d.reportDeviceLimited(uid, denied.Limit, denied.Observed, sourceIP, func() *model.LimitSnapshot {
+				if denied.Snapshot != nil {
+					return denied.Snapshot
+				}
+				return model.NewLimitSnapshot(sourceIP, nil, false)
+			})
 		}
 		return nil, err
 	}
@@ -360,7 +365,11 @@ func (d *LimitDispatcher) acquireDevice(ctx context.Context, email, sourceIP str
 // 没装 connLimiter 时走无锁快速路径，不解析 userID 也不计数。
 // 并发检查在速率检查之前，避免并发已超限时还白白消耗一个速率令牌。
 // 放行时已占用并发名额，由调度失败分支或连接关闭回调归还。
-func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bool) {
+func (d *LimitDispatcher) checkConnGate(email string, sources ...string) (int, string, int, int, bool) {
+	sourceIP := ""
+	if len(sources) > 0 {
+		sourceIP = sources[0]
+	}
 	ptr := d.connLimiter.Load()
 	if ptr == nil {
 		return 0, "", 0, 0, false
@@ -382,7 +391,7 @@ func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bo
 	for {
 		current := counter.Load()
 		if limited && current >= int64(limit) {
-			cl.ReportLimited(uid, model.ConnLimitKindConcurrent, limit, int(current))
+			model.ReportLimit(cl, uid, model.ConnLimitKindConcurrent, limit, int(current), sourceIP, func() *model.LimitSnapshot { return d.connectionLimitSnapshot(email, sourceIP) })
 			return uid, model.ConnLimitKindConcurrent, limit, int(current), true
 		}
 		if counter.CompareAndSwap(current, current+1) {
@@ -393,7 +402,7 @@ func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bo
 	if !cl.AllowNewConn(uid) {
 		counter.Add(-1)
 		// 速率上限由 limiter 自己补全，内核不需要知道具体配置。
-		cl.ReportLimited(uid, model.ConnLimitKindRate, 0, 0)
+		model.ReportLimit(cl, uid, model.ConnLimitKindRate, 0, 0, sourceIP, func() *model.LimitSnapshot { return d.connectionLimitSnapshot(email, sourceIP) })
 		return uid, model.ConnLimitKindRate, 0, 0, true
 	}
 
@@ -402,7 +411,7 @@ func (d *LimitDispatcher) checkConnGate(email string) (int, string, int, int, bo
 
 // reportDeviceLimited 把设备数超限记入本周期统计，随状态上报面板。
 // 调用方持有 d.mu；limiter 不会回调 dispatcher，不存在锁顺序问题。
-func (d *LimitDispatcher) reportDeviceLimited(uid, limit, observed int, sourceIP string) {
+func (d *LimitDispatcher) reportDeviceLimited(uid, limit, observed int, sourceIP string, build func() *model.LimitSnapshot) {
 	if uid <= 0 {
 		return
 	}
@@ -410,9 +419,26 @@ func (d *LimitDispatcher) reportDeviceLimited(uid, limit, observed int, sourceIP
 	if ptr == nil {
 		return
 	}
-	if reporter, ok := (*ptr).(model.DeviceLimitReporter); ok {
-		reporter.ReportDeviceLimited(uid, limit, observed, sourceIP)
+	model.ReportLimit(*ptr, uid, model.ConnLimitKindDevice, limit, observed, sourceIP, build)
+}
+
+func (d *LimitDispatcher) connectionLimitSnapshot(email, source string) *model.LimitSnapshot {
+	ips := []string{}
+	if value, ok := d.userIPs.Load(email); ok {
+		counter := value.(*ipCounter)
+		counter.mu.Lock()
+		defer counter.mu.Unlock()
+		for ip, count := range counter.ips {
+			// 旧设备检查已提前登记本请求；快照扣除这一次，保留同 IP 的其他连接。
+			if !d.deviceGate.Load().Enabled() && ip == source {
+				count--
+			}
+			if count > 0 {
+				ips = append(ips, ip)
+			}
+		}
 	}
+	return model.NewLimitSnapshot(source, ips, true)
 }
 
 // userConnCounter 返回该用户的活跃连接计数器，不存在时创建。
@@ -731,7 +757,9 @@ func (d *LimitDispatcher) checkDeviceLimit(email, sourceIP string, _ bool) bool 
 		}
 	}
 	if len(seen) >= limit {
-		d.reportDeviceLimited(uid, limit, len(seen), sourceIP)
+		d.reportDeviceLimited(uid, limit, len(seen), sourceIP, func() *model.LimitSnapshot {
+			return model.NewLimitSnapshot(sourceIP, model.DeviceLimitSources(seen), true)
+		})
 		return true
 	}
 	ips[sourceIP]++

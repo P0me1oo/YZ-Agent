@@ -236,7 +236,7 @@ func (m *Manager) request(ctx context.Context, request AdmissionRequest) (Admiss
 			}
 			return reply, nil
 		case "denied":
-			return reply, &DeniedError{Limit: reply.Limit, Observed: reply.Observed, Reason: reply.Reason}
+			return reply, &DeniedError{Limit: reply.Limit, Observed: reply.Observed, Reason: reply.Reason, Snapshot: reply.LimitSnapshot}
 		case "waiting":
 			m.ApplyRevocations(reply.Revoked)
 			if len(reply.Revoked) > 0 {

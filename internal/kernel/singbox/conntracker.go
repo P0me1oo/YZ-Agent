@@ -469,14 +469,14 @@ func (t *ConnTracker) checkConnGate(us *userStats, userID int, sourceIP string) 
 
 	if limit, ok := cl.MaxConnByUserID(userID); ok && us != nil {
 		if current := us.connCount + us.pendingConns; current >= limit {
-			cl.ReportLimited(userID, model.ConnLimitKindConcurrent, limit, current)
+			model.ReportLimit(cl, userID, model.ConnLimitKindConcurrent, limit, current, sourceIP, func() *model.LimitSnapshot { return connectionLimitSnapshot(us, sourceIP) })
 			return model.ConnLimitKindConcurrent, limit, current, true
 		}
 	}
 
 	if !cl.AllowNewConn(userID) {
 		// 速率上限由 limiter 自己补全，内核不需要知道具体配置。
-		cl.ReportLimited(userID, model.ConnLimitKindRate, 0, 0)
+		model.ReportLimit(cl, userID, model.ConnLimitKindRate, 0, 0, sourceIP, func() *model.LimitSnapshot { return connectionLimitSnapshot(us, sourceIP) })
 		return model.ConnLimitKindRate, 0, 0, true
 	}
 
@@ -531,7 +531,9 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 		}
 		nlog.Core().Debug("device limit: local over limit, rejecting",
 			"userID", userID, "ip", sourceIP, "localIPs", localCount, "limit", limit)
-		t.reportDeviceLimited(userID, limit, localCount, sourceIP)
+		t.reportDeviceLimited(userID, limit, localCount, sourceIP, func() *model.LimitSnapshot {
+			return model.NewLimitSnapshot(sourceIP, model.DeviceLimitSources(localIPs), true)
+		})
 		return true
 	}
 
@@ -558,7 +560,9 @@ func (t *ConnTracker) checkDeviceGate(us *userStats, userID int, sourceIP string
 	// 名额已满时只拒绝新来源，不按地址排序抢占已有来源。
 	nlog.Core().Debug("device limit: total over limit, rejecting",
 		"userID", userID, "ip", sourceIP, "totalIPs", len(allIPs), "limit", limit)
-	t.reportDeviceLimited(userID, limit, len(allIPs), sourceIP)
+	t.reportDeviceLimited(userID, limit, len(allIPs), sourceIP, func() *model.LimitSnapshot {
+		return model.NewLimitSnapshot(sourceIP, model.DeviceLimitSources(allIPs), true)
+	})
 	return true
 }
 
@@ -589,14 +593,19 @@ func (t *ConnTracker) acquireDevice(ctx context.Context, userID int, sourceIP st
 	if err != nil {
 		var denied *devicegate.DeniedError
 		if errors.As(err, &denied) {
-			t.reportDeviceLimited(userID, denied.Limit, denied.Observed, sourceIP)
+			t.reportDeviceLimited(userID, denied.Limit, denied.Observed, sourceIP, func() *model.LimitSnapshot {
+				if denied.Snapshot != nil {
+					return denied.Snapshot
+				}
+				return model.NewLimitSnapshot(sourceIP, nil, false)
+			})
 		}
 	}
 	return permit, err
 }
 
 // reportDeviceLimited 把设备数超限记入本周期统计，随状态上报面板。
-func (t *ConnTracker) reportDeviceLimited(userID, limit, observed int, sourceIP string) {
+func (t *ConnTracker) reportDeviceLimited(userID, limit, observed int, sourceIP string, build func() *model.LimitSnapshot) {
 	if userID <= 0 {
 		return
 	}
@@ -604,9 +613,20 @@ func (t *ConnTracker) reportDeviceLimited(userID, limit, observed int, sourceIP 
 	if ptr == nil {
 		return
 	}
-	if reporter, ok := (*ptr).(model.DeviceLimitReporter); ok {
-		reporter.ReportDeviceLimited(userID, limit, observed, sourceIP)
+	model.ReportLimit(*ptr, userID, model.ConnLimitKindDevice, limit, observed, sourceIP, build)
+}
+
+// 调用方持有用户锁；新请求尚未登记，因此列表只包含已有连接。
+func connectionLimitSnapshot(us *userStats, source string) *model.LimitSnapshot {
+	ips := []string{}
+	if us != nil {
+		for ip, count := range us.ips {
+			if count > 0 {
+				ips = append(ips, ip)
+			}
+		}
 	}
+	return model.NewLimitSnapshot(source, ips, us != nil)
 }
 
 func (t *ConnTracker) nextID() string {

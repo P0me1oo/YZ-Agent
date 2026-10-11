@@ -71,9 +71,12 @@ func (s *State) admitManagedSourceLocked(u *userState, raw string, payload bool,
 			permit.Release()
 			var denied *devicegate.DeniedError
 			if errors.As(err, &denied) {
-				if reporter, ok := limiter.(model.DeviceLimitReporter); ok {
-					reporter.ReportDeviceLimited(id, denied.Limit, denied.Observed, raw)
-				}
+				model.ReportLimit(limiter, id, model.ConnLimitKindDevice, denied.Limit, denied.Observed, raw, func() *model.LimitSnapshot {
+					if denied.Snapshot != nil {
+						return denied.Snapshot
+					}
+					return model.NewLimitSnapshot(raw, nil, false)
+				})
 			}
 			return
 		}

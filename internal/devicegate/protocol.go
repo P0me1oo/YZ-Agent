@@ -3,6 +3,7 @@ package devicegate
 import (
 	"context"
 	"errors"
+	"github.com/P0me1oo/YZ-Agent/internal/limitreport"
 )
 
 var (
@@ -25,12 +26,13 @@ type AdmissionRequest struct {
 }
 
 type AdmissionReply struct {
-	Status   string       `json:"status"`
-	Lease    string       `json:"lease"`
-	Limit    int          `json:"limit"`
-	Observed int          `json:"observed"`
-	Reason   string       `json:"reason"`
-	Revoked  []Revocation `json:"revoked"`
+	Status        string                `json:"status"`
+	Lease         string                `json:"lease"`
+	Limit         int                   `json:"limit"`
+	Observed      int                   `json:"observed"`
+	Reason        string                `json:"reason"`
+	Revoked       []Revocation          `json:"revoked"`
+	LimitSnapshot *limitreport.Snapshot `json:"limit_snapshot,omitempty"`
 }
 
 type Source struct {
@@ -78,6 +80,7 @@ type RenewalRemote interface {
 type DeniedError struct {
 	Limit, Observed int
 	Reason          string
+	Snapshot        *limitreport.Snapshot
 }
 
 func (*DeniedError) Error() string { return "设备来源名额暂不可用" }
