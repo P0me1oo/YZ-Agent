@@ -42,7 +42,7 @@ func (e *endpoint) DstToBytes() []byte {
 func (e *endpoint) FromPeer(key [32]byte) {
 	e.admitted.Store(e.bind.runtime.authenticated(e.header, e.size, base64.StdEncoding.EncodeToString(key[:]), e.address.Addr()))
 }
-func (b *udpBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
+func (b *udpBind) Open(_ uint16) ([]conn.ReceiveFunc, uint16, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.socket != nil {
@@ -52,7 +52,8 @@ func (b *udpBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	if ip == "" {
 		ip = "::"
 	}
-	address, err := net.ResolveUDPAddr("udp", net.JoinHostPort(ip, fmt.Sprint(port)))
+	// 底层绑定失败会把内部端口置零；后台启用与主动启用都必须重试配置端口。
+	address, err := net.ResolveUDPAddr("udp", net.JoinHostPort(ip, fmt.Sprint(b.runtime.config.ServerPort)))
 	if err != nil {
 		return nil, 0, err
 	}
