@@ -1,6 +1,6 @@
 # YZ-Agent 兼容矩阵
 
-## v2.11.0 服务器流量保护（未发布）
+## v2.11.0 服务器流量保护（已发布）
 
 - 基线 `dev` / `1ce7006f8c2f43125cf2cef25ac6a8d7468dfc83`，实际远程 `P0me1oo/YZ-Agent`。配套面板 `1.82.0`、管理端 `0.54.0`。sing-box 固定 `v1.14.0-yz.2`，Xray 固定 `v0.0.0-20261011032238-77d29e684aed`，依赖文件及两个核心 fork 未改动。
 - 服务器模式读取 Linux 外网网卡计数，自动解析默认出口并去除虚拟接口重复计数；支持指定网卡、单向 / 双向、面板时区月度重置和本地原子持久化。首次启用从 0 开始，不提供手动校准。状态丢失、不可用网卡与存储错误按[保护规则](docs/server-traffic-protection.md)处理。
@@ -9,7 +9,24 @@
 - 双核心实连专项完整通过（8.821 秒）：VLESS、Shadowsocks、Trojan 六组立即停止与恢复，两个核心前置的 TCP/UDP 拒绝直出回退，以及 Xray 重载前后的连接同时关闭。初版共用客户端夹具缺少 Xray 路由格式、回环放行和 Trojan ALPN，已按各核心配置修正夹具后通过，没有修改产品准入规则或弱化拒绝断言。
 - 服务器调度、服务取消后的禁止重启、落地用户同步与普通 WireGuard TCP/UDP、重载、端口失败恢复专项通过（0.592 / 0.971 / 5.983 秒）。验证保持两个核心既有固定依赖，没有更改核心源码目录。
 - Linux amd64、arm64 均使用完整功能标签构建并核对：Go `1.27.0`、`CGO_ENABLED=0`、对应目标架构、完整基线提交、`vcs.modified=true`，实际两个核心解析到本节固定版本。amd64 SHA-256 为 `fded41ad084a59ba926d78c113ee13d5c0fe96449f0138162d118c28d2b92f2b`，arm64 为 `c98c5b7c13ad2df654cf4103a2b4b3c9e5be65a73be2df8c49726fb99b6903fb`。这些是未提交工作区的开发验证产物，不是正式发布附件。
-- 测试均使用本机回环和临时身份，没有连接真实服务器；Linux 实际网卡及跨机联调未执行。没有提交、推送或发布，记录及产物保留在 `D:/codex-tmp/yz-server-traffic-20261015/`。
+- 开发测试使用本机回环和临时身份，没有连接真实服务器；Linux 实际网卡及跨机联调未执行。记录及产物保留在 `D:/codex-tmp/yz-server-traffic-20261015/`。
+
+正式来源 `fb2f3f8aa2b96783129361a58c7ac27ed5bc2622` / `v2.11.0`。[正式流程 38752035741](https://github.com/P0me1oo/YZ-Agent/actions/runs/38752035741) 的 Linux 全量竞态、六个独立兼容包、Mihomo WireGuard、安装器和四组原生防火墙检查全部通过。sing-box 全包 589.480 秒、Xray 4.012 秒、普通 WireGuard 8.439 秒；本次新增计量与取消保护通过，双核心停服、旧实例关闭和中转拒绝直出验证通过。两个 Mihomo 用例分别为 7.281 秒和 3.180 秒。
+
+[Release v2.11.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.11.0) 已发布并设为最新正式版。12 个附件均实际下载，大小和 SHA-256 与 GitHub 一致，`SHA256SUMS` 的 11 项一致；历史 `xboard-node` 同架构附件与 `yz-agent` 相同，安装器与固定源码相同。四个实际程序的 ELF 架构和构建信息与附件一致，均为 Go `1.27.1`、对应 Linux 架构、`CGO_ENABLED=0`、上述完整来源和 `vcs.modified=false`。正式流程实际运行 amd64 的两个程序及双架构镜像，版本和提交均正确。
+
+`ghcr.io/p0me1oo/yz-agent:v2.11.0`、完整提交标签和 `latest` 均为 `sha256:354ff05c0b87f1057d70eda82943db1fbeeeb3a454e7a0e6bfd5089ae9cd512f`。amd64 清单 `sha256:4c3a64ff59a7c84fbdf02b4b98f32c384a6ba480c1d9b4067f5453f425fc6c48`，arm64 清单 `sha256:8a79813ad508541c3e806027d2a4390356226d4e05d9a673864a40a56eefda47`。两个架构全部五层已实际下载校验，镜像内实际程序的来源、架构、固定核心依赖和干净构建状态一致；正式流程实际运行两个镜像，版本与提交正确。
+
+配套面板 `v1.82.0` 来源 `fed4db1d923ef0cb1a7592e5ba6000a17cf7d273`，管理端 `0.54.0`。回滚参考 `v2.10.1`，来源 `2427687c094b3f07c2e790e0ede04371d291eed2`、镜像 `sha256:0f80f326af73def2489c1d8762c8f5b1cd10265e614392d27e2811b7f66054da`，旧双架构清单、来源及所有层已再次核验可获取。先更新面板、再更新所有前置及落地 Node；服务器操作由用户执行。
+
+| 正式附件 | SHA-256 |
+| --- | --- |
+| yz-agent-linux-amd64（含相同的历史别名附件） | `e3360dbca53d6b01ce2c8887476be59d403013845231adc06071aff31ba30764` |
+| yz-agent-linux-arm64（含相同的历史别名附件） | `3b56ab94446ec98ca3e9963a2c3148bfd94e043f7a7bd4c4a13573d958ec4a9a` |
+| xbctl-linux-amd64 | `ade7fbb9bc41662c183ef24ec7e152236c90095e54a6c539c0d30f8542a3eaea` |
+| xbctl-linux-arm64 | `a9864d738d38c8379512172c11df5afc0d6377d6e3be9ac5f1f330fa08e05366` |
+| install.sh | `01948ac91482e83bcd71ec450a513f2bd8778d907770164641b779cfd68222c1` |
+| SHA256SUMS | `1efcee39b653fb0d527b4b2837fea3d641a6d59c8f91c02b3445e815817592eb` |
 
 ## v2.10.1 超限事件来源快照（已发布）
 
