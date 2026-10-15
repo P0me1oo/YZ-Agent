@@ -67,13 +67,21 @@ func (m *Managed) Reload(n *model.NodeSpec, users []model.UserSpec, tls kernel.T
 	return m.Kernel.Reload(n, users, tls)
 }
 func (m *Managed) Stop() {
+	m.stop(false)
+}
+func (m *Managed) StopNow() { m.stop(true) }
+func (m *Managed) stop(immediate bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.runtime != nil {
 		m.runtime.Close()
 		m.runtime = nil
 	}
-	m.Kernel.Stop()
+	if stopper, ok := m.Kernel.(kernel.ImmediateStopper); ok && immediate {
+		stopper.StopNow()
+	} else {
+		m.Kernel.Stop()
+	}
 }
 func (m *Managed) IsRunning() bool {
 	m.mu.Lock()

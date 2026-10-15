@@ -18,6 +18,7 @@ type retiredXray struct {
 	cancel     context.CancelFunc
 	systemWG   *systemwg.Runtime
 	stop       chan struct{}
+	force      chan struct{}
 	done       chan struct{}
 }
 
@@ -30,6 +31,7 @@ func (x *Xray) retireCurrentLocked() *retiredXray {
 		instance: x.instance, dispatcher: x.limitDispatcher, config: x.nodeConfig, cancel: x.cancel,
 		systemWG: x.systemWG,
 		stop:     make(chan struct{}), done: make(chan struct{}),
+		force: make(chan struct{}),
 	}
 	x.retired = append(x.retired, previous)
 	return previous
@@ -67,6 +69,8 @@ func (x *Xray) recycleOld(previous *retiredXray) {
 drain:
 	for previous.dispatcher != nil && previous.dispatcher.connCount.Load() > 0 {
 		select {
+		case <-previous.force:
+			break drain
 		case <-ticker.C:
 		case <-stop:
 			// 退出时所有旧实例共同使用短排空窗口，避免等待每次重载的五分钟期限。

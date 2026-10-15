@@ -270,7 +270,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	// 证书与节点配置一起应用，失败时保留控制通道接收修正。
 	defer s.cert.Stop()
 	defer func() {
-		s.stopKernel()
+		s.stopKernelFor(context.Cause(ctx))
 		if s.deviceGate != nil {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -325,7 +325,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.stopKernel()
+			s.stopKernelFor(context.Cause(ctx))
 			s.pushReportSync()
 			return nil
 
@@ -400,6 +400,9 @@ func (s *Service) initialSetup(ctx context.Context) error {
 
 	bootstrap, err := s.source.Initial(ctx, s.wsMetrics, s.wsEvents, s.wsStatusCh)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if provider, ok := s.source.(interface{ DeviceHandoverClient() devicegate.Remote }); ok {
@@ -979,6 +982,9 @@ func (s *Service) startKernel(ctx context.Context, nc *model.NodeSpec, users []m
 // ensureRunning starts the kernel if it is not running and there are users +
 // config available. Returns true if the kernel is running afterwards.
 func (s *Service) ensureRunning(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	if s.kernel.IsRunning() {
 		return true
 	}
@@ -1172,6 +1178,9 @@ func subtractUsers(base, delta []model.UserSpec) []model.UserSpec {
 // applyChanges applies config changes to the kernel. User-only changes are
 // handled by applyUserUpdate/applyUserDelta directly via the atomic user API.
 func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged bool) bool {
+	if ctx.Err() != nil {
+		return false
+	}
 	if !configChanged || s.lastConfig == nil {
 		return true
 	}

@@ -114,6 +114,9 @@ type SpeedLimitRefresher interface {
 	RefreshSpeedLimits()
 }
 
+// ImmediateStopper 用于额度保护，关闭监听和存量连接，不等待自然排空。
+type ImmediateStopper interface{ StopNow() }
+
 // DeviceGateConsumer 把实际连接的准入和关闭交给面板协调器。
 type DeviceGateConsumer interface {
 	SetDeviceGate(*devicegate.Manager)

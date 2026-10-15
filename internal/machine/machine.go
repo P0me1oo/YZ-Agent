@@ -16,6 +16,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
+	"github.com/P0me1oo/YZ-Agent/internal/machinetraffic"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/monitor"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
@@ -26,6 +27,7 @@ import (
 // nodeHandle tracks a running node service.
 type nodeHandle struct {
 	cancel           context.CancelFunc
+	protect          context.CancelFunc
 	done             chan struct{}
 	mailbox          *controlplane.NodeMailbox
 	kernel           string // actual runtime kernel after transport compatibility resolution
@@ -44,8 +46,10 @@ type Orchestrator struct {
 	firewall     firewall.Controller
 	client       *panel.Client // machine-level client (no node_id)
 
-	mu    sync.Mutex
-	nodes map[int]*nodeHandle // node_id → handle
+	mu             sync.Mutex
+	nodes          map[int]*nodeHandle // node_id → handle
+	trafficMeter   *machinetraffic.Meter
+	trafficBlocked atomic.Bool
 
 	// Per-node mailbox keyed by node_id. Shared WS events are aggregated here
 	// and each node service drains the latest state when ready.
@@ -242,6 +246,16 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return fmt.Errorf("initial node discovery: %w", err)
 	}
 
+	if err := o.initTraffic(ctx, nodesResp.Traffic); err != nil {
+		nlog.Core().Error("machine traffic initialization failed; proxies remain protected", "error", err)
+	}
+	if o.trafficMeter != nil {
+		// 首次有效采样可能已经解除面板的等待计量状态，重新取得管理员启用的节点。
+		if refreshed, err := o.client.GetMachineNodes(); err == nil {
+			nodesResp = refreshed
+		}
+		go o.trafficLoop(ctx)
+	}
 	o.applyIntervals(nodesResp.BaseConfig)
 	nlog.Core().Info(fmt.Sprintf("machine %d: discovered %d nodes",
 		o.cfg.Machine.MachineID, len(nodesResp.Nodes)))
@@ -316,12 +330,18 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 		}
 	}
 
-	nodeCtx, cancel := context.WithCancel(ctx)
+	if o.trafficBlocked.Load() || ctx.Err() != nil {
+		o.mu.Unlock()
+		return
+	}
+	nodeCtx, cancelCause := context.WithCancelCause(ctx)
+	cancel := func() { cancelCause(context.Canceled) }
 	done := make(chan struct{})
 	mb := controlplane.NewNodeMailbox()
 	o.nodes[mn.ID] = &nodeHandle{
 		cancel: cancel, done: done, mailbox: mb,
-		kernel: wantedKernel, configuredKernel: wantedKernel,
+		protect: func() { cancelCause(service.ErrTrafficProtection) },
+		kernel:  wantedKernel, configuredKernel: wantedKernel,
 	}
 	o.mu.Unlock()
 
@@ -408,6 +428,10 @@ func (o *Orchestrator) finishNode(nodeID int, done chan struct{}, runErr error) 
 	o.mu.Unlock()
 	if runErr != nil {
 		o.setNodeStatus(nodeID, service.RuntimeFailed)
+	}
+	// 提额可能早于旧服务完成退出；退出后重新发现，避免等待长连接的周期校对。
+	if runErr == nil && o.trafficMeter != nil && !o.trafficBlocked.Load() && o.runCtx != nil && o.runCtx.Err() == nil {
+		go o.rediscover(o.runCtx)
 	}
 }
 

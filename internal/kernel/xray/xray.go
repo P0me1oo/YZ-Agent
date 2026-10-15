@@ -297,6 +297,12 @@ func (x *Xray) Reload(nodeConfig *model.NodeSpec, users []model.UserSpec, tls ke
 
 // Stop gracefully shuts down the kernel, draining active connections first.
 func (x *Xray) Stop() {
+	x.stop(false)
+}
+
+func (x *Xray) StopNow() { x.stop(true) }
+
+func (x *Xray) stop(immediate bool) {
 	x.lifecycleMu.Lock()
 	defer x.lifecycleMu.Unlock()
 	x.running.Store(false)
@@ -312,6 +318,13 @@ func (x *Xray) Stop() {
 
 	x.closeOld(old)
 	for _, previous := range retired {
+		if immediate && previous.force != nil {
+			select {
+			case <-previous.force:
+			default:
+				close(previous.force)
+			}
+		}
 		select {
 		case <-previous.stop:
 		default:

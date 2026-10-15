@@ -295,7 +295,17 @@ func (s *SingBox) Stop() {
 	s.stop()
 }
 
+func (s *SingBox) StopNow() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopImmediately(true)
+}
+
 func (s *SingBox) stop() {
+	s.stopImmediately(false)
+}
+
+func (s *SingBox) stopImmediately(immediate bool) {
 	if s.box == nil {
 		return
 	}
@@ -309,7 +319,7 @@ func (s *SingBox) stop() {
 	}
 
 	// Step 2: wait for in-flight connections to drain naturally (best-effort).
-	if s.connTracker != nil {
+	if s.connTracker != nil && !immediate {
 		deadline := time.Now().Add(drainTimeout)
 		for time.Now().Before(deadline) {
 			if s.connTracker.ActiveCount() == 0 {

@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
+	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
@@ -43,7 +45,17 @@ func computeKernelConfigHash(node *model.NodeSpec) string {
 
 // 停止监听后再清理规则。退出上下文已经取消时仍给清理操作独立的执行时间。
 func (s *Service) stopKernel() {
-	s.kernel.Stop()
+	s.stopKernelFor(nil)
+}
+
+var ErrTrafficProtection = errors.New("machine traffic protection")
+
+func (s *Service) stopKernelFor(cause error) {
+	if stopper, ok := s.kernel.(kernel.ImmediateStopper); ok && errors.Is(cause, ErrTrafficProtection) {
+		stopper.StopNow()
+	} else {
+		s.kernel.Stop()
+	}
 	if s.firewall == nil {
 		return
 	}
