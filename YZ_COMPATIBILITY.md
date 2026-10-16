@@ -1,5 +1,14 @@
 # YZ-Agent 兼容矩阵
 
+## v2.13.0 访问记录（已发布）
+
+- [Release v2.13.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.13.0) 已发布并核对为最新正式版，Tag 固定到 `d44e61216e8873b55dfb075cf778a98b35c8ff96`。配套面板 `1.86.0` / `bcfffd014f587a9305df17403609fb45d06d0c7a`、管理端 `0.58.0` / `6de07de567b43f948592b02b66efc98d6e726279`。两个核心源码、`go.mod` 和 `go.sum` 不变，仍为 `YZ-sing-box v1.14.0-yz.2`、`YZ-Xray-core v0.0.0-20261011032238-77d29e684aed`。
+- [正式 CI 38934603488](https://github.com/P0me1oo/YZ-Agent/actions/runs/38934603488) 全部通过：Linux 全仓竞态、独立核心兼容包、双核心实连、中转及恢复、Mihomo、安装器、四组原生防火墙、双架构程序和镜像内实际版本检查。面板正式双数据库完整回归、管理端完整验证及本机 Node → Laravel → 管理页面的隔离联调均通过，重复批次只保存一次，非法目标被拒绝，桌面和手机正常查询。
+- 12 个附件全部实际下载，大小、GitHub 摘要与 `SHA256SUMS` 的 11 项均一致；安装脚本与固定源码相同，历史 `xboard-node` 附件与同架构 `yz-agent` 相同。四个实际程序的 Linux ELF、Go `1.27.1`、目标架构、`CGO_ENABLED=0`、`-trimpath=true`、完整 `vcs.revision` 和 `vcs.modified=false` 均正确，构建信息与随附文件相同。正式流程实际执行 `yz-agent` 与 `xbctl`，版本 `v2.13.0` 和提交均正确，没有本地核心路径依赖。
+- `yz-agent-linux-amd64` SHA-256 为 `cca33e5bce661609cb688cbcf032c5dec9ee16fb845dc6be59747851c81b083b`，arm64 为 `3f6c1c416ec9d33dbf25d708f324a859c8ff0bb390a9685d6cc82aaa03641987`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.13.0`、完整提交标签和 `latest` 均为 `sha256:5775ec9d5a33472e09d1b8fc9935438227af115fc441214c22780aff4c7e4690`。amd64 清单 `sha256:ce742b5d66b129d1e44c012c7e38df158fc53cf8cdd4f845d9d65ca1c09482a8`，arm64 清单 `sha256:d896be7495b8acd6e7fcde59faaec99bc2fb7cd43e42067bec8375320b1f3949`。两个架构全部五层已匿名下载核验，镜像内实际程序的来源、架构、固定核心依赖和干净构建状态一致；正式流程已实际运行两个架构镜像并核对版本。
+- 先更新面板，再更新所有相关 Node。回滚参考 `v2.12.0` / `9892e68b18cc6aa8250d64abc782b25095431b16`，镜像 `sha256:d5f1ab5d0e55375e762377b48a5284cbc2c12a4336629d4605d639421f43e1c6`；该版本双架构与镜像层已核验可获取。未连接或更新生产服务器；开发阶段的 Windows 指针校验与超时不记为通过，以最终正式 Linux 流程为发布依据。临时身份、隔离数据库和测试服务已清理或重置，无凭据核验结果位于 `D:/codex-tmp/yz-full-audit-20261016/`，发布后文档提交不移动 Tag 或改变固定来源。
+
 ## v2.13.0 访问记录开发验证记录
 
 - 基线 `dev` / `c3b6b53ea1972ce87271502921bfc9a8b805fd6c`，实际远程为 `P0me1oo/YZ-Agent`，开始时工作区干净。配套面板 `1.86.0`、管理端 `0.58.0`。sing-box 保持 `v1.14.0-yz.2`，Xray 保持 `v0.0.0-20261011032238-77d29e684aed`；两个核心源码和依赖文件均未修改。
