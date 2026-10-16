@@ -1,6 +1,6 @@
 # Reality 目标检测
 
-Node `v2.12.0` 配套面板 `1.85.0`、管理端 `0.57.0`，目前未发布。完整交互和限制见 [面板使用说明](../../YZboard/docs/reality-target-scan.md)。本功能在服务器模式启用，不修改 Xray、sing-box 或代理配置，不开放新监听端口。
+Node `v2.12.0` 配套面板 `1.85.0`、管理端 `0.57.0`，已正式发布；先更新面板，再更新 Node。完整交互和限制见 [面板使用说明](../../YZboard/docs/reality-target-scan.md)。本功能在服务器模式启用，不修改 Xray、sing-box 或代理配置，不开放新监听端口。
 
 Node 在原五秒控制请求中声明 `reality_scan_supported`，附带最近一次 `reality_scan` 报告，并接收响应中的同名任务。报告独立于重启/升级的 `operation`，服务器不需要开放入站管理端口。旧面板忽略新增字段后继续工作；旧 Node 未声明能力时，面板拒绝创建检测任务。
 

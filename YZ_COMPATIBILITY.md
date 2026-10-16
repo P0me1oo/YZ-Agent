@@ -1,13 +1,18 @@
 # YZ-Agent 兼容矩阵
 
-## v2.12.0 Reality 目标检测（发布准备）
+## v2.12.0 Reality 目标检测（已发布）
 
 - 工作区基线 `dev` / `69492dc3e3834d44cefc5590e862070522ae139f`，实际远程 `P0me1oo/YZ-Agent`。保留并纳入已有未提交 `v2.11.1` 网卡默认路由识别修复。配套面板 `1.85.0`、管理端 `0.57.0`，核心依赖文件和两个核心 fork 不变。
 - 服务器模式通过既有控制请求接收 Reality 检测任务，支持指定域名、IP、CIDR、证书发现后复测和可用性排序，预设去掉 Cloudflare。拒绝非公网与混合私网解析；重复任务复用结果，确认后停止上传，任务替换和退出时取消检测。检测与重启/升级互相独立，旧面板继续兼容。详见 [功能说明](docs/reality-target-scan.md)。
 - 本地 Go `1.27.0` / Windows 的检测及面板通信专项已通过，覆盖真实本机 TLS 握手、证书域名发现与复测、信任和主机名失败、TLS/HTTP2 要求、DNS 地址固定、私网拦截、数量边界、重复投递、撤销、迟到结果及任务确认。既有机器和控制层检查已通过；实际 Linux 网卡和两个核心启动、状态回传由正式 Linux 全量流程验证。
-- 本地测试只使用回环 TLS 服务和独立临时身份，没有扫描公网或操作生产服务器。记录及修改前 Node 文件备份位于 `D:/codex-tmp/yz-reality-scan-20261016/`。正式固定来源、检查、附件与双架构镜像结果在发布完成后补入。
+- 本地测试只使用回环 TLS 服务和独立临时身份，没有扫描公网或操作生产服务器。记录及修改前 Node 文件备份位于 `D:/codex-tmp/yz-reality-scan-20261016/`。
+- [Release v2.12.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.12.0) 已发布并核对为最新正式版，Tag 固定到 `9892e68b18cc6aa8250d64abc782b25095431b16`。[正式 CI 38879009859](https://github.com/P0me1oo/YZ-Agent/actions/runs/38879009859) 全部通过：Linux 完整功能标签和竞态检查、两个核心、面板通信、计量恢复、Reality 检测、安装器迁移、四组防火墙后端检查，以及双架构构建和镜像内实际版本检查。
+- 12 个附件全部下载，11 项 `SHA256SUMS` 与 GitHub 附件摘要核对通过；安装脚本与固定提交一致，旧 `xboard-node` 附件与统一 `yz-agent` 程序逐字节一致。amd64、arm64 的 ELF、`GOOS=linux`、`CGO_ENABLED=0`、完整 `vcs.revision` 和 `vcs.modified=false` 均核对，实际构建信息与随附文件一致。核心仍为 `YZ-sing-box v1.14.0-yz.2`、`YZ-Xray-core v0.0.0-20261011032238-77d29e684aed`，没有本地路径依赖。
+- `yz-agent-linux-amd64` SHA-256 为 `5fb932d5ffccf2459ede37d4be278d7baf0a23dfbbda5e70a929727553f01b6c`，arm64 为 `3a807a42be173af28b1e206643c9fb2b210e0a34a6078ebaac2ff28951e54b75`。正式工作流实际运行 `yz-agent` 与 `xbctl` 的版本输出均为 `v2.12.0`，来源提交一致。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.12.0`、完整提交标签 `9892e68b18cc6aa8250d64abc782b25095431b16` 和 `latest` 同为 `sha256:d5f1ab5d0e55375e762377b48a5284cbc2c12a4336629d4605d639421f43e1c6`。两个架构的 OCI 来源、版本、镜像层摘要及内部程序的实际构建信息均已核验，支持 `linux/amd64` 和 `linux/arm64`。
+- 先更新面板 `1.85.0`，再执行 Node 常规升级；回滚参考 `v2.11.0` / `sha256:354ff05c0b87f1057d70eda82943db1fbeeeb3a454e7a0e6bfd5089ae9cd512f`，已核验双架构与镜像层可获取。未连接或更新生产服务器，发布后文档提交不移动 Tag 或改变固定构建来源。
 
-## v2.11.1 默认出口识别修复（未发布）
+## v2.11.1 默认出口识别修复（开发记录，已纳入 v2.12.0）
 
 - 开发基线 `dev` / `69492dc3e3834d44cefc5590e862070522ae139f`，实际远程为 `P0me1oo/YZ-Agent`。程序入口与 Makefile 默认版本均为 `v2.11.1`；未提交、未创建 Tag 或发布。
 - 修复计量模块将默认路由目标限定为空的问题。固定依赖 `github.com/vishvananda/netlink v1.3.1` 会补全默认目标，现在同时识别 IPv4 `0.0.0.0/0`、IPv6 `::/0` 和空目标，保留主路由表、单播类型、最低优先级及多路径出口选择。
