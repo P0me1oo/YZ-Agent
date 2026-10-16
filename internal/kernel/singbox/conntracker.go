@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"io"
 	"net"
 	"sync"
@@ -140,6 +141,7 @@ func (u *userStats) aliveIPList() map[string]bool {
 //   - Close callback to decrement IP refcounts
 //   - Per-connection rate limit token accumulation (amortized WaitN)
 type ConnTracker struct {
+	accessLog    *accesslog.Recorder
 	relayAccess  kernel.RelayAccess
 	deviceFilter *deviceip.Filter
 	deviceGate   atomic.Pointer[devicegate.Manager]
@@ -353,10 +355,14 @@ func (t *ConnTracker) RoutedConnection(
 	t.usersMu.Lock()
 	t.connMap[connID] = wrapped
 	t.usersMu.Unlock()
-	if !t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() }) {
+	registered := t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() })
+	if !registered {
 		_ = wrapped.Close()
 	}
 	permit.Bind(func() { _ = wrapped.Close() })
+	if registered && permit.Valid() {
+		t.recordAccess(uid, metadata)
+	}
 	return wrapped
 }
 
@@ -433,10 +439,14 @@ func (t *ConnTracker) RoutedPacketConnection(
 		relay:        relay,
 		relaySource:  t.trackRelaySource(uid, outbound, sourceIP),
 	}
-	if !t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() }) {
+	registered := t.relayAccess.Register(connID, metadata.User, func() { _ = wrapped.Close() })
+	if !registered {
 		_ = wrapped.Close()
 	}
 	permit.Bind(func() { _ = wrapped.Close() })
+	if registered && permit.Valid() {
+		t.recordAccess(uid, metadata)
+	}
 	return wrapped
 }
 

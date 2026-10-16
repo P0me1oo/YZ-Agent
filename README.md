@@ -1,5 +1,7 @@
 # YZ-Agent
 
+`v2.13.0` 本地新增代理访问记录，配套面板 `1.86.0`、管理端 `0.58.0`，尚未发布。只记录用户、域名或 IP、端口和连接时间，支持批量确认与缓存恢复；范围和保存限制见[访问记录](docs/access-logs.md)。
+
 [`v2.12.0`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.12.0) 已发布，配套面板 `1.85.0`、管理端 `0.57.0`。新增节点服务器执行的 Reality 目标检测，支持域名、IP 和指定网段，通过原控制连接返回延迟与结果；预设去掉 Cloudflare，两个核心不变。包含此前未独立发布的 `v2.11.1` 出口网卡识别修复；12 个附件及双架构镜像已核验，先更新面板，再执行 `yz-agent upgrade`。见 [Reality 目标检测](docs/reality-target-scan.md)与[发布记录](YZ_COMPATIBILITY.md)。
 
 [`v2.11.0`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.11.0) 已发布，配套面板 `1.82.0`，新增服务器网卡流量保护。首次启用从 0 开始，无手动校准；超限关闭全部受管代理并保留管理连接。Linux 完整检查、12 个附件和双架构镜像均已核验，使用及恢复规则见[服务器流量保护](docs/server-traffic-protection.md)，来源与校验值见[兼容矩阵](YZ_COMPATIBILITY.md)。

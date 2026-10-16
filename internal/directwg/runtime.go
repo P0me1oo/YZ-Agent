@@ -229,6 +229,7 @@ func (r *Runtime) NewConnectionEx(_ context.Context, c net.Conn, source, destina
 			}
 		})
 	}
+	r.state.accessLog.Add(id, destination.Fqdn, destination.Addr.String(), destination.Port)
 	r.router.WireGuardTCP(ctx, limited, M.Socksaddr{Addr: public, Port: source.Port}, destination, done)
 }
 func (r *Runtime) NewPacketConnectionEx(_ context.Context, c N.PacketConn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
@@ -253,6 +254,7 @@ func (r *Runtime) NewPacketConnectionEx(_ context.Context, c N.PacketConn, sourc
 			}
 		})
 	}
+	r.state.accessLog.Add(id, destination.Fqdn, destination.Addr.String(), destination.Port)
 	r.router.WireGuardUDP(ctx, limited, M.Socksaddr{Addr: public, Port: source.Port}, destination, done)
 }
 

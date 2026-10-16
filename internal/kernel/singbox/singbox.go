@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"reflect"
 	"sync"
 	"time"
@@ -37,7 +38,8 @@ const drainTimeout = 5 * time.Second
 // UpdatableInbound interface, which hot-swaps user credentials without
 // restarting listeners — zero connection disruption.
 type SingBox struct {
-	cfg config.KernelConfig
+	accessLog *accesslog.Recorder
+	cfg       config.KernelConfig
 
 	mu       sync.RWMutex
 	box      *box.Box
@@ -162,6 +164,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 
 	// 在开放监听前注册统计器，首个连接也必须纳入同一份用户统计。
 	tracker := NewConnTracker(0)
+	tracker.accessLog = s.accessLog
 	tracker.deviceGate.Store(s.deviceGate)
 	tracker.deviceFilter = s.deviceFilter
 	tracker.traffic = s.traffic

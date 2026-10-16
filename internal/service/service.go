@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"github.com/P0me1oo/YZ-Agent/internal/cert"
 	"github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -36,6 +37,8 @@ import (
 )
 
 type Service struct {
+	accessLog         *accesslog.Recorder
+	accessLogFailed   bool
 	cfg               *config.Config
 	source            controlplane.Source
 	sink              controlplane.Sink
@@ -226,10 +229,15 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 	}
 
 	k = directwg.Wrap(k)
+	accessRecorder := &accesslog.Recorder{}
+	if consumer, ok := k.(interface{ SetAccessLog(*accesslog.Recorder) }); ok {
+		consumer.SetAccessLog(accessRecorder)
+	}
 	l := limiter.New()
 	st := limiter.NewSpeedTracker(l)
 
 	return &Service{
+		accessLog:    accessRecorder,
 		cfg:          cfg,
 		source:       cp,
 		sink:         cp,
@@ -287,6 +295,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	if err := s.initialSetup(ctx); err != nil {
 		return fmt.Errorf("initial setup: %w", err)
 	}
+	defer s.startAccessLog(ctx)()
 
 	// 状态实时采样与流量批次周期分离，累计流量仍沿用原有落盘和确认。
 	trackInterval := time.Duration(s.cfg.Node.TrackInterval) * time.Second
@@ -402,6 +411,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.initializeAccessLog()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

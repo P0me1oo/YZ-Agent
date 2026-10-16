@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"os"
 	"strings"
 	"sync"
@@ -60,7 +61,8 @@ const (
 //   - instance.Start() and instance.Close() run OUTSIDE the lock.
 //   - running (atomic) gates fast-path checks in IsRunning / GetConnections.
 type Xray struct {
-	cfg config.KernelConfig
+	accessLog *accesslog.Recorder
+	cfg       config.KernelConfig
 
 	// mu protects instance, limitDispatcher, users, protocol, inboundTag,
 	// lastKernelHash, and cumTraffic. Never held during slow I/O.
@@ -188,6 +190,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	ctx = systemWGContext(ctx, wgRuntime)
 	ctx = internet.ContextWithProxyProtocolTrust(ctx, x.proxyTrust)
 	ctx = context.WithValue(ctx, deviceFilterContextKey{}, x.deviceFilter)
+	ctx = context.WithValue(ctx, accessLogContextKey{}, x.accessLog)
 	ctx = singService.ContextWithDefaultRegistry(ctx)
 	singService.MustRegister[ntp.TimeService](ctx, timesync.Default())
 	xrayCreationMu.Lock()

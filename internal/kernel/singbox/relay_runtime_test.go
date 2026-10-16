@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/directwg"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
@@ -200,9 +201,13 @@ func TestSingBoxRelayVLESSTransports(t *testing.T) {
 	}
 }
 
-func relayStartCore(t *testing.T, kind string, node *model.NodeSpec, users []model.UserSpec, cert kernel.TLSCert, target string) kernel.Kernel {
+func relayStartCore(t *testing.T, kind string, node *model.NodeSpec, users []model.UserSpec, cert kernel.TLSCert, target string, recorders ...*accesslog.Recorder) kernel.Kernel {
 	t.Helper()
 	node.CustomRoutes = nil
+	if len(recorders) > 0 && kind == "singbox" && node.Relay == nil {
+		// 域名专项直接交给本机 SOCKS 夹具，不访问外部 DNS。
+		node.CustomRoutes = []map[string]any{{"domain": []string{"example.test"}, "action": "route", "outbound": "direct"}}
+	}
 	cfg := config.KernelConfig{Type: kind, LogLevel: "fatal", ConfigDir: t.TempDir()}
 	_, port, err := net.SplitHostPort(target)
 	if err != nil {
@@ -242,6 +247,9 @@ func relayStartCore(t *testing.T, kind string, node *model.NodeSpec, users []mod
 				break
 			}
 		}
+	}
+	if len(recorders) > 0 {
+		core.(interface{ SetAccessLog(*accesslog.Recorder) }).SetAccessLog(recorders[0])
 	}
 	if err := core.Start(node, users, cert); err != nil {
 		t.Fatal(err)
@@ -289,9 +297,12 @@ func relayMarkerEcho(t *testing.T, marker string) string {
 	return tcp.Addr().String()
 }
 
-func relayMarkerExchange(t *testing.T, client adapter.Outbound, marker, network string) {
+func relayMarkerExchange(t *testing.T, client adapter.Outbound, marker, network string, targets ...singM.Socksaddr) {
 	t.Helper()
 	destination := singM.ParseSocksaddr("198.51.100.10:80")
+	if len(targets) > 0 {
+		destination = targets[0]
+	}
 	want := []byte(marker + ":" + runtimePayload)
 	if network == "tcp" {
 		conn := runtimeDial(t, client, destination)
@@ -313,7 +324,11 @@ func relayMarkerExchange(t *testing.T, client adapter.Outbound, marker, network 
 		if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			t.Fatalf("无法设置 UDP 读取超时: %v", err)
 		}
-		if _, err := conn.WriteTo([]byte(runtimePayload), destination.UDPAddr()); err != nil {
+		var target net.Addr = destination.UDPAddr()
+		if destination.IsFqdn() {
+			target = destination
+		}
+		if _, err := conn.WriteTo([]byte(runtimePayload), target); err != nil {
 			t.Fatal(err)
 		}
 		got := make([]byte, 65535)

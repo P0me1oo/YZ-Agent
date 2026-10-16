@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/directwg"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
@@ -153,6 +154,9 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 				base = singbox.New(cfg)
 			}
 			k := directwg.Wrap(base)
+			recorder := &accesslog.Recorder{}
+			recorder.Enable(true)
+			k.(interface{ SetAccessLog(*accesslog.Recorder) }).SetAccessLog(recorder)
 			t.Cleanup(k.Stop)
 			n := &model.NodeSpec{Protocol: "wireguard", KernelType: name, ListenIP: "127.0.0.1", ServerPort: port, WireGuard: &panel.WireGuardConfig{PrivateKey: serverPriv, Address: []string{"10.0.0.1/32"}, MTU: 1420}}
 			users := []model.UserSpec{{ID: 1, UUID: "wg-runtime-user", DeviceLimit: 1, WireGuard: &panel.WireGuardPeer{PublicKey: clientPub, Address: []string{"10.0.0.2/32"}}}}
@@ -163,6 +167,16 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 			client := wgClient(t, clientPriv, serverPub, port, users[0].WireGuard.Address)
 			exchange(t, client, "tcp", tcp)
 			exchange(t, client, "udp", udp)
+			batch, logErr := recorder.Next()
+			if logErr != nil || batch == nil || len(batch.Records) != 2 {
+				t.Fatal("普通 WG 的 TCP/UDP 访问记录不完整或重复")
+			}
+			for _, record := range batch.Records {
+				if record.UserID != 1 || record.Destination != "198.51.100.10" || record.Port == 0 {
+					t.Fatal("普通 WG 访问记录身份或目标错误")
+				}
+			}
+			recorder.Ack(batch.ID)
 			traffic, alive, _, e := k.GetUserTraffic(context.Background())
 			if e != nil || traffic[1][0] == 0 || traffic[1][1] == 0 {
 				t.Fatal("用户流量未统计")

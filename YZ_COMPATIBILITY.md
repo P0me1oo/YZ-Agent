@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.13.0 访问记录（本地开发，未发布）
+
+- 基线 `dev` / `c3b6b53ea1972ce87271502921bfc9a8b805fd6c`，实际远程为 `P0me1oo/YZ-Agent`，开始时工作区干净。配套面板 `1.86.0`、管理端 `0.58.0`。sing-box 保持 `v1.14.0-yz.2`，Xray 保持 `v0.0.0-20261011032238-77d29e684aed`；两个核心源码和依赖文件均未修改。
+- 通过核心适配层和普通 WireGuard 的用户准入层采集目标主机、端口、用户编号和连接时间。按面板能力启用，独立批次确认、限长队列及磁盘快照不参与流量结算。中转只记录入口，正常重载沿用队列。采集和丢失边界见[访问记录](docs/access-logs.md)。
+- Windows / Go `1.27.0` / LLVM MinGW、完整功能标签下，竞态专项通过：`go test -mod=readonly -race -count=1 -timeout 5m -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./internal/accesslog ./internal/panel ./internal/controlplane ./internal/service ./internal/kernel/xray ./internal/kernel/singbox ./internal/directwg -run 'Test(HostOnly|RetryCheckpoint|ConcurrentBound|CorruptStore|AccessLog|DirectWireGuardTCPUDPAndUsers)'` 中，队列、HTTP 确认、服务恢复与普通 WG 分别通过。覆盖非法地址、IP 回退、并发上限、确认丢失、固定快照、过期、损坏缓存、写入失败和重启重试；普通 WG 实际 TCP/UDP 的身份、目标及不重复采集通过。
+- 双核心实连夹具首轮存在导入名称冲突及域名 DNS、UDP 地址类型、Xray Trojan ALPN 配置问题，均在测试代码修正。最终 `./internal/kernel/singbox -run '^TestAccessLog'` 在相同竞态与完整标签参数下全部通过（25.495 秒）：六组核心/协议组合的域名和 IP、TCP/UDP、重载；四组双核心中转及落地不重复；追踪器域名优先和 IPv6 回退。测试只使用本机回环、测试域名和临时身份，未弱化产品路由或准入规则。
+- 既有通信与生命周期专项 `./internal/panel ./internal/controlplane ./internal/service -run 'Test.*(Handshake|Initial|Bootstrap|Realtime|Snapshot|Report|Discovery)'` 在上述竞态参数下全部通过（2.105 / 1.811 / 6.053 秒），覆盖原配置、用户、状态、握手和报告路径。
+- Linux amd64、arm64 完整标签构建均通过，实际 ELF 架构已核对；解析为上述固定核心依赖，Go `1.27.0`、`CGO_ENABLED=0`、对应架构和 `GOOS=linux`。VCS 来源均为本节完整基线，`vcs.modified=true`；程序版本 `v2.13.0`。产物为未提交工作区的开发构建，不能视为正式 Release 附件。
+- 开发产物保留在 `D:/codex-tmp/yz-access-log-20261016/`。amd64 SHA-256 `1bb47ef2cc9bf83873e8783eb4d81c951892c99ce5c44f9fe6142b29252a7caf`；arm64 SHA-256 `a200a7f353ba73776590e9c77c0c9b8fdd77f7401b05e62041cdd7e597f55149`。未在 Linux 宿主机运行，未连接真实服务器，未执行全仓完整回归、提交、推送或发布。
+
 ## v2.12.0 Reality 目标检测（已发布）
 
 - 工作区基线 `dev` / `69492dc3e3834d44cefc5590e862070522ae139f`，实际远程 `P0me1oo/YZ-Agent`。保留并纳入已有未提交 `v2.11.1` 网卡默认路由识别修复。配套面板 `1.85.0`、管理端 `0.57.0`，核心依赖文件和两个核心 fork 不变。

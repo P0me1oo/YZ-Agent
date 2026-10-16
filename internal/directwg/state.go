@@ -3,6 +3,7 @@ package directwg
 import (
 	"context"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"io"
 	"net/netip"
 	"slices"
@@ -34,6 +35,7 @@ type userState struct {
 }
 
 type State struct {
+	accessLog   *accesslog.Recorder
 	mu          sync.Mutex
 	users       map[int]*userState
 	byKey       map[string]int
