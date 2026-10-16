@@ -1,5 +1,22 @@
 # YZ-Agent 兼容矩阵
 
+## v2.12.0 Reality 目标检测（发布准备）
+
+- 工作区基线 `dev` / `69492dc3e3834d44cefc5590e862070522ae139f`，实际远程 `P0me1oo/YZ-Agent`。保留并纳入已有未提交 `v2.11.1` 网卡默认路由识别修复。配套面板 `1.85.0`、管理端 `0.57.0`，核心依赖文件和两个核心 fork 不变。
+- 服务器模式通过既有控制请求接收 Reality 检测任务，支持指定域名、IP、CIDR、证书发现后复测和可用性排序，预设去掉 Cloudflare。拒绝非公网与混合私网解析；重复任务复用结果，确认后停止上传，任务替换和退出时取消检测。检测与重启/升级互相独立，旧面板继续兼容。详见 [功能说明](docs/reality-target-scan.md)。
+- 本地 Go `1.27.0` / Windows 的检测及面板通信专项已通过，覆盖真实本机 TLS 握手、证书域名发现与复测、信任和主机名失败、TLS/HTTP2 要求、DNS 地址固定、私网拦截、数量边界、重复投递、撤销、迟到结果及任务确认。既有机器和控制层检查已通过；实际 Linux 网卡和两个核心启动、状态回传由正式 Linux 全量流程验证。
+- 本地测试只使用回环 TLS 服务和独立临时身份，没有扫描公网或操作生产服务器。记录及修改前 Node 文件备份位于 `D:/codex-tmp/yz-reality-scan-20261016/`。正式固定来源、检查、附件与双架构镜像结果在发布完成后补入。
+
+## v2.11.1 默认出口识别修复（未发布）
+
+- 开发基线 `dev` / `69492dc3e3834d44cefc5590e862070522ae139f`，实际远程为 `P0me1oo/YZ-Agent`。程序入口与 Makefile 默认版本均为 `v2.11.1`；未提交、未创建 Tag 或发布。
+- 修复计量模块将默认路由目标限定为空的问题。固定依赖 `github.com/vishvananda/netlink v1.3.1` 会补全默认目标，现在同时识别 IPv4 `0.0.0.0/0`、IPv6 `::/0` 和空目标，保留主路由表、单播类型、最低优先级及多路径出口选择。
+- YT-香港已通过 netcatty 只读排查：运行 `v2.11.0`，主路由表默认出口为 `eth0`，来宾系统的 virtio 网卡和收发计数可读，本地状态仍报告网卡不可用且未建立基线；流量上限为 0。未更改远端程序、配置、服务或计量文件，未在服务器执行修复后程序。
+- 本次仅修改 Node 采集逻辑与相关测试、版本和说明，未修改面板、管理端、通信格式、计量状态格式、两个核心及固定依赖；升级保留实例目录及已有计量状态。
+- Windows / Go `1.27.0` 下，执行 `go test -mod=readonly -count=1 ./internal/machinetraffic -run '^TestDefaultRouteLinkIndices$'` 在修复前按预期复现 7 个失败场景；修复后 12 个路由场景及已有计量测试全部通过。完整功能标签下 `go test -mod=readonly -race -count=1 -timeout 3m ./internal/machinetraffic` 通过（58.424 秒），覆盖计量恢复、重启续计、周期切换、计数归零、状态丢失、写盘失败、并发策略更新和底层网卡去重。
+- 同环境、完整功能标签及竞态检查下，保护时保留管理通道和计量上报兼容专项通过（分别 5.225 秒、6.344 秒），命令为 `go test -mod=readonly -race -count=1 -timeout 3m ./internal/machine ./internal/panel -run '^(TestTrafficProtectionCancelsAllProxiesButPreservesManagement|TestMachineTrafficProtocol)$'`。
+- Linux amd64、arm64 完整功能标签构建均通过，实际 ELF 架构、Go `1.27.0`、`CGO_ENABLED=0`、上述完整基线提交与 `vcs.modified=true` 均已核对；两个核心仍解析到既有固定依赖。开发产物、构建信息及校验记录保留在 `D:/codex-tmp/yz-traffic-interface-20261016/`，amd64 SHA-256 为 `2ef3da9716c3c0d5a70cdb5df478634fa9eb7876a8ba5ad16ae5af07e071e13c`，arm64 为 `6f4ed6830560773bc13a728e62aafdc8c860264591ea367ef882053f82f7ad41`；这些不是正式发布附件。尚未在 Linux 宿主机运行修复后的采样程序。
+
 ## v2.11.0 服务器流量保护（已发布）
 
 - 基线 `dev` / `1ce7006f8c2f43125cf2cef25ac6a8d7468dfc83`，实际远程 `P0me1oo/YZ-Agent`。配套面板 `1.82.0`、管理端 `0.54.0`。sing-box 固定 `v1.14.0-yz.2`，Xray 固定 `v0.0.0-20261011032238-77d29e684aed`，依赖文件及两个核心 fork 未改动。

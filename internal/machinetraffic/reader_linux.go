@@ -21,30 +21,12 @@ func defaultInterfaces() ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		best := int(^uint(0) >> 1)
-		for _, r := range routes {
-			if r.Dst == nil && r.Type == 1 && r.Table == 254 && r.Priority < best {
-				best = r.Priority
+		for _, index := range defaultRouteLinkIndices(routes) {
+			link, err := netlink.LinkByIndex(index)
+			if err != nil {
+				return nil, err
 			}
-		}
-		for _, r := range routes {
-			if r.Dst != nil || r.Type != 1 || r.Table != 254 || r.Priority != best {
-				continue
-			}
-			indices := []int{r.LinkIndex}
-			for _, hop := range r.MultiPath {
-				indices = append(indices, hop.LinkIndex)
-			}
-			for _, index := range indices {
-				if index <= 0 {
-					continue
-				}
-				link, err := netlink.LinkByIndex(index)
-				if err != nil {
-					return nil, err
-				}
-				names[link.Attrs().Name] = true
-			}
+			names[link.Attrs().Name] = true
 		}
 	}
 	result := []string{}

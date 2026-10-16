@@ -3,11 +3,39 @@ package panel
 import (
 	"encoding/json"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/realityscan"
 	"github.com/gofrs/uuid/v5"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+func TestMachineControlExchangesRealityWithoutChangingOperations(t *testing.T) {
+	id, _ := uuid.NewV4()
+	server, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Supported bool               `json:"reality_scan_supported"`
+			Scan      realityscan.Report `json:"reality_scan"`
+			Operation MachineOperation   `json:"operation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.Supported || body.Scan.ID != id.String() || body.Scan.Status != "running" || body.Operation.Action != "restart" {
+			t.Errorf("错误的控制报告：%+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"command":      MachineOperation{ID: id.String(), Action: "restart", Status: "pending"},
+			"reality_scan": realityscan.Task{ID: id.String(), Targets: []string{"example.com"}, ExpiresAt: 1},
+		})
+	})
+	defer server.Close()
+	operation, scan, err := client.ExchangeMachineControlWithReality("v2.12.0", "test-process", true,
+		&MachineOperation{Action: "restart"}, &realityscan.Report{ID: id.String(), Status: "running"})
+	if err != nil || operation.Action != "restart" || scan.ID != id.String() {
+		t.Fatalf("控制与检测必须同时保留：%+v %+v %v", operation, scan, err)
+	}
+}
 
 func TestMachineControlAuthenticationAndRuntime(t *testing.T) {
 	credential, _ := uuid.NewV4()

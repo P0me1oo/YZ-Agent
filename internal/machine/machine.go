@@ -21,6 +21,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/monitor"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/realityscan"
 	"github.com/P0me1oo/YZ-Agent/internal/service"
 )
 
@@ -146,6 +147,7 @@ func (o *Orchestrator) addressLoop(ctx context.Context) {
 
 func (o *Orchestrator) controlLoop(ctx context.Context) {
 	key := agentcli.RemoteKey(o.cfg.Panel.URL, o.cfg.Machine.MachineID)
+	scanner := realityscan.NewRunner()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -154,7 +156,7 @@ func (o *Orchestrator) controlLoop(ctx context.Context) {
 			return
 		default:
 		}
-		command, err := o.client.ExchangeMachineControl(o.agentVersion, o.bootID, agentcli.RemoteAvailable(), agentcli.RemoteResult(key))
+		command, scan, err := o.client.ExchangeMachineControlWithReality(o.agentVersion, o.bootID, agentcli.RemoteAvailable(), agentcli.RemoteResult(key), scanner.Snapshot())
 		select {
 		case <-ctx.Done():
 			return
@@ -164,6 +166,9 @@ func (o *Orchestrator) controlLoop(ctx context.Context) {
 			if err := agentcli.StartRemote(key, *command); err != nil {
 				nlog.Core().Warn("machine operation could not start")
 			}
+		}
+		if err == nil {
+			scanner.Accept(ctx, scan)
 		}
 		select {
 		case <-ctx.Done():
