@@ -163,6 +163,64 @@ func TestMeterFailuresAndUnlimited(t *testing.T) {
 	}
 }
 
+func TestMeterContainerUplinksRecoverWithoutResettingUsage(t *testing.T) {
+	p := testPolicy(t)
+	p.Mode, p.RX, p.TX = "both", 10, 20
+	now := time.Unix(p.PeriodStart+100, 0)
+	available := false
+	reading := Reading{Boot: "container-boot", Counters: map[string]Counter{
+		"eth0": {Identity: "2", RX: 1000, TX: 2000},
+		"eth1": {Identity: "3", RX: 3000, TX: 4000},
+	}}
+	reader := func([]string) (Reading, error) {
+		if !available {
+			return Reading{}, errors.New("virtual interface cannot be a billing interface")
+		}
+		return reading, nil
+	}
+	path := filepath.Join(t.TempDir(), "meter.json")
+	m := New(path, reader)
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if s, blocked := m.Tick(now); !blocked || s.Error != "interfaces_unavailable" {
+		t.Fatalf("old reader did not persist its failure: %+v, %v", s, blocked)
+	}
+	// 升级后继续使用同一状态文件，首次有效采样只建立基线，不补计历史。
+	available = true
+	m = New(path, reader)
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		s, blocked := m.Tick(now)
+		if blocked || !s.Initialized || s.Error != "" || s.RX != 10 || s.TX != 20 || len(s.Interfaces) != 2 {
+			t.Fatalf("container baseline recovery: %+v, %v", s, blocked)
+		}
+	}
+	reading.Counters = map[string]Counter{
+		"eth0": {Identity: "2", RX: 1005, TX: 2010},
+		"eth1": {Identity: "3", RX: 3015, TX: 4020},
+	}
+	for range 2 {
+		s, blocked := m.Tick(now.Add(time.Second))
+		if blocked || s.RX != 30 || s.TX != 50 {
+			t.Fatalf("dual uplink delta or duplicate sample: %+v, %v", s, blocked)
+		}
+	}
+	available = false
+	if s, blocked := m.Tick(now); !blocked || s.Error != "interfaces_unavailable" || s.RX != 30 || s.TX != 50 {
+		t.Fatalf("read failure lost usage or protection: %+v, %v", s, blocked)
+	}
+	available = true
+	m = New(path, reader)
+	reading.Counters["eth1"] = Counter{Identity: "3", RX: 3025, TX: 4030}
+	s, blocked := m.Tick(now.Add(2 * time.Second))
+	if !blocked || s.Error != "" || s.RX != 40 || s.TX != 60 {
+		t.Fatalf("restart lost baseline or ignored quota: %+v, %v", s, blocked)
+	}
+}
+
 func TestPeriodClampsMonthEndAndUsesTimezoneMidnight(t *testing.T) {
 	for _, test := range []struct{ now, start, end string }{
 		{"2026-02-28T00:00:00+08:00", "2026-02-28T00:00:00+08:00", "2026-03-31T00:00:00+08:00"},

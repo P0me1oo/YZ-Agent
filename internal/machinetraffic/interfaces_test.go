@@ -8,7 +8,7 @@ import (
 
 func TestExternalInterfacesAvoidVirtualDoubleCounting(t *testing.T) {
 	graph := map[string]interfaceInfo{
-		"eth0": {physical: true}, "eth1": {physical: true},
+		"eth0": {billable: true}, "eth1": {billable: true},
 		"bond0": {lower: []string{"eth0", "eth1"}}, "vlan10": {lower: []string{"bond0"}},
 		"docker0": {bridge: true, lower: []string{"veth0", "veth1"}}, "tun0": {},
 		"bridge0": {bridge: true, lower: []string{"eth0"}}, "cycle0": {lower: []string{"cycle1"}}, "cycle1": {lower: []string{"cycle0"}},

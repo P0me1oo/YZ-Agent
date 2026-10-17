@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.13.1 LXC 出口计量开发验证记录
+
+- 开发基线 `dev` / `c8ca4e8bae1ba16c1c73ae3f4cd414623acbcc17`，实际远程为 `P0me1oo/YZ-Agent`，开始时工作区干净。只修改 Node 的网卡筛选、相关测试与版本文档；面板接口、计量状态格式、两个核心及其固定依赖不变，无需配套修改面板。
+- 允许对端位于其他网络空间、未加入桥接等主接口的以太网 veth，兼容 LXC 的 IPv4、IPv6 独立出口和手动指定。拒绝宿主机容器桥接端口、本地 veth 对、隧道、回环和未知虚拟设备；继续对 VLAN、bond 和单出口硬件桥接的底层网卡去重。使用及恢复规则见[服务器流量保护](docs/server-traffic-protection.md)。
+- Linux / amd64 / Go `1.27.0` 的整个 `internal/machinetraffic` 测试包已在本机 Alpine `3.22.2`（WSL 内核）通过。隔离网络和挂载空间内实际创建两组跨网络空间 veth，验证 IPv4、IPv6 默认路由、双向 UDP 收发后的网卡累计字节、显式选择及去重；未使用生产网络或修改宿主机网卡。模拟网卡覆盖硬件、桥接、VLAN、bond、隧道和读取失败，状态机覆盖旧版失败状态恢复、首次基线、已有累计量、重复采样、进程重启、额度及错误保护。
+- Windows / Go `1.27.0` / LLVM MinGW 执行 `go test -mod=readonly -race -count=1 -timeout=2m ./internal/machinetraffic` 通过。Windows 不提供实际网卡采样，实际 Linux 网卡读取由上一项验证。
+- 相同 Windows 竞态环境、完整功能标签下，`./internal/panel ./internal/machine -run 'Test(MachineTrafficProtocol|TrafficProtection)'` 通过，覆盖现有计量上报及重试、接口不可用、全部受管代理保护与管理通道保留。
+- Linux amd64、arm64 完整功能标签构建通过，ELF 架构、Go `1.27.0`、`CGO_ENABLED=0`、`-trimpath=true`、基线完整 `vcs.revision` 和 `vcs.modified=true` 均已核对；amd64 在本机 Linux 实际执行 `version` 输出为 `v2.13.1`。两个架构仍解析为上述已发布版本使用的固定核心依赖，没有新增本地核心路径。
+- 开发产物及验证记录位于 `D:/codex-tmp/yz-lxc-meter-20261017/`。amd64 SHA-256 为 `82455e951b569c15671c5a9a4a300cd1878d16fd6a60af64e47d2bbaa35062b1`，arm64 为 `36e30a524f86d1ad742aa8a686e3681d86e17c3a8b94a334e860450d2b711ba5`。本节记录发布前的专项与开发构建，不能将这些产物当作正式 Release；正式发布另由固定 Tag 的完整 CI 构建和核验。未更新生产服务器。
+
 ## v2.13.0 访问记录（已发布）
 
 - [Release v2.13.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.13.0) 已发布并核对为最新正式版，Tag 固定到 `d44e61216e8873b55dfb075cf778a98b35c8ff96`。配套面板 `1.86.0` / `bcfffd014f587a9305df17403609fb45d06d0c7a`、管理端 `0.58.0` / `6de07de567b43f948592b02b66efc98d6e726279`。两个核心源码、`go.mod` 和 `go.sum` 不变，仍为 `YZ-sing-box v1.14.0-yz.2`、`YZ-Xray-core v0.0.0-20261011032238-77d29e684aed`。

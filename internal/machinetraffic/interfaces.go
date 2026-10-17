@@ -7,7 +7,7 @@ import (
 )
 
 type interfaceInfo struct {
-	physical, bridge bool
+	billable, bridge bool
 	lower            []string
 }
 
@@ -38,8 +38,8 @@ func selectInterfaces(names []string, inspect func(string) (interfaceInfo, error
 			}
 			return nil
 		}
-		if !info.physical {
-			return errors.New("virtual interface cannot be a billing interface")
+		if !info.billable {
+			return errors.New("interface cannot be a billing interface")
 		}
 		selected[name] = true
 		return nil

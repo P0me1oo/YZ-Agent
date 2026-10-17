@@ -39,8 +39,8 @@ func defaultInterfaces() ([]string, error) {
 	return result, nil
 }
 
-// 只统计最底层外网接口。bond/VLAN 的父子去重；桥接多出口需要管理员明确指定。
-func physicalInterfaces(root string, names []string) ([]string, error) {
+// 统计硬件出口或容器自身的外网 veth；bond/VLAN 的父子接口只计一次。
+func billingInterfaces(root string, names []string, linkByName func(string) (netlink.Link, error)) ([]string, error) {
 	return selectInterfaces(names, func(name string) (interfaceInfo, error) {
 		base := filepath.Join(root, name)
 		target, err := filepath.EvalSymlinks(base)
@@ -61,7 +61,27 @@ func physicalInterfaces(root string, names []string) ([]string, error) {
 		if err != nil {
 			return interfaceInfo{}, err
 		}
-		info.physical = !strings.Contains(filepath.ToSlash(target), "/virtual/") && strings.TrimSpace(string(typeBytes)) == "1"
+		if strings.TrimSpace(string(typeBytes)) != "1" {
+			return interfaceInfo{}, errors.New("billing interface is not Ethernet")
+		}
+		info.billable = !strings.Contains(filepath.ToSlash(target), "/virtual/")
+		if !info.billable {
+			link, err := linkByName(name)
+			if err != nil {
+				return interfaceInfo{}, err
+			}
+			switch link.Type() {
+			case "veth":
+				// LXC 出口的对端位于其他网络空间。宿主机桥接端口和本地
+				// veth 对不能作为出口计量，避免累计容器内部或重复流量。
+				attrs := link.Attrs()
+				info.billable = attrs.NetNsID >= 0 && attrs.MasterIndex == 0
+			case "bond", "vlan", "bridge":
+				// 仅这些聚合接口可以继续解析底层网卡；隧道不能借此通过。
+			default:
+				return interfaceInfo{}, errors.New("unsupported virtual billing interface")
+			}
+		}
 		return info, nil
 	})
 }
@@ -74,7 +94,7 @@ func Read(names []string) (Reading, error) {
 			return Reading{}, err
 		}
 	}
-	names, err = physicalInterfaces("/sys/class/net", names)
+	names, err = billingInterfaces("/sys/class/net", names, netlink.LinkByName)
 	if err != nil {
 		return Reading{}, err
 	}
