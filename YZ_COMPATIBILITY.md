@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.15.0 sing-box TCP 真实来源 IP
+
+- 开发基线 `dev` / `3eb3e58876692c5a452b5a40b9212d2f129f2df5`，开始时工作区干净。YZ-sing-box 固定为 `v1.15.0` / `9dbebd69f3a7634b97d44a0948d86b3965cd6cb6`，官方基线仍为 `v1.14.0`；未修改官方 sing-box 目录或 Xray 核心。
+- sing-box 的通用 TCP 监听在认证、TLS 和统计前解析可信前置提供的 PROXY v1/v2。名单沿用面板已有“前置服务器 IP”，按核心实例隔离；空名单和名单外来源不解析，普通直连继续工作，更新名单不重建监听器。设备、来源拦截及访问记录使用解析后的来源，流量不包含协议头字节。原生 UDP、QUIC 及独立组件监听不增加该能力。使用及边界见[真实来源说明](docs/proxy-protocol.md)。
+- 正式 `go.mod`、`go.sum` 固定到新的核心版本，版本报告同步记录实际 fork 提交。开发阶段曾用 `D:/codex-tmp/yz-singbox-proxy-20261018/node.local.mod` 做本地联调；该开发替换不进入正式构建。发布流程增加独立核心监听包竞态测试。
+- 已复现旧实现的 SS2022 AES-128 / PROXY v2 实连失败（EOF）及核心未剥离协议头；修复后 Windows / Go `1.27.0` 的核心监听包普通测试通过。Node 的新功能专项通过，覆盖普通 SS、SS2022 AES-128/AES-256、VLESS、Trojan 的 v1/v2、真实 IP、协议头不计流量、名单重复更新与撤销、旧连接保持、停止恢复、换端口重载、实例隔离及来源拦截。
+- 既有 TCP 用户生命周期专项通过，范围为普通 SS、两种 SS2022、VLESS、Trojan、SOCKS、HTTP、AnyTLS；UDP 专项覆盖普通 SS、两种 SS2022、VLESS、Trojan。未运行数据库回归，没有修改面板业务接口或管理前端，也未连接生产服务器。
+- Windows / Go `1.27.0` / LLVM MinGW Clang `23.1.2` 下，核心监听包和 Node 完整功能标签的新功能专项均通过 `-race -count=1`；既有路由热更新与失败恢复专项通过。竞态检查首次因编译器目录不正确而未执行，修正后重跑通过，没有跳过或弱化测试。
+- Linux amd64、arm64 完整功能标签的本地开发构建通过，实际解析为 `../YZ-sing-box@(devel)`；Go `1.27.0`、`CGO_ENABLED=0`、`-trimpath=true`、对应架构、基线 VCS 来源和 `vcs.modified=true` 已核对。amd64 已在本机 WSL 实际运行 `version` 输出 `v2.15.0`，arm64 未做运行验证。产物和验证记录位于 `D:/codex-tmp/yz-singbox-proxy-20261018/`，不是正式 Release 或生产更新包。
+
 ## v2.14.0 Reality 检测详情（已发布）
 
 - [Release v2.14.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.14.0) 已发布并核对为最新正式版，Tag 固定到 `b8b253dcf80b20023023ddc604a7a2ddcd9ffc7d`。配套面板 `1.88.2` / `c1c506b23c2de3f2c41f62d395490f9cf1c1cadd`、管理端 `0.60.2` / `6e7bae239ca46bbbfccd1eea2a42a108a27d48d3`；两个核心和固定依赖不变。

@@ -656,7 +656,6 @@ func buildVMess(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TL
 	base["users"] = userList
 
 	applyTransport(base, nc)
-	applyProxyProtocol(base, nc)
 	applyMultiplex(base, nc)
 
 	if nc.TLS == 1 {
@@ -689,7 +688,6 @@ func buildVLESS(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TL
 	base["users"] = userList
 
 	applyTransport(base, nc)
-	applyProxyProtocol(base, nc)
 	applyMultiplex(base, nc)
 
 	if nc.TLS == 1 {
@@ -717,7 +715,6 @@ func buildTrojan(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.T
 	base["users"] = userList
 
 	applyTransport(base, nc)
-	applyProxyProtocol(base, nc)
 	applyMultiplex(base, nc)
 
 	if nc.TLS == 1 {
@@ -895,7 +892,6 @@ func buildHTTP(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TLS
 	}
 	base["users"] = userList
 
-	applyProxyProtocol(base, nc)
 	if nc.TLS == 1 {
 		if tls := buildTLSConfig(nc, tc); tls != nil {
 			base["tls"] = tls
@@ -1086,16 +1082,6 @@ func applyMultiplex(base M, nc *model.NodeSpec) {
 	}
 
 	base["multiplex"] = mux
-}
-
-// applyProxyProtocol：sing-box 上游自 1.6.0 起删除了接收 PROXY 头的功能。
-// 面板为 sing-box 节点打开该开关时明确提示，而不是静默忽略；
-// 需要按真实用户地址计设备的前置转发节点应改用 Xray 内核。
-func applyProxyProtocol(_ M, nc *model.NodeSpec) {
-	if nc.GetProxyProtocol() {
-		nlog.Core().Warn("sing-box does not support accepting PROXY protocol headers; the setting is ignored, use the xray kernel for nodes behind forwarders that send real client IPs",
-			"protocol", nc.Protocol, "port", nc.ServerPort)
-	}
 }
 
 // extractECHInbound extracts ECH config for sing-box server (inbound).

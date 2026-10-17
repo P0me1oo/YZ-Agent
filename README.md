@@ -1,5 +1,7 @@
 # YZ-Agent
 
+`v2.15.0` 为 sing-box 的通用 TCP 入站增加可信 PROXY protocol v1/v2 接收，配套核心 `YZ-sing-box v1.15.0`。沿用面板“前置服务器 IP”设置指定可信 Realm 出口；普通直连不受影响，原生 UDP、QUIC 不在此次支持范围内。配置方式、验证结果和限制见[真实来源说明](docs/proxy-protocol.md)及[兼容矩阵](YZ_COMPATIBILITY.md)。
+
 [`v2.14.0`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.14.0) 已发布，配套面板 `1.88.2`、管理端 `0.60.2`。Reality 检测增加 CDN 厂商识别和页面状态，位置由面板本地 ip2region 查询；保留旧任务兼容及原握手判断，两个核心和固定依赖不变。完整 CI、12 个附件和双架构镜像已核验，先更新面板，再更新 Node。详见[检测说明](docs/reality-target-scan.md)和[发布记录](YZ_COMPATIBILITY.md)。
 
 `v2.13.0` 新增代理访问记录，配套面板 `1.86.0`、管理端 `0.58.0`。只记录用户、域名或 IP、端口和连接时间，支持批量确认与缓存恢复；范围和保存限制见[访问记录](docs/access-logs.md)。

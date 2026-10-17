@@ -15,9 +15,9 @@ const (
 
 	// sing-box 的 require 版本和 replace 后实际使用的版本需要同时记录。
 	SingBoxRequestedVersion = "v1.14.0"
-	SingBoxResolvedVersion  = "v1.14.0-yz.2"
+	SingBoxResolvedVersion  = "v1.15.0"
 	SingBoxUpstreamCommit   = "0b8995879f29a9b98ee027bc17b75e101445b238"
-	SingBoxForkCommit       = "09615a105e219076330d9d2a25ea1e2e733d5427"
+	SingBoxForkCommit       = "9dbebd69f3a7634b97d44a0948d86b3965cd6cb6"
 
 	// SS2022 关闭补丁与 Node 同一提交发布，上游来源保持独立可查。
 	ShadowsocksUpstreamVersion = "v0.2.8"

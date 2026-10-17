@@ -11,6 +11,7 @@ import (
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
+	"github.com/sagernet/sing-box/common/listener"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/auth"
 	singJSON "github.com/sagernet/sing/common/json"
@@ -68,10 +69,14 @@ type SingBox struct {
 	deviceGate       *devicegate.Manager
 	deviceFilter     *deviceip.Filter
 	ownsDeviceFilter bool
+	proxyTrust       *listener.ProxyProtocolTrust
 }
 
 func New(cfg config.KernelConfig) *SingBox {
-	return &SingBox{cfg: cfg, traffic: newTrafficTotals(), deviceFilter: deviceip.DefaultFilter()}
+	return &SingBox{
+		cfg: cfg, traffic: newTrafficTotals(), deviceFilter: deviceip.DefaultFilter(),
+		proxyTrust: &listener.ProxyProtocolTrust{},
+	}
 }
 
 func (s *SingBox) SetDeviceIPExclude(entries []string) ([]string, bool) {
@@ -81,7 +86,11 @@ func (s *SingBox) SetDeviceIPExclude(entries []string) ([]string, bool) {
 		s.deviceFilter = &deviceip.Filter{}
 		s.ownsDeviceFilter = true
 	}
-	return s.deviceFilter.SetExcluded(entries)
+	invalid, changed := s.deviceFilter.SetExcluded(entries)
+	if changed {
+		s.proxyTrust.Set(s.deviceFilter.Prefixes())
+	}
+	return invalid, changed
 }
 
 var _ kernel.Kernel = (*SingBox)(nil)
@@ -145,6 +154,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 		cancel()
 		return err
 	}
+	ctx = listener.ContextWithProxyProtocolTrust(ctx, s.proxyTrust)
 	service.MustRegister[ntp.TimeService](ctx, timesync.Default())
 
 	opts, err := singJSON.UnmarshalExtendedContext[option.Options](ctx, data)
