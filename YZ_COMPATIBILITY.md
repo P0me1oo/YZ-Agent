@@ -1,6 +1,15 @@
 # YZ-Agent 兼容矩阵
 
-## v2.14.0 Reality 检测详情（未发布）
+## v2.14.0 Reality 检测详情（已发布）
+
+- [Release v2.14.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.14.0) 已发布并核对为最新正式版，Tag 固定到 `b8b253dcf80b20023023ddc604a7a2ddcd9ffc7d`。配套面板 `1.88.2` / `c1c506b23c2de3f2c41f62d395490f9cf1c1cadd`、管理端 `0.60.2` / `6e7bae239ca46bbbfccd1eea2a42a108a27d48d3`；两个核心和固定依赖不变。
+- [正式 CI 39003450000](https://github.com/P0me1oo/YZ-Agent/actions/runs/39003450000) 全部通过，包括 Linux 全仓竞态、核心兼容、双核心与中转、Mihomo、安装器、四组原生防火墙、双架构构建和镜像实际运行检查。
+- 12 个附件均已下载，大小、GitHub 摘要及 `SHA256SUMS` 的 11 项校验和一致；安装器与固定源码一致，历史 `xboard-node` 附件与同架构 `yz-agent` 相同。实际程序的 ELF 架构、来源、核心固定依赖、`CGO_ENABLED=0`、`-trimpath=true` 和 `vcs.modified=false` 均正确，构建信息与随附文件一致。正式流程中的程序实际版本为 `v2.14.0`，来源与 Tag 相同。
+- `yz-agent-linux-amd64` SHA-256 为 `93ceaf6d2a0a957ecf542da365d9ad91d468ed1f497cbd3ff1b03a9586bf779a`，arm64 为 `223a8001337f39931505b15cf205da3f443ac976638dda29627c2505e81a21c2`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.14.0`、完整提交标签及 `latest` 均为 `sha256:c216438abfcdd7687fd9222b838edee2ec548569a1595dcda72c0343a19e7b49`。amd64 清单 `sha256:b66e40da8a82bcaeff175e04e7f5ceb729045f93f3d6b4cff9631858899ef883`，arm64 清单 `sha256:4b052178bfdbcdfdfa8ade93d4ae55700e8be363ad563ac7b60e3a6fba8632a3`；两个架构全部镜像层和镜像内程序的实际构建信息、OCI 来源及版本已核验。
+- 先更新面板，再更新相关 Node。回滚参考 `v2.13.1` / `42484d37296ea018322ed1b3ab97bfeb2546ef7b`，镜像 `sha256:ccdede7d5593bba72a0d8dcb5694338afd0a5da51b9e0de5bcbdccdec366c795`；版本、双架构及镜像层可获取性已核对。核验记录位于 `D:/codex-tmp/yz-reality-release-20261017/`，未连接或更新生产服务器，发布后文档提交不移动 Tag。
+
+## v2.14.0 Reality 检测详情开发验证记录
 
 - 开发基线为 `dev` / `42484d37296ea018322ed1b3ab97bfeb2546ef7b`，配套面板 `1.88.0`、管理端 `0.60.0`。仅增加检测任务的可选增强开关及 CDN、HTTP 结果；两个核心、固定依赖、节点配置和代理协议不变。
 - CNAME 使用域名标签边界匹配，结合厂商特有 HTTP 头识别 CDN；页面请求复用已验证连接、保留目标端口，不跟随跳转、不读取正文。未启用增强开关时不发额外请求，也不改变旧报告字段。IP 位置由面板离线查询；详见[检测说明](docs/reality-target-scan.md)。
