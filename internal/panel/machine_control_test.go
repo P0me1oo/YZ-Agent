@@ -26,13 +26,13 @@ func TestMachineControlExchangesRealityWithoutChangingOperations(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"command":      MachineOperation{ID: id.String(), Action: "restart", Status: "pending"},
-			"reality_scan": realityscan.Task{ID: id.String(), Targets: []string{"example.com"}, ExpiresAt: 1},
+			"reality_scan": realityscan.Task{ID: id.String(), Targets: []string{"example.com"}, ExpiresAt: 1, Diagnostics: true},
 		})
 	})
 	defer server.Close()
 	operation, scan, err := client.ExchangeMachineControlWithReality("v2.12.0", "test-process", true,
 		&MachineOperation{Action: "restart"}, &realityscan.Report{ID: id.String(), Status: "running"})
-	if err != nil || operation.Action != "restart" || scan.ID != id.String() {
+	if err != nil || operation.Action != "restart" || scan.ID != id.String() || !scan.Diagnostics {
 		t.Fatalf("控制与检测必须同时保留：%+v %+v %v", operation, scan, err)
 	}
 }

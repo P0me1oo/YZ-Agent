@@ -25,27 +25,29 @@ var Defaults = []string{
 }
 
 type Result struct {
-	Target         string   `json:"target"`
-	Host           string   `json:"host"`
-	IP             string   `json:"ip"`
-	DiscoveredIP   string   `json:"discovered_ip,omitempty"`
-	Port           int      `json:"port"`
-	Feasible       bool     `json:"feasible"`
-	TLS13          bool     `json:"tls13"`
-	TLSVersion     string   `json:"tls_version"`
-	H2             bool     `json:"h2"`
-	ALPN           string   `json:"alpn"`
-	X25519         bool     `json:"x25519"`
-	Curve          string   `json:"curve"`
-	CertValid      bool     `json:"cert_valid"`
-	CertChainValid bool     `json:"cert_chain_valid"`
-	CertChainBytes int      `json:"cert_chain_bytes"`
-	CertSubject    string   `json:"cert_subject"`
-	CertIssuer     string   `json:"cert_issuer"`
-	NotAfter       string   `json:"not_after"`
-	ServerNames    []string `json:"server_names"`
-	LatencyMS      int64    `json:"latency_ms"`
-	Reason         string   `json:"reason"`
+	Target         string      `json:"target"`
+	Host           string      `json:"host"`
+	IP             string      `json:"ip"`
+	DiscoveredIP   string      `json:"discovered_ip,omitempty"`
+	Port           int         `json:"port"`
+	Feasible       bool        `json:"feasible"`
+	TLS13          bool        `json:"tls13"`
+	TLSVersion     string      `json:"tls_version"`
+	H2             bool        `json:"h2"`
+	ALPN           string      `json:"alpn"`
+	X25519         bool        `json:"x25519"`
+	Curve          string      `json:"curve"`
+	CertValid      bool        `json:"cert_valid"`
+	CertChainValid bool        `json:"cert_chain_valid"`
+	CertChainBytes int         `json:"cert_chain_bytes"`
+	CertSubject    string      `json:"cert_subject"`
+	CertIssuer     string      `json:"cert_issuer"`
+	NotAfter       string      `json:"not_after"`
+	ServerNames    []string    `json:"server_names"`
+	LatencyMS      int64       `json:"latency_ms"`
+	Reason         string      `json:"reason"`
+	CDN            *CDNResult  `json:"cdn,omitempty"`
+	HTTP           *HTTPResult `json:"http,omitempty"`
 }
 
 type target struct {
@@ -167,9 +169,11 @@ func publicAddress(ip netip.Addr) bool {
 
 type Scanner struct {
 	// 测试替身仍须经过公网地址检查，实际连接只使用已经核对的 IP。
-	Lookup func(context.Context, string) ([]netip.Addr, error)
-	Dial   func(context.Context, string, string) (net.Conn, error)
-	Roots  *x509.CertPool
+	Lookup      func(context.Context, string) ([]netip.Addr, error)
+	Dial        func(context.Context, string, string) (net.Conn, error)
+	Roots       *x509.CertPool
+	Diagnostics bool
+	LookupCNAME func(context.Context, string) (string, error)
 }
 
 func certificateLabel(value string) string {
@@ -217,6 +221,10 @@ func (s Scanner) dial(ctx context.Context, host string, port int) (net.Conn, str
 
 func (s Scanner) probe(ctx context.Context, item target) Result {
 	r := Result{Host: item.sni, Port: item.port, Target: net.JoinHostPort(item.host, strconv.Itoa(item.port)), ServerNames: []string{}}
+	if s.Diagnostics {
+		r.CDN = &CDNResult{Status: "unknown", Providers: []string{}, Evidence: []string{}}
+		r.HTTP = &HTTPResult{Status: "not_checked"}
+	}
 	timeout := 10 * time.Second
 	if item.sni == "" {
 		timeout = 4 * time.Second
@@ -297,6 +305,9 @@ func (s Scanner) probe(ctx context.Context, item target) Result {
 		r.Reason = "x25519_required"
 	default:
 		r.Feasible = true
+	}
+	if s.Diagnostics {
+		s.inspect(ctx, item, &r, tlsConn)
 	}
 	return r
 }

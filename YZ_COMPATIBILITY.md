@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.14.0 Reality 检测详情（未发布）
+
+- 开发基线为 `dev` / `42484d37296ea018322ed1b3ab97bfeb2546ef7b`，配套面板 `1.88.0`、管理端 `0.60.0`。仅增加检测任务的可选增强开关及 CDN、HTTP 结果；两个核心、固定依赖、节点配置和代理协议不变。
+- CNAME 使用域名标签边界匹配，结合厂商特有 HTTP 头识别 CDN；页面请求复用已验证连接、保留目标端口，不跟随跳转、不读取正文。未启用增强开关时不发额外请求，也不改变旧报告字段。IP 位置由面板离线查询；详见[检测说明](docs/reality-target-scan.md)。
+- Windows / Go `1.27.0` 下，`go test -mod=readonly -race -count=1 -timeout=90s ./internal/realityscan ./internal/panel` 通过。测试使用本机 TLS 服务和解析替身，覆盖 HTTP/2、HTTP/1.1、自定义端口、200/302/403/404/503、同一连接、不跟随私网跳转、超时、无效证书、CDN 误匹配、多厂商、DNS 失败、旧任务格式、控制请求及重复/取消任务；测试身份和证书只存在内存。
+- 本地构建和检查记录位于 `D:/codex-tmp/yz-reality-details-20261017/`。尚未提交、推送或发布，未扫描公网候选或连接生产服务器。
+- 双核心相关专项通过：Xray Reality 配置接受检查、sing-box VLESS/Trojan Reality 配置、VLESS/Trojan 本机连接生命周期，以及 Xray 重载后监听与状态检查。使用正式功能标签，未运行全仓回归。
+- 工作期间仓库新增 `60dbf15657fa2c9b68f235e2d07b68312bf3d578`，仅补充 `v2.13.1` 发布记录；本次保留该提交及其文档。最终构建按该提交统一程序内来源标识与 VCS 来源，未提交功能代码通过 `vcs.modified=true` 标明。
+- Linux amd64、arm64 的正式功能标签构建均通过，Go `1.27.0`、`CGO_ENABLED=0`、`-trimpath=true`、ELF 架构、上述 VCS 来源和两个核心固定依赖均已核对。最终 amd64 SHA-256 为 `a8ee4b583415a2cea786936f0014a5568c5e9477a478960884642d086b496d42`，arm64 为 `ea71537567b40233b6fee72eae5c2dab652a977d91bf8c3eda6cf8cac1d81426`。amd64 已在本机 WSL 执行 `version`，确认 `v2.14.0` 及上述来源；未启动节点服务，arm64 未做运行验证。这是未发布的本地开发产物。
+
 ## v2.13.1 LXC 出口计量（已发布）
 
 - [Release v2.13.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.13.1) 已发布并核对为最新正式版，Tag 固定到 `42484d37296ea018322ed1b3ab97bfeb2546ef7b`。只需更新 Node，无需更新面板；两个核心及固定依赖保持 `YZ-sing-box v1.14.0-yz.2`、`YZ-Xray-core v0.0.0-20261011032238-77d29e684aed`。

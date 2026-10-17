@@ -7,10 +7,11 @@ import (
 )
 
 type Task struct {
-	ID        string   `json:"id"`
-	Targets   []string `json:"targets"`
-	SNI       string   `json:"sni"`
-	ExpiresAt int64    `json:"expires_at"`
+	ID          string   `json:"id"`
+	Targets     []string `json:"targets"`
+	SNI         string   `json:"sni"`
+	ExpiresAt   int64    `json:"expires_at"`
+	Diagnostics bool     `json:"diagnostics,omitempty"`
 }
 
 type Report struct {
@@ -26,10 +27,14 @@ type Runner struct {
 	report *Report
 	lastID string
 	cancel context.CancelFunc
-	scan   func(context.Context, []string, string) ([]Result, error)
+	scan   func(context.Context, []string, string, bool) ([]Result, error)
 }
 
-func NewRunner() *Runner { return &Runner{scan: (Scanner{}).Scan} }
+func NewRunner() *Runner {
+	return &Runner{scan: func(ctx context.Context, targets []string, sni string, diagnostics bool) ([]Result, error) {
+		return (Scanner{Diagnostics: diagnostics}).Scan(ctx, targets, sni)
+	}}
+}
 
 func (r *Runner) Snapshot() *Report {
 	r.mu.Lock()
@@ -67,7 +72,7 @@ func (r *Runner) Accept(ctx context.Context, task *Task) {
 	r.report = &Report{ID: task.ID, Status: "running"}
 	go func() {
 		defer cancel()
-		results, err := r.scan(scanCtx, task.Targets, task.SNI)
+		results, err := r.scan(scanCtx, task.Targets, task.SNI, task.Diagnostics)
 		report := &Report{ID: task.ID, Status: "succeeded", Results: results}
 		if err != nil {
 			report.Status, report.Error = "failed", err.Error()

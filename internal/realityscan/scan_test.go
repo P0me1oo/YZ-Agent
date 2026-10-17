@@ -140,7 +140,7 @@ func TestRunnerRetriesReuseResultsAndCancellation(t *testing.T) {
 	var calls atomic.Int32
 	started := make(chan struct{}, 3)
 	finish := make(chan struct{})
-	runner := &Runner{scan: func(ctx context.Context, values []string, sni string) ([]Result, error) {
+	runner := &Runner{scan: func(ctx context.Context, values []string, sni string, diagnostics bool) ([]Result, error) {
 		calls.Add(1)
 		started <- struct{}{}
 		select {
@@ -187,7 +187,7 @@ func TestRunnerRetriesReuseResultsAndCancellation(t *testing.T) {
 func TestRunnerCancelsSupersededWorkAndIgnoresLateCompletion(t *testing.T) {
 	started := make(chan string, 2)
 	canceled := make(chan struct{}, 2)
-	runner := &Runner{scan: func(ctx context.Context, values []string, sni string) ([]Result, error) {
+	runner := &Runner{scan: func(ctx context.Context, values []string, sni string, diagnostics bool) ([]Result, error) {
 		started <- values[0]
 		<-ctx.Done()
 		canceled <- struct{}{}
