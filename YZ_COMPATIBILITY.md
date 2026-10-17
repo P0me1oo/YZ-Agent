@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.13.1 LXC 出口计量（已发布）
+
+- [Release v2.13.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.13.1) 已发布并核对为最新正式版，Tag 固定到 `42484d37296ea018322ed1b3ab97bfeb2546ef7b`。只需更新 Node，无需更新面板；两个核心及固定依赖保持 `YZ-sing-box v1.14.0-yz.2`、`YZ-Xray-core v0.0.0-20261011032238-77d29e684aed`。
+- [正式 CI 38995603280](https://github.com/P0me1oo/YZ-Agent/actions/runs/38995603280) 全部通过，包括 Linux 全仓竞态、独立核心兼容包、双核心与中转、Mihomo、安装器、四组原生防火墙、双架构程序及镜像内实际版本。新增的隔离 veth 双栈收发、网卡筛选和旧计量状态恢复测试均实际执行通过，未跳过。
+- 12 个附件全部下载，大小、GitHub 摘要和 `SHA256SUMS` 的 11 项均一致；安装脚本与固定源码一致，历史 `xboard-node` 附件与同架构 `yz-agent` 相同。四个程序的 ELF 架构、Go `1.27.1`、`CGO_ENABLED=0`、`-trimpath=true`、完整来源及 `vcs.modified=false` 均已核对；实际构建信息与附件一致，没有新增本地核心路径。amd64、arm64 的 `yz-agent` 均无动态解释器依赖，正式 amd64 安装包已在本机 Alpine `3.22.2`（WSL 内核）执行 `version`，输出版本和来源正确。
+- 正式 `yz-agent-linux-amd64` SHA-256 为 `c7c8a2ebb3e7021103c167dd4086d8439681c2bdf4aa5e156cc4687ef1fe176c`，arm64 为 `cf19cec57612b279de7546b9d3a7bae1e051c495c07ed0b3fb5c4aff5a4b8692`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.13.1`、完整提交标签及 `latest` 均为 `sha256:ccdede7d5593bba72a0d8dcb5694338afd0a5da51b9e0de5bcbdccdec366c795`。amd64 清单为 `sha256:923a93a68dcbfec34ce660fb38d219645a67139451e1f0c4232a762b6d90deca`，arm64 为 `sha256:63543051441829c092e0657b424c97698ae6290631f10ffef0467bcf6724e369`；两种架构全部镜像层均已匿名下载校验，OCI 版本、来源和镜像内程序的实际构建信息正确。镜像沿用 Alpine `3.20`，正式流程实际运行两个架构并核对版本。
+- 回滚参考 `v2.13.0` / `d44e61216e8873b55dfb075cf778a98b35c8ff96`，镜像 `sha256:5775ec9d5a33472e09d1b8fc9935438227af115fc441214c22780aff4c7e4690`，已核对 Release 和双架构镜像仍可获取；回滚会恢复原有 LXC 计量限制。升级保留实例配置目录及计量文件，服务器更新由用户执行，本次未操作生产服务。
+- 发布核验数据保存在 `D:/codex-tmp/yz-lxc-release-20261017/`。发布后仅补充记录，不移动 Tag 或改变固定构建来源。
+
 ## v2.13.1 LXC 出口计量开发验证记录
 
 - 开发基线 `dev` / `c8ca4e8bae1ba16c1c73ae3f4cd414623acbcc17`，实际远程为 `P0me1oo/YZ-Agent`，开始时工作区干净。只修改 Node 的网卡筛选、相关测试与版本文档；面板接口、计量状态格式、两个核心及其固定依赖不变，无需配套修改面板。
