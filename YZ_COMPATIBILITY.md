@@ -1,5 +1,13 @@
 # YZ-Agent 兼容矩阵
 
+## v2.15.0 sing-box TCP PROXY protocol（已发布）
+
+- `v2.15.0` 于 2026-10-17 发布，Node 来源提交 `1c66ea58bfa238e70473d319583b7edd512257fc`；配套 YZ-sing-box `v1.15.0`，核心来源提交 `9dbebd69f3a7634b97d44a0948d86b3965cd6cb6`，官方 sing-box 基线 `v1.14.0` / `0b8995879f29a9b98ee027bc17b75e101445b238`。
+- 新增可信 PROXY v1/v2 TCP 接收，复用面板“前置服务器 IP”名单；名单外来源保持普通直连，解析后的真实来源用于设备限制、来源拦截和访问记录。原生 UDP、QUIC 与独立监听组件不在支持范围，详细使用及边界见[真实来源说明](docs/proxy-protocol.md)。
+- Windows Go `1.27.0` 下，新功能专项及 `-race` 检查、构建信息检查通过；CI 的完整测试、四种防火墙组合检查、Linux amd64/arm64 构建和镜像内版本检查通过。Release 包含 12 个安装脚本、二进制、校验和及构建信息附件。
+- GHCR `ghcr.io/p0me1oo/yz-agent:v2.15.0` 与 `:latest` 均可匿名拉取，OCI manifest list digest 为 `sha256:b6bf72c75fba5c380a77dffc63f91735612df824baceec87a219e14fb8374ffe`；amd64 manifest 为 `sha256:483e2bc949f209cd6ffbb1e697ca3da92adddb7f16eff3453fa0539e32f9d244`，arm64 manifest 为 `sha256:4ca620569adb674ad8852c93ecc9973563d24107a689a704db1610593e5ccc40`。两架构 OCI revision 均核对为 Node 来源提交。
+- 本地没有连接生产服务器。Node 常规更新命令仍使用 `yz-agent upgrade`、`yz-agent version`、`yz-agent service status`；有经面板更新的 sing-box 节点时先更新面板，再更新 Node。
+
 ## v2.15.0 sing-box TCP 真实来源 IP
 
 - 开发基线 `dev` / `3eb3e58876692c5a452b5a40b9212d2f129f2df5`，开始时工作区干净。YZ-sing-box 固定为 `v1.15.0` / `9dbebd69f3a7634b97d44a0948d86b3965cd6cb6`，官方基线仍为 `v1.14.0`；未修改官方 sing-box 目录或 Xray 核心。
