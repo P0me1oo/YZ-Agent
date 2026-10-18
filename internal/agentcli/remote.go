@@ -294,12 +294,11 @@ func runRemoteWith(args []string, ops remoteExecution) error {
 	return finish("")
 }
 
-func latestStableRelease(ctx context.Context) (string, error) {
+func queryLatestRelease(ctx context.Context, client *http.Client) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadBase+"/latest", nil)
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

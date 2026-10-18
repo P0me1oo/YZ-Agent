@@ -330,26 +330,62 @@ func TestUpgradePreservesBackupWhenRollbackFails(t *testing.T) {
 	requireFileContents(t, paths.cli(), "old-xbctl")
 }
 
-// 校验文件只走直连下载，程序文件才允许镜像重试，校验值始终来自 GitHub。
-func TestUpgradeDownloadsChecksumsWithoutMirror(t *testing.T) {
+// 无论直连还是镜像，必须先取得校验清单，随后才能下载和核验程序。
+func TestUpgradeDownloadsChecksumsBeforeBinaries(t *testing.T) {
 	paths, ops := upgradeFixture(t)
-	mirrored := ops.download
-	var direct, fallback []string
+	download := ops.download
+	var requested []string
 	ops.downloadChecksums = func(url, destination string) error {
-		direct = append(direct, path.Base(url))
-		return mirrored(url, destination)
+		requested = append(requested, path.Base(url))
+		return download(url, destination)
 	}
 	ops.download = func(url, destination string) error {
-		if path.Base(url) == "SHA256SUMS" {
-			t.Fatal("校验文件不应使用带镜像重试的下载")
+		if len(requested) == 0 || requested[0] != "SHA256SUMS" {
+			t.Fatal("程序下载前必须先取得校验清单")
 		}
-		fallback = append(fallback, path.Base(url))
-		return mirrored(url, destination)
+		requested = append(requested, path.Base(url))
+		return download(url, destination)
 	}
 	if _, err := upgradeBinaries(paths, "v1.20.0", ops); err != nil {
 		t.Fatal(err)
 	}
-	if len(direct) != 1 || direct[0] != "SHA256SUMS" || len(fallback) != 2 {
-		t.Fatalf("直连=%v，允许镜像=%v", direct, fallback)
+	if len(requested) != 3 || requested[0] != "SHA256SUMS" {
+		t.Fatalf("下载顺序=%v", requested)
 	}
+}
+
+func TestUpgradeContinuesWhenAllChecksumSourcesAreUnavailable(t *testing.T) {
+	for _, unified := range []bool{false, true} {
+		t.Run(fmt.Sprint(unified), func(t *testing.T) {
+			paths, ops := upgradeFixture(t)
+			ops.downloadChecksums = func(string, string) error { return errReleaseChecksumsUnavailable }
+			if unified {
+				ops.run = func(string, ...string) ([]byte, error) { return []byte("yz-agent v2.18.0 (test build)"), nil }
+				ops.migrate = func(node, cli string) error {
+					requireFileContents(t, node, "new-xboard-node")
+					return nil
+				}
+			}
+			if _, err := upgradeBinaries(paths, "v2.18.0", ops); err != nil {
+				t.Fatal(err)
+			}
+			if !unified {
+				requireFileContents(t, paths.installedBinary(), "new-xboard-node")
+				requireFileContents(t, paths.cli(), "new-xbctl")
+			}
+			requireNoUpgradeStage(t, paths)
+		})
+	}
+}
+
+func TestChecksumSaveFailureDoesNotSkipVerification(t *testing.T) {
+	paths, ops := upgradeFixture(t)
+	ops.downloadChecksums = func(string, string) error {
+		return &os.PathError{Op: "write", Path: "test-checksums", Err: syscall.ENOSPC}
+	}
+	ops.download = func(string, string) error { t.Fatal("清单写盘失败不能继续下载程序"); return nil }
+	if _, err := upgradeBinaries(paths, "v2.18.0", ops); err == nil {
+		t.Fatal("本地写盘失败不能当作远程清单缺失")
+	}
+	requireOriginalUpgradeFiles(t, paths)
 }

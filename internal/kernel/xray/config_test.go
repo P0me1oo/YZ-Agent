@@ -407,7 +407,7 @@ func TestToMemoryUser_ExistingXrayProtocols(t *testing.T) {
 			check: func(t *testing.T, account any) {
 				got, ok := account.(*ss2022.MemoryAccount)
 				want := base64.StdEncoding.EncodeToString([]byte(user.UUID[:16]))
-				if !ok || got.Key != want {
+				if !ok || got.ToProto().(*ss2022.Account).Key != want {
 					t.Fatalf("Shadowsocks 2022 account = %#v", account)
 				}
 			},
@@ -685,7 +685,7 @@ func TestSS2022DynamicUserKeyMatchesStaticConfig(t *testing.T) {
 			if err != nil {
 				t.Fatalf("toMemoryUser() error = %v", err)
 			}
-			dynamicKey := memoryUser.Account.(*ss2022.MemoryAccount).Key
+			dynamicKey := memoryUser.Account.(*ss2022.MemoryAccount).ToProto().(*ss2022.Account).Key
 			want := base64.StdEncoding.EncodeToString([]byte(user.UUID[:tc.size]))
 			if staticKey != want || dynamicKey != want {
 				t.Fatalf("SS2022 keys differ: static=%q dynamic=%q want=%q", staticKey, dynamicKey, want)

@@ -50,6 +50,15 @@ DEFAULT_RELEASE_VERSION="latest"
 DEFAULT_LOG_LEVEL="info"
 DEFAULT_KERNEL_LOG_LEVEL="warn"
 DEFAULT_DOWNLOAD_BASE="https://github.com/P0me1oo/YZ-Agent/releases"
+RELEASE_METADATA_URL="https://api.github.com/repos/P0me1oo/YZ-Agent/releases/latest"
+RELEASE_MIRRORS=("https://gh-proxy.org/" "https://ghfast.top/" "https://github.chenc.dev/")
+GITHUB_TIMED_OUT=0
+CHECKSUMS_UNAVAILABLE=0
+MIRROR_PROBE_DIR=""
+RANKED_MIRRORS=()
+RANKED_MIRROR_TIMES=()
+RANKED_MIRROR_FILES=()
+LATEST_RELEASE_URL=""
 
 ACTION="${DEFAULT_ACTION}"
 MODE=""
@@ -106,6 +115,7 @@ cleanup_tmp() {
         return
     fi
     CLEANUP_DONE=1
+    cleanup_mirror_probe
     if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
         rm -rf "$TMP_DIR"
     fi
@@ -983,6 +993,154 @@ select_binary_source() {
     echo ""
 }
 
+cleanup_mirror_probe() {
+    if [ -n "$MIRROR_PROBE_DIR" ] && [ -d "$MIRROR_PROBE_DIR" ]; then
+        rm -rf "$MIRROR_PROBE_DIR"
+    fi
+    MIRROR_PROBE_DIR=""
+}
+
+mirror_release_tag() {
+    local file="$1" tag draft prerelease
+    # 只接受正式 Release 响应；返回值仅作为版本号使用，不执行响应内容。
+    grep -q '^[[:space:]]*{' "$file" || return 1
+    tag=$(sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"[:space:]]+)".*/\1/p' "$file")
+    draft=$(sed -nE 's/.*"draft"[[:space:]]*:[[:space:]]*(true|false).*/\1/p' "$file")
+    prerelease=$(sed -nE 's/.*"prerelease"[[:space:]]*:[[:space:]]*(true|false).*/\1/p' "$file")
+    [ "$draft" = false ] && [ "$prerelease" = false ] || return 1
+    upgrade_version_key "$tag" >/dev/null || return 1
+    printf '%s' "$tag"
+}
+
+probe_release_mirrors() {
+    local url="$1" kind="$2" index base elapsed file pid status code content_type
+    local pids=()
+    cleanup_mirror_probe
+    MIRROR_PROBE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/yz-agent-mirrors.XXXXXX") || return 1
+    RANKED_MIRRORS=() RANKED_MIRROR_TIMES=() RANKED_MIRROR_FILES=()
+    for index in "${!RELEASE_MIRRORS[@]}"; do
+        base="${RELEASE_MIRRORS[$index]}"
+        (
+            file="$MIRROR_PROBE_DIR/$index.body"
+            # 清单缺失时直接探测程序的前 4 KiB；不因缺少清单而阻止程序下载。
+            if [ "$kind" = artifact ]; then
+                status=0
+                elapsed=$(LC_ALL=C curl -q -fsSL --connect-timeout 3 --max-time 5 --range 0-4095 --max-filesize 4096 \
+                    -o "$file" -w '%{time_total}\t%{http_code}\t%{content_type}' "${base}${url}" 2>/dev/null) || status=$?
+                # 63 表示源忽略 Range 且文件超过探测上限，响应头仍可用于判定可达。
+                [ "$status" -eq 0 ] || [ "$status" -eq 63 ] || exit 0
+                IFS=$'\t' read -r elapsed code content_type <<< "$elapsed"
+                [[ "$code" = 200 || "$code" = 206 ]] && [[ "$content_type" != text/html* ]] || exit 0
+                if [ "$status" -eq 0 ]; then
+                    [ -s "$file" ] || exit 0
+                    if LC_ALL=C grep -aiEq '^[[:space:]]*<(![Dd][Oo][Cc][Tt][Yy][Pp][Ee]|[Hh][Tt][Mm][Ll])' "$file"; then exit 0; fi
+                fi
+                printf '%s\t%s\t%s\n' "$elapsed" "$base" "$file" > "$MIRROR_PROBE_DIR/$index.rank"
+            elif elapsed=$(LC_ALL=C curl -q -fsSL --connect-timeout 3 --max-time 5 --max-filesize 1048576 \
+                -o "$file" -w '%{time_total}' "${base}${url}" 2>/dev/null); then
+                if [ "$kind" = latest ]; then
+                    mirror_release_tag "$file" >/dev/null || exit 0
+                else
+                    grep -Eq '^[[:xdigit:]]{64}[[:blank:]]+\*?[^[:space:]]' "$file" || exit 0
+                fi
+                [[ "$elapsed" =~ ^[0-9]+([.][0-9]+)?$ ]] || exit 0
+                printf '%s\t%s\t%s\n' "$elapsed" "$base" "$file" > "$MIRROR_PROBE_DIR/$index.rank"
+            fi
+            exit 0
+        ) &
+        pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do wait "$pid" || true; done
+    : > "$MIRROR_PROBE_DIR/results"
+    for file in "$MIRROR_PROBE_DIR/"*.rank; do
+        [ ! -f "$file" ] || cat "$file" >> "$MIRROR_PROBE_DIR/results"
+    done
+    while IFS=$'\t' read -r elapsed base file; do
+        RANKED_MIRRORS+=("$base")
+        RANKED_MIRROR_TIMES+=("$elapsed")
+        RANKED_MIRROR_FILES+=("$file")
+    done < <(LC_ALL=C sort -n "$MIRROR_PROBE_DIR/results")
+    if [ "${#RANKED_MIRRORS[@]}" -eq 0 ]; then
+        log_error "没有可用的 GitHub 镜像源" >&2
+        cleanup_mirror_probe
+        return 1
+    fi
+}
+
+query_latest_release() {
+    local status tag
+    if [ "$GITHUB_TIMED_OUT" -eq 0 ]; then
+        if LATEST_RELEASE_URL=$(curl -q -fsSL --connect-timeout 10 --max-time 30 \
+            -o /dev/null -w '%{url_effective}' "${DEFAULT_DOWNLOAD_BASE}/latest"); then
+            return 0
+        else
+            status=$?
+        fi
+        [ "$status" -eq 28 ] || return "$status"
+        GITHUB_TIMED_OUT=1
+        log_warn "GitHub 查询超时，正在探测备用下载源..." >&2
+    fi
+    probe_release_mirrors "$RELEASE_METADATA_URL" latest || return 1
+    log_info "使用镜像源 ${RANKED_MIRRORS[0]}（HTTPS 响应 ${RANKED_MIRROR_TIMES[0]} 秒）" >&2
+    tag=$(mirror_release_tag "${RANKED_MIRROR_FILES[0]}") || { cleanup_mirror_probe; return 1; }
+    LATEST_RELEASE_URL="${DEFAULT_DOWNLOAD_BASE}/tag/${tag}"
+    cleanup_mirror_probe
+}
+
+download_release_file() {
+    local url="$1" destination="$2" status index source checksum_url kind=checksum
+    if [ "$GITHUB_TIMED_OUT" -eq 0 ]; then
+        if curl -q -fsSL --connect-timeout 10 --max-time 120 "$url" -o "$destination.part"; then
+            if [[ "$url" != */SHA256SUMS ]] || grep -Eq '^[[:xdigit:]]{64}[[:blank:]]+\*?[^[:space:]]' "$destination.part"; then
+                mv "$destination.part" "$destination"
+                return
+            fi
+            status=22
+        else
+            status=$?
+        fi
+        rm -f "$destination.part"
+        [ "$status" -ne 23 ] || return "$status"
+        if [ "$status" -eq 28 ]; then
+            GITHUB_TIMED_OUT=1
+            log_warn "GitHub 下载超时，正在探测备用下载源..." >&2
+        elif [[ "$url" != */SHA256SUMS ]]; then
+            return "$status"
+        fi
+    fi
+    checksum_url="${url%/*}/SHA256SUMS"
+    if [ "$url" != "$checksum_url" ]; then
+        checksum_url="$url"
+        kind=artifact
+    fi
+    if ! probe_release_mirrors "$checksum_url" "$kind"; then
+        [[ "$url" != */SHA256SUMS ]] || return 69
+        return 1
+    fi
+    for index in "${!RANKED_MIRRORS[@]}"; do
+        source="${RANKED_MIRRORS[$index]}"
+        log_info "使用镜像源 ${source}（HTTPS 响应 ${RANKED_MIRROR_TIMES[$index]} 秒）" >&2
+        if [[ "$url" = */SHA256SUMS ]]; then
+            if mv "${RANKED_MIRROR_FILES[$index]}" "$destination.part" && mv "$destination.part" "$destination"; then
+                cleanup_mirror_probe
+                return 0
+            fi
+            rm -f "$destination.part"
+            cleanup_mirror_probe
+            return 1
+        fi
+        if curl -q -fsSL --connect-timeout 10 --max-time 120 "${source}${url}" -o "$destination.part"; then
+            mv "$destination.part" "$destination" || { cleanup_mirror_probe; return 1; }
+            cleanup_mirror_probe
+            return 0
+        fi
+        rm -f "$destination.part"
+    done
+    cleanup_mirror_probe
+    log_error "所有可用镜像下载均失败" >&2
+    return 1
+}
+
 resolve_download_url() {
     local artifact="$1"
     if [ "$RELEASE_VERSION" = "latest" ]; then
@@ -993,20 +1151,36 @@ resolve_download_url() {
 }
 
 download_release_checksums() {
+    [ "$CHECKSUMS_UNAVAILABLE" -eq 0 ] || return 0
     local checksums="$TMP_DIR/SHA256SUMS"
+    local status
     if [ ! -f "$checksums" ]; then
+        if [ "$RELEASE_VERSION" = latest ]; then
+            query_latest_release || return 1
+            RELEASE_VERSION="${LATEST_RELEASE_URL##*/}"
+            [[ "$LATEST_RELEASE_URL" = */tag/* ]] && upgrade_version_key "$RELEASE_VERSION" >/dev/null || return 1
+        fi
         resolve_download_url "SHA256SUMS"
         log_step "Downloading release checksums: ${DOWNLOAD_URL}"
-        if ! curl -fsSL "$DOWNLOAD_URL" -o "$checksums"; then
-            log_error "Failed to download release checksums from ${DOWNLOAD_URL}"
-            exit 1
+        if download_release_file "$DOWNLOAD_URL" "$checksums"; then
+            return 0
+        else
+            status=$?
         fi
+        if [ "$status" -eq 69 ]; then
+            CHECKSUMS_UNAVAILABLE=1
+            log_warn "所有来源均无法获取校验清单，跳过 SHA-256 校验并继续安装或升级。" >&2
+            return 0
+        fi
+        log_error "Failed to save release checksums from ${DOWNLOAD_URL}"
+        return "$status"
     fi
 }
 
 verify_release_checksum() {
     local file="$1" artifact="$2" checksums="$TMP_DIR/SHA256SUMS"
-    download_release_checksums
+    download_release_checksums || return $?
+    [ "$CHECKSUMS_UNAVAILABLE" -eq 0 ] || return 0
     local expected
     local actual
     expected=$(awk -v name="$artifact" '$2 == name || $2 == "*" name { print $1; exit }' "$checksums")
@@ -1037,21 +1211,28 @@ stage_binary() {
             cp "$local_src" "$staged"
         fi
     else
-        download_release_checksums
-        local artifact="" name
+        download_release_checksums || return $?
+        local artifact="" name downloaded=0
+        local candidates=()
         for name in yz-agent agent xboard-node; do
-            if awk -v name="$name-linux-$ARCH" '$2 == name || $2 == "*" name { found=1 } END { exit !found }' "$TMP_DIR/SHA256SUMS"; then
+            if [ "$CHECKSUMS_UNAVAILABLE" -eq 1 ]; then
+                candidates+=("$name-linux-$ARCH")
+            elif awk -v name="$name-linux-$ARCH" '$2 == name || $2 == "*" name { found=1 } END { exit !found }' "$TMP_DIR/SHA256SUMS"; then
                 artifact="$name-linux-$ARCH"
+                candidates+=("$artifact")
                 break
             fi
         done
-        if [ -z "$artifact" ]; then
+        if [ "${#candidates[@]}" -eq 0 ]; then
             log_error "Release checksums contain no supported node artifact"
             return 1
         fi
-        resolve_download_url "$artifact"
-        log_step "Downloading binary: ${DOWNLOAD_URL}"
-        if ! curl -fsSL "$DOWNLOAD_URL" -o "$staged"; then
+        for artifact in "${candidates[@]}"; do
+            resolve_download_url "$artifact"
+            log_step "Downloading binary: ${DOWNLOAD_URL}"
+            if download_release_file "$DOWNLOAD_URL" "$staged"; then downloaded=1; break; fi
+        done
+        if [ "$downloaded" -eq 0 ]; then
             log_error "Failed to download binary from ${DOWNLOAD_URL}"
             exit 1
         fi
@@ -1099,7 +1280,7 @@ stage_xbctl() {
         local artifact="xbctl-linux-${ARCH}"
         resolve_download_url "$artifact"
         log_step "Downloading xbctl: ${DOWNLOAD_URL}"
-        if ! curl -fsSL "$DOWNLOAD_URL" -o "$staged"; then
+        if ! download_release_file "$DOWNLOAD_URL" "$staged"; then
             log_error "Failed to download xbctl from ${DOWNLOAD_URL}"
             exit 1
         fi
@@ -1473,10 +1654,11 @@ check_latest_upgrade() {
         log_error "无法识别当前版本：$current，已停止升级"
         return 1
     fi
-    if ! url=$(curl -fsSL --connect-timeout 10 --max-time 30 -o /dev/null -w '%{url_effective}' "${DEFAULT_DOWNLOAD_BASE}/latest"); then
+    if ! query_latest_release; then
         log_error "查询最新正式版失败，已停止升级"
         return 1
     fi
+    url="$LATEST_RELEASE_URL"
     target="${url##*/}"
     if [[ "$url" != */tag/* ]] || ! target_key=$(upgrade_version_key "$target"); then
         log_error "无法识别最新正式版：$target，已停止升级"

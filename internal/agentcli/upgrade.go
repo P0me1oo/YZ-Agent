@@ -46,16 +46,24 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 	if downloadChecksums == nil {
 		downloadChecksums = ops.download
 	}
-	if err := downloadChecksums(resolveDownloadURL("SHA256SUMS", release), checksumsPath); err != nil {
-		return "", fmt.Errorf("download release checksums: %w", err)
-	}
-	checksums, err := os.ReadFile(checksumsPath)
-	if err != nil {
-		return "", fmt.Errorf("read release checksums: %w", err)
-	}
-	nodeArtifact, err := releaseNodeArtifact(checksums, runtime.GOARCH)
-	if err != nil {
-		return "", err
+	checksumErr := downloadChecksums(resolveDownloadURL("SHA256SUMS", release), checksumsPath)
+	skipChecksums := errors.Is(checksumErr, errReleaseChecksumsUnavailable)
+	var checksums []byte
+	nodeArtifact := "yz-agent-linux-" + runtime.GOARCH
+	if skipChecksums {
+		fmt.Println("警告：所有来源均无法获取校验清单，跳过 SHA-256 校验并继续升级。")
+	} else {
+		if checksumErr != nil {
+			return "", fmt.Errorf("download release checksums: %w", checksumErr)
+		}
+		checksums, err = os.ReadFile(checksumsPath)
+		if err != nil {
+			return "", fmt.Errorf("read release checksums: %w", err)
+		}
+		nodeArtifact, err = releaseNodeArtifact(checksums, runtime.GOARCH)
+		if err != nil {
+			return "", err
+		}
 	}
 	nodeName := strings.TrimSuffix(nodeArtifact, "-linux-"+runtime.GOARCH)
 	files := []upgradeFile{
@@ -66,11 +74,25 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 	for i := range files {
 		name := filepath.Base(files[i].staged)
 		artifact := fmt.Sprintf("%s-linux-%s", name, runtime.GOARCH)
-		if err := ops.download(resolveDownloadURL(artifact, release), files[i].staged); err != nil {
-			return "", fmt.Errorf("download %s: %w", name, err)
+		candidates := []string{artifact}
+		if skipChecksums && i == 0 {
+			candidates = []string{"yz-agent-linux-" + runtime.GOARCH, "agent-linux-" + runtime.GOARCH, "xboard-node-linux-" + runtime.GOARCH}
 		}
-		if err := verifyReleaseChecksum(files[i].staged, artifact, checksums); err != nil {
-			return "", err
+		var downloadErr error
+		for _, candidate := range candidates {
+			downloadErr = ops.download(resolveDownloadURL(candidate, release), files[i].staged)
+			if downloadErr == nil {
+				artifact = candidate
+				break
+			}
+		}
+		if downloadErr != nil {
+			return "", fmt.Errorf("download %s: %w", name, downloadErr)
+		}
+		if !skipChecksums {
+			if err := verifyReleaseChecksum(files[i].staged, artifact, checksums); err != nil {
+				return "", err
+			}
 		}
 		if err := os.Chmod(files[i].staged, 0o755); err != nil {
 			return "", fmt.Errorf("chmod %s: %w", name, err)

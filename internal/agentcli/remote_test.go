@@ -134,7 +134,7 @@ func TestLatestReleaseIsResolvedOnceAndRejectsPrerelease(t *testing.T) {
 			}))
 			defer server.Close()
 			downloadBase = server.URL
-			got, err := latestStableRelease(context.Background())
+			got, err := newReleaseDownloader().latestStableRelease(context.Background())
 			if tc.valid && (err != nil || got != tc.version) {
 				t.Fatalf("resolve: %s %v", got, err)
 			}

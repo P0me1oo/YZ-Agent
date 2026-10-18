@@ -548,13 +548,14 @@ func runUpgradeWithResult(args []string, result func(string)) error {
 	if err != nil {
 		return err
 	}
+	downloader := newReleaseDownloader()
 	if release == "latest" {
 		report, err := exec.Command(paths.installedBinary(), "-v").Output()
 		if err != nil {
 			return upgradeCheckFailure("current_version_failed", fmt.Errorf("读取当前版本失败，已停止升级：%w", err))
 		}
 		var message string
-		release, message, err = planLatestUpgrade(context.Background(), installedVersion("", report), latestStableRelease)
+		release, message, err = planLatestUpgrade(context.Background(), installedVersion("", report), downloader.latestStableRelease)
 		if err != nil {
 			return err
 		}
@@ -580,11 +581,11 @@ func runUpgradeWithResult(args []string, result func(string)) error {
 	newVer, err := upgradeBinaries(paths, release, upgradeOperations{
 		download: func(url, destination string) error {
 			fmt.Printf("Downloading %s...\n", url)
-			return downloadFile(url, destination)
+			return downloader.download(url, destination)
 		},
 		downloadChecksums: func(url, destination string) error {
 			fmt.Printf("Downloading %s...\n", url)
-			return downloadChecksumFile(url, destination)
+			return downloader.downloadChecksums(url, destination)
 		},
 		run: func(file string, args ...string) ([]byte, error) {
 			return exec.Command(file, args...).CombinedOutput()
@@ -723,28 +724,6 @@ func resolveDownloadURL(artifact, version string) string {
 		return downloadBase + "/latest/download/" + artifact
 	}
 	return downloadBase + "/download/" + version + "/" + artifact
-}
-
-// downloadFile 下载程序附件：GitHub 直连超时后改用 gh-proxy.org 重试，下载后仍按 GitHub 上的校验文件核对。
-func downloadFile(url, dest string) error {
-	client := &http.Client{Timeout: 120 * time.Second}
-	return downloadFileWithFallback(client, url, dest)
-}
-
-// downloadChecksumFile 只从 GitHub 直连下载校验文件。
-// 校验值不能来自镜像，否则镜像同时提供程序和校验值时，核对无法发现被改过的程序。
-func downloadChecksumFile(url, dest string) error {
-	client := &http.Client{Timeout: 120 * time.Second}
-	return downloadFileWithClient(client, url, dest)
-}
-
-func downloadFileWithFallback(client *http.Client, url, dest string) error {
-	err := downloadFileWithClient(client, url, dest)
-	if err == nil || !(errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err)) {
-		return err
-	}
-	fmt.Println("GitHub 下载超时，改用 gh-proxy.org 重试...")
-	return downloadFileWithClient(client, "https://gh-proxy.org/"+url, dest)
 }
 
 func downloadFileWithClient(client *http.Client, url, dest string) error {
