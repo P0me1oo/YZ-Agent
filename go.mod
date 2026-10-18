@@ -35,21 +35,29 @@ require (
 	github.com/libdns/tencentcloud v1.4.3
 	github.com/libdns/vultr/v2 v2.0.4
 	github.com/miekg/dns v1.1.73
+	github.com/pires/go-proxyproto v0.15.0
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7
 	github.com/sagernet/sing v0.9.0-beta.4
 	github.com/sagernet/sing-box v1.14.0
 	github.com/sagernet/sing-quic v0.7.0-beta.4
+	github.com/sagernet/sing-shadowsocks v0.2.8
 	github.com/sagernet/sing-tun v0.9.0-beta.4
+	github.com/sagernet/wireguard-go v0.0.5-0.20260823125007-8bd032a91a30
 	github.com/shirou/gopsutil/v4 v4.26.2
+	github.com/vishvananda/netlink v1.3.1
+	github.com/vishvananda/netns v0.0.5
 	github.com/xtls/xray-core v1.260327.0 // 由下方 replace 固定到 YZ fork 的可回滚提交
-	golang.org/x/sys v0.47.0
-	golang.org/x/term v0.45.0
+	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
+	golang.org/x/net v0.61.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 	golang.org/x/time v0.15.0
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	cloud.google.com/go/auth v0.18.2 // indirect
+	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -65,7 +73,7 @@ require (
 	github.com/akutz/memconn v0.1.0 // indirect
 	github.com/alexbrainman/sspi v0.0.0-20231016080023-1a75b4708caa // indirect
 	github.com/anchore/go-lzo v0.1.0 // indirect
-	github.com/andybalholm/brotli v1.1.0 // indirect
+	github.com/andybalholm/brotli v1.2.3 // indirect
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be // indirect
 	github.com/anthropics/anthropic-sdk-go v1.26.0 // indirect
 	github.com/anytls/sing-anytls v0.0.11 // indirect
@@ -89,7 +97,6 @@ require (
 	github.com/caddyserver/zerossl v0.1.5 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.21.0 // indirect
-	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
 	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
@@ -103,7 +110,7 @@ require (
 	github.com/digitalocean/godo v1.148.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/enfein/mieru/v3 v3.29.0 // indirect
-	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/florianl/go-nfqueue/v2 v2.1.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gaissmai/bart v0.26.1 // indirect
@@ -139,8 +146,8 @@ require (
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/nftables v0.2.1-0.20240414091927-5e242ec57806 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.11 // indirect
-	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.15 // indirect
+	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
@@ -152,7 +159,7 @@ require (
 	github.com/jsimonetti/rtnetlink v1.4.1 // indirect
 	github.com/juju/ratelimit v1.0.2 // indirect
 	github.com/keybase/go-keychain v0.0.1 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
+	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/fs v0.1.0 // indirect
@@ -180,7 +187,6 @@ require (
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/stun/v3 v3.1.7 // indirect
 	github.com/pion/transport/v4 v4.1.0 // indirect
-	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/sftp v1.13.10 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
@@ -230,7 +236,6 @@ require (
 	github.com/sagernet/sing-mux v0.3.5 // indirect
 	github.com/sagernet/sing-openconnect v0.0.0-20260810065514-53aa8058f8df // indirect
 	github.com/sagernet/sing-openvpn v0.0.0-20260729104525-103eb5fe5eb6 // indirect
-	github.com/sagernet/sing-shadowsocks v0.2.8 // indirect
 	github.com/sagernet/sing-shadowsocks2 v0.2.1 // indirect
 	github.com/sagernet/sing-shadowtls v0.2.1 // indirect
 	github.com/sagernet/sing-snell v0.0.0-20260829071736-20f2eaec77c3 // indirect
@@ -238,7 +243,6 @@ require (
 	github.com/sagernet/sing-vmess v0.2.8-0.20250909125414-3aed155119a1 // indirect
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1 // indirect
 	github.com/sagernet/tailscale v1.102.1-sing-box-1.14-mod.4 // indirect
-	github.com/sagernet/wireguard-go v0.0.5-0.20260823125007-8bd032a91a30 // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
 	github.com/smallstep/pkcs7 v0.1.1 // indirect
 	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
@@ -255,17 +259,16 @@ require (
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
-	github.com/vishvananda/netlink v1.3.1 // indirect
-	github.com/vishvananda/netns v0.0.5 // indirect
 	github.com/vultr/govultr/v3 v3.20.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+	github.com/yuin/gopher-lua v1.1.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.mongodb.org/mongo-driver v1.4.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
@@ -273,24 +276,22 @@ require (
 	go.uber.org/zap v1.27.1 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
-	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
-	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261005185213-c3db4df58582 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/mod v0.39.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
-	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb // indirect
-	golang.zx2c4.com/wireguard/windows v1.0.1 // indirect
-	google.golang.org/api v0.264.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/grpc v1.83.2 // indirect
+	golang.zx2c4.com/wireguard/windows v1.1.1 // indirect
+	google.golang.org/api v0.278.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gvisor.dev/gvisor v0.0.0-20260122175437-89a5d21be8f0 // indirect
+	layeh.com/gopher-luar v1.0.11 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
@@ -303,6 +304,6 @@ replace github.com/anytls/sing-anytls => ./compat/sing-anytls
 // SS2022 关闭路径兼容补丁随 Node 源码固定，来源与删除条件见兼容目录。
 replace github.com/sagernet/sing-shadowsocks => ./compat/sing-shadowsocks
 
-// 上游 v26.9.9 没有对应的 Go module Tag；保留兼容的 require 版本，
+// 上游 v26.10.17 没有对应的 Go module Tag；保留兼容的 require 版本，
 // 并将实际依赖固定到 YZ fork 的发布提交，避免解析到移动分支。
-replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261011032238-77d29e684aed
+replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261018151951-fb2f909b7987
