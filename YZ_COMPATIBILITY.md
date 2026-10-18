@@ -1,6 +1,6 @@
 # YZ-Agent 兼容矩阵
 
-## v2.19.2 Xray v26.10.17 正式依赖更新（发布准备）
+## v2.19.2 Xray v26.10.17 正式发布核验（2026-10-19）
 
 - Node 起点 `6cde54c3fef2a8749ad2b1067ca36bc250074036`；将 Xray 替换固定为 YZ-Xray-core `v26.10.0` / `fb2f909b7987c651741e34798881657733161e30`，Go 模块版本 `v0.0.0-20261018151951-fb2f909b7987`。该提交合并固定上游 `v26.10.17` / `92ccc939aaf4f8965f369cf0b142e005aeaa11d5`，已推送并可通过 Go 模块解析；不使用本地路径或移动分支。
 - 面板沿用 `1.93.0`、管理端 `0.65.0`，通信、配置下发及状态报告格式不变。sing-box 继续固定 `v1.15.0`；实际验证覆盖 Xray 适配、双核心中转、流量累计、用户热更新、重载与恢复、服务报告和面板通信。
@@ -8,6 +8,11 @@
 - 核心正式 [测试流程](https://github.com/P0me1oo/YZ-Xray-core/actions/runs/39140011457) 全部通过，包括 Linux、Windows、macOS 完整回归、格式、生成文件、SS2022/HY2 和 WG 竞态、REALITY 多客户端互通。本地使用固定依赖的版本专项已确认实际 Xray 为 `v26.10.17`、YZ fork 为 `v26.10.0`；Node 全仓发布回归和产物核验由本次正式 CI 完成。
 - Node `v2.19.0` / `72e43501bd868553b64cc97ee53340eb7fa04185` 的 [CI](https://github.com/P0me1oo/YZ-Agent/actions/runs/39141240918) 全仓竞态回归与四组防火墙通过，但 Mihomo 客户端专项因测试夹具使用旧私钥类型而编译失败，未生成 Release 或镜像。`v2.19.1` 使用新密钥对象的字节导出接口修正测试，保留原断言；失败标签不移动。
 - Node `v2.19.1` / `b22a125da76f741d80c912b0d61d34139af711af` 的 [CI](https://github.com/P0me1oo/YZ-Agent/actions/runs/39142896723) 全仓竞态回归和四组防火墙通过，独立 Mihomo 客户端首请求在转发初始化前遇到 EOF，未生成 Release 或镜像。`v2.19.2` 使用完整 TCP 代理收发确认客户端就绪，再执行原 TCP/UDP 出口检查；本地 Linux 实连通过。普通 Mihomo WG 客户端在 Xray 和 sing-box 两种核心下也通过。
+- Node 固定发布来源为 `c34bae7e11597e3e642a6081d4884ce3c9dd2ecb`，正式 [Release](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.19.2) 与 Tag 均为 `v2.19.2`，GitHub 最新正式版已指向本版本。[CI](https://github.com/P0me1oo/YZ-Agent/actions/runs/39144230552) 的完整竞态回归、四组原生防火墙、Mihomo REALITY/WG 与双核心普通 WG 客户端、安装器、两架构构建、镜像运行版本和 Release 发布全部通过。
+- 12 个 Release 附件全部实际下载核验，11 项 SHA256SUMS 与 GitHub 摘要、大小一致。安装器与固定源码一致，历史 xboard-node 附件与同架构 yz-agent 相同；实际 ELF 架构、Go `1.27.1`、`CGO_ENABLED=0`、`-trimpath=true`、来源 revision、`vcs.modified=false`、随附构建信息及新 Xray 固定模块解析均正确。amd64 程序 SHA-256 为 `87481bf7d86ec66ee85439888340c6a1b91af81fbfa9b19c95903e3bf04706d3`，arm64 为 `7914f640630ef7f6b385fd3121a932e74d4ed4c9585eab53906e93735abb431b`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.19.2`、完整提交标签与 `latest` 均为 `sha256:438c127d7dc617830cc9daa8ddcf34f79ef87adaa7ec662978d1fb29395c983d`。amd64 清单为 `sha256:8c6f4b6e331cf660b3a27e5f3e53eecf0ea578424f54af3265b914c040898c8b`，arm64 为 `sha256:d8a87d4cb3fb0a455ddf65add193e6d8acb736a1717e57712b62c323e58682be`；两个架构全部镜像层已匿名下载校验，OCI 版本、完整来源与实际内嵌核心模块一致。
+- 正式 CI 实际运行两个架构镜像，输出 Node `v2.19.2`、Xray 上游 `v26.10.17`、YZ fork `v26.10.0` 与固定来源；下载后的 amd64 Release 和镜像内程序也在本地 Linux 运行版本命令核对。服务器只需升级 Node，内嵌核心随之更新；回滚参考 `v2.18.0` / `sha256:b62fabbcb7047b1219334aaf9be1ae881a28177a483a592252131834cd4f7363`，两个架构清单仍可获取。
+- 核心 `v26.10.0` 已完成独立 Release、64 个附件和镜像核验，详见核心 `YZ_FORK.md`。配套面板继续使用 `1.93.0`，不要求为本次核心升级另发面板版本。未连接或更新生产服务器；Node 核验文件位于 `D:/codex-tmp/yz-agent-v2.19.2-release-20261019/`，发布后文档提交不移动正式标签。
 
 ## v2.18.0 正式发布核验（2026-10-18）
 
