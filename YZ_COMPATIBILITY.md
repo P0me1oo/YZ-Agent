@@ -1,6 +1,15 @@
 # YZ-Agent 兼容矩阵
 
-## v2.16.1 访问记录归属实际落地（发布准备）
+## v2.16.1 正式发布核验
+
+- [Release v2.16.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.16.1) 已发布并核对为最新正式版，固定来源 `62aeb1282e23993ae2f7422764cd3e8ced77b7a0`；配套面板 `v1.92.0` / `529ba92f51eed92f429d24520abcb9b9f98c80b6`、管理端 `v0.64.0`。包含节点 PROXY 接收开关和访问记录实际出口归属。
+- [正式 CI](https://github.com/P0me1oo/YZ-Agent/actions/runs/39101237609) 全部通过，包括 Linux 全仓竞态测试、核心兼容、双核心与中转、Mihomo、安装器、四组原生防火墙、双架构安装包和镜像实际版本检查。
+- 12 个附件全部下载核验，11 项 SHA256SUMS 校验和、GitHub 摘要和大小一致；安装器与固定源码一致，历史 xboard-node 与同架构 yz-agent 相同。程序 ELF 架构、来源、`CGO_ENABLED=0`、`-trimpath=true`、`vcs.modified=false` 及随附构建信息均正确，实际运行版本由正式 CI 输出核对。固定依赖仍为 YZ-sing-box `v1.15.0` 和 YZ-Xray-core `v0.0.0-20261011032238-77d29e684aed`，没有新增本地路径替换。
+- yz-agent amd64 SHA-256 为 `b05235bc96caef2896474a462a56e7b4c32d6c6e0b25189b50900a39bc845ec3`，arm64 为 `bd60a35a2a778fe375a4eb4abd2dac76059c2d7ab19aa25b8ed7b9f3716bbdc5`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.16.1`、完整提交标签及 `latest` 均指向 `sha256:564ac8145e200ade9b654b1bfc4c82ec3c35af42fcfe6fc5812f02275c06b23d`。两个架构所有镜像层均经匿名获取并核验，OCI 来源、版本、镜像内程序构建信息与固定来源一致。
+- 先更新面板，再更新 Agent，两端更新完成后再操作新接收开关。回滚参考 `v2.15.0` / `sha256:b6bf72c75fba5c380a77dffc63f91735612df824baceec87a219e14fb8374ffe`，Release 附件及两个架构镜像仍可获取；回退前评估新开关及访问记录版本兼容性。未操作生产服务器，核验文件位于 `D:/codex-tmp/yz-release-1.92.0-20261018/`，发布后文档提交不移动标签。
+
+## v2.16.1 访问记录归属实际落地（开发验证记录）
 
 本次与面板 `1.92.0`、管理端 `0.64.0` 统一发布，包含下方 `v2.16.0` 的接收开关。先更新面板，再更新 Agent，两端更新完成后再操作新接收开关。正式发布沿用完整 CI、双架构安装包和镜像检查；下方为开发阶段的验证记录。
 

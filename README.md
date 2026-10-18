@@ -1,8 +1,8 @@
 # YZ-Agent
 
-本地开发版本 `v2.16.1` 将访问记录归属改为实际出口：中转记录选中的落地，前置直出记录前置。配套面板 `1.90.1`，尚未发布；包含下方 `v2.16.0` 的接收开关改动。见[访问记录](docs/access-logs.md)。
+[`v2.16.1`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.16.1) 已发布，将访问记录归属改为实际出口：中转记录选中的落地，前置直出记录前置。配套面板 [`1.92.0`](https://github.com/P0me1oo/YZboard/releases/tag/v1.92.0)；包含下方 `v2.16.0` 的接收开关改动。见[访问记录](docs/access-logs.md)。
 
-本地开发版本 `v2.16.0` 新增节点级“接收 PROXY 协议”开关，配套面板 `1.90.0`、管理端 `0.62.0`，尚未发布。开启后自动识别任意来源的 TCP PROXY v1/v2 并兼容普通连接，无需填写中转 IP；请配合防火墙限制使用。旧节点保留名单兼容，两个核心无需修改。见[接收说明](docs/proxy-protocol.md)。
+原开发版本 `v2.16.0` 的节点级“接收 PROXY 协议”开关已纳入 `v2.16.1`，本轮配套面板 `1.92.0`、管理端 `0.64.0`。开启后自动识别任意来源的 TCP PROXY v1/v2 并兼容普通连接，无需填写中转 IP；请配合防火墙限制使用。旧节点保留名单兼容，两个核心无需修改。见[接收说明](docs/proxy-protocol.md)。
 
 [`v2.15.0`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.15.0) 已发布，为 sing-box 的通用 TCP 入站增加可信 PROXY protocol v1/v2 接收，配套核心 `YZ-sing-box v1.15.0`。沿用面板“前置服务器 IP”设置指定可信 Realm 出口；普通直连不受影响，原生 UDP、QUIC 不在此次支持范围内。配置方式、验证结果和限制见[真实来源说明](docs/proxy-protocol.md)及[兼容矩阵](YZ_COMPATIBILITY.md)。
 
