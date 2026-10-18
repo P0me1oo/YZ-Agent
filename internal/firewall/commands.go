@@ -35,6 +35,9 @@ func (systemCommands) Run(parent context.Context, name, input string, args ...st
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	// 子进程可能继续持有输出管道，单独终止主进程不能保证 Run 按时返回。
+	cmd.WaitDelay = time.Second
+	configureCommandCancellation(cmd)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
@@ -42,6 +45,10 @@ func (systemCommands) Run(parent context.Context, name, input string, args ...st
 	var output limitedOutput
 	cmd.Stdout, cmd.Stderr = &output, &output
 	err := cmd.Run()
+	if err != nil && cmd.Process != nil {
+		// 主进程已退出但管道仍被占用时，也清理本命令留下的子进程。
+		_ = cmd.Cancel()
+	}
 	if ctx.Err() != nil {
 		err = ctx.Err()
 	}

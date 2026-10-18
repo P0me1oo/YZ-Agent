@@ -1,4 +1,4 @@
-VERSION ?= v2.19.2
+VERSION ?= v2.19.3
 TEST_EXEC ?=
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -32,6 +32,7 @@ test:
 	bash tests/upgrade_version_test.sh
 	bash tests/download_mirrors_test.sh
 	bash tests/install_service_manager_test.sh
+	bash tests/install_health_test.sh
 	bash tests/install_kernel_defaults_test.sh
 	bash tests/install_paths_test.sh
 	bash tests/install_name_migration_test.sh

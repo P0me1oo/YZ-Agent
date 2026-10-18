@@ -72,6 +72,7 @@ KERNEL_EXPLICIT=0
 RELEASE_VERSION="${DEFAULT_RELEASE_VERSION}"
 HEALTH_PORT="${DEFAULT_HEALTH_PORT}"
 HEALTH_ENABLED=1
+HEALTH_WAIT_SECONDS=180
 RUNTIME_GOMEMLIMIT=""
 RUNTIME_GOGC=""
 BINARY_SOURCE=""
@@ -1561,17 +1562,24 @@ wait_for_health() {
     if [ "$HEALTH_ENABLED" -eq 0 ]; then
         return 0
     fi
-    local attempt=0
-    local max_attempts=30
-    while [ "$attempt" -lt "$max_attempts" ]; do
+    log_info "等待服务就绪（最多 ${HEALTH_WAIT_SECONDS} 秒）"
+    local deadline=$((SECONDS + HEALTH_WAIT_SECONDS))
+    local remaining request_timeout
+    while [ "$SECONDS" -lt "$deadline" ]; do
         if ! service_is_active; then
             return 1
         fi
-        if curl -fsS "http://127.0.0.1:${HEALTH_PORT}/healthz" >/dev/null 2>&1; then
+        remaining=$((deadline - SECONDS))
+        [ "$remaining" -gt 0 ] || return 1
+        request_timeout=2
+        [ "$remaining" -ge "$request_timeout" ] || request_timeout="$remaining"
+        if curl --noproxy '*' --connect-timeout "$request_timeout" --max-time "$request_timeout" \
+            -fsS "http://127.0.0.1:${HEALTH_PORT}/healthz" >/dev/null 2>&1; then
             return 0
         fi
-        sleep 1
-        attempt=$((attempt + 1))
+        if [ "$SECONDS" -lt "$deadline" ]; then
+            sleep 1
+        fi
     done
     return 1
 }
