@@ -282,3 +282,167 @@ func TestMeterConcurrentSamplesAndPolicyUpdatesPersistOneState(t *testing.T) {
 		t.Fatal("concurrent updates lost persisted metering state")
 	}
 }
+
+func currentPolicy(t *testing.T) Policy {
+	t.Helper()
+	p := testPolicy(t)
+	var err error
+	p.PeriodStart, p.PeriodEnd, err = Period(time.Now(), p.ResetDay, p.Timezone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestProxyUsesPanelTotalsWithoutInterfacesAndSurvivesRestart(t *testing.T) {
+	p := currentPolicy(t)
+	p.Mode, p.ProxyRX, p.ProxyTX, p.Initialized = "proxy", 20, 30, true
+	p.Interfaces = []string{"missing0"}
+	reader := func([]string) (Reading, error) { t.Fatal("代理模式不应读取网卡"); return Reading{}, nil }
+	path := filepath.Join(t.TempDir(), "meter.json")
+	m := New(path, reader)
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		s, blocked := m.Tick(time.Now())
+		if blocked || !s.Initialized || s.Error != "" || len(s.Interfaces) != 0 || s.Mode != "proxy" || s.Revision != p.Revision {
+			t.Fatalf("代理心跳: %+v, blocked=%v", s, blocked)
+		}
+	}
+	m = New(path, reader)
+	// 重启必须重新获得面板确认，不能仅凭磁盘里的过期额度放行。
+	if _, blocked := m.Snapshot(); !blocked {
+		t.Fatal("重启跳过面板确认")
+	}
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Tick(time.Now()); blocked {
+		t.Fatal("重启丢失代理累计或受网卡影响")
+	}
+	p.ProxyTX = 80
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Snapshot(); !blocked {
+		t.Fatal("上传加下载达到额度后未停服")
+	}
+	p.ProxyRX, p.ProxyTX = 0, 0 // 同周期迟到响应不能把用量倒退。
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Tick(time.Now()); !blocked {
+		t.Fatal("迟到响应清空代理额度")
+	}
+	p.Limit, p.Revision = 200, p.Revision+1
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Tick(time.Now()); blocked {
+		t.Fatal("提高额度未恢复")
+	}
+	// 本地代理文件丢失仍可从权威累计恢复，不建立新的零点。
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	p.ProxyRX, p.ProxyTX = 20, 80
+	m = New(path, reader)
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Tick(time.Now()); blocked {
+		t.Fatal("代理累计未能从面板恢复")
+	}
+}
+
+func TestProxyModeSwitchRetainsIndependentCountersAndNetworkBaseline(t *testing.T) {
+	p := currentPolicy(t)
+	reading := Reading{Boot: "boot", Counters: map[string]Counter{"eth0": {Identity: "2", RX: 1000, TX: 2000}}}
+	reads := 0
+	m := New(filepath.Join(t.TempDir(), "meter.json"), func([]string) (Reading, error) { reads++; return reading, nil })
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	m.Tick(time.Now())
+	reading.Counters = map[string]Counter{"eth0": {Identity: "2", RX: 1020, TX: 2030}}
+	m.Tick(time.Now())
+	p.Mode, p.ProxyRX, p.ProxyTX, p.Revision = "proxy", 10, 20, 2
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		s, blocked := m.Tick(time.Now())
+		if blocked || s.RX != 20 || s.TX != 30 || reads != 2 {
+			t.Fatalf("模式切换混用累计: %+v, reads=%d", s, reads)
+		}
+	}
+	p.Mode, p.Revision = "both", 3
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	reading.Counters = map[string]Counter{"eth0": {Identity: "2", RX: 1030, TX: 2040}}
+	s, blocked := m.Tick(time.Now())
+	if blocked || s.RX != 30 || s.TX != 40 || reads != 3 {
+		t.Fatalf("切回网卡丢失原基线: %+v", s)
+	}
+	p.Mode, p.Revision = "proxy", 4
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if m.state.Policy.ProxyRX != 10 || m.state.Policy.ProxyTX != 20 {
+		t.Fatal("切回代理后用量被清空")
+	}
+}
+
+func TestProxyLeaseRolloverAndStorageFailure(t *testing.T) {
+	p := currentPolicy(t)
+	p.Mode, p.ProxyRX, p.ProxyTX = "proxy", 50, 60
+	path := filepath.Join(t.TempDir(), "meter.json")
+	m := New(path, func([]string) (Reading, error) { t.Fatal("代理模式读取网卡"); return Reading{}, nil })
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, blocked := m.Tick(now); !blocked {
+		t.Fatal("超限未保护")
+	}
+	// 月初可以清空新周期，但网络断开时仍不能凭过期面板状态运行。
+	s, blocked := m.Tick(time.Unix(p.PeriodEnd, 0))
+	if !blocked || s.PeriodStart != p.PeriodEnd {
+		t.Fatal("新周期绕过控制通道租约")
+	}
+	p.PeriodStart, p.PeriodEnd = p.PeriodEnd, p.PeriodEnd+31*86400
+	p.ProxyRX, p.ProxyTX, p.Revision = 1, 2, p.Revision+1
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Tick(now); blocked {
+		t.Fatal("新周期确认后未恢复")
+	}
+	if _, blocked := m.Tick(time.Now().Add(31 * time.Second)); !blocked {
+		t.Fatal("过期额度继续放行")
+	}
+	if err := m.Apply(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Tick(time.Now()); blocked {
+		t.Fatal("控制通道恢复失败")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, blocked = m.Tick(time.Now())
+	if !blocked || s.Error != "state_write_failed" {
+		t.Fatal("写盘失败未保护")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, blocked := m.Tick(time.Now()); blocked {
+		t.Fatal("写盘恢复未重试")
+	}
+}

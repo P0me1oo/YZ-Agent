@@ -1,4 +1,4 @@
-// Package machinetraffic 对宿主机外网网卡计量，不读取代理用户统计。
+// Package machinetraffic 管理服务器额度，支持网卡计量和面板汇总的代理计量。
 package machinetraffic
 
 import (
@@ -27,6 +27,8 @@ type Policy struct {
 	PeriodEnd   int64    `json:"period_end"`
 	RX          uint64   `json:"rx"`
 	TX          uint64   `json:"tx"`
+	ProxyRX     uint64   `json:"proxy_rx"`
+	ProxyTX     uint64   `json:"proxy_tx"`
 	Baseline    uint64   `json:"baseline"`
 	Sequence    uint64   `json:"sequence"`
 	Initialized bool     `json:"initialized"`
@@ -34,6 +36,8 @@ type Policy struct {
 }
 
 type Sample struct {
+	Revision    uint64   `json:"revision"`
+	Mode        string   `json:"mode"`
 	Epoch       uint64   `json:"epoch"`
 	PeriodStart int64    `json:"period_start"`
 	Sequence    uint64   `json:"sequence"`
@@ -73,6 +77,7 @@ type Meter struct {
 	loaded      bool
 	lost        bool
 	writeFailed bool
+	confirmedAt time.Time
 }
 
 func New(path string, reader Reader) *Meter {
@@ -98,7 +103,7 @@ func New(path string, reader Reader) *Meter {
 func (m *Meter) Apply(p Policy) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p.Epoch == 0 || p.Revision == 0 || p.ResetDay < 1 || p.ResetDay > 31 || p.PeriodEnd <= p.PeriodStart || (p.Mode != "outbound" && p.Mode != "both") {
+	if p.Epoch == 0 || p.Revision == 0 || p.ResetDay < 1 || p.ResetDay > 31 || p.PeriodEnd <= p.PeriodStart || (p.Mode != "outbound" && p.Mode != "both" && p.Mode != "proxy") {
 		return errors.New("invalid machine traffic policy")
 	}
 	if _, err := time.LoadLocation(p.Timezone); err != nil {
@@ -120,6 +125,7 @@ func (m *Meter) Apply(p Policy) error {
 		if p.PeriodStart < old.PeriodStart {
 			p.PeriodStart, p.PeriodEnd, p.Baseline = old.PeriodStart, old.PeriodEnd, old.Baseline
 			p.RX, p.TX, p.Sequence = 0, 0, 0
+			p.ProxyRX, p.ProxyTX = old.ProxyRX, old.ProxyTX
 		} else if p.PeriodStart > old.PeriodStart {
 			m.state.Sample = Sample{Epoch: p.Epoch, PeriodStart: p.PeriodStart}
 			if m.lost {
@@ -130,6 +136,14 @@ func (m *Meter) Apply(p Policy) error {
 		if !slices.Equal(p.Interfaces, old.Interfaces) {
 			m.state.Previous = Reading{}
 		}
+		if (p.Mode == "proxy") != (old.Mode == "proxy") {
+			// 两种来源独立保存，切回网卡后仍从原基线继续。
+			m.state.Sample.Initialized, m.state.Sample.Error = false, ""
+			m.state.Sample.Interfaces = nil
+		}
+		if p.PeriodStart == old.PeriodStart {
+			p.ProxyRX, p.ProxyTX = max(p.ProxyRX, old.ProxyRX), max(p.ProxyTX, old.ProxyTX)
+		}
 		if m.state.Sample.PeriodStart == p.PeriodStart {
 			m.state.Sample.RX = max(m.state.Sample.RX, p.RX)
 			m.state.Sample.TX = max(m.state.Sample.TX, p.TX)
@@ -137,6 +151,7 @@ func (m *Meter) Apply(p Policy) error {
 		}
 		m.state.Policy = p
 	}
+	m.confirmedAt = time.Now()
 	return m.saveLocked()
 }
 
@@ -182,7 +197,7 @@ func (m *Meter) Tick(now time.Time) (Sample, bool) {
 	}
 	if now.Unix() >= p.PeriodEnd {
 		start, end, _ := Period(now, p.ResetDay, p.Timezone)
-		p.PeriodStart, p.PeriodEnd, p.Baseline = start, end, 0
+		p.PeriodStart, p.PeriodEnd, p.Baseline, p.ProxyRX, p.ProxyTX = start, end, 0, 0, 0
 		m.state.Sample = Sample{Epoch: p.Epoch, PeriodStart: start}
 		if m.lost {
 			m.lost = false
@@ -191,45 +206,51 @@ func (m *Meter) Tick(now time.Time) (Sample, bool) {
 	}
 	s := &m.state.Sample
 	s.Sequence++
-	reading, err := m.reader(p.Interfaces)
-	if m.lost {
-		s.Error, s.Initialized = "state_lost", false
-	} else if err != nil || len(reading.Counters) == 0 || reading.Boot == "" {
-		s.Error = "interfaces_unavailable"
+	// 代理累计由面板接收节点报告时持久化，心跳仅确认模式和控制通道。
+	if p.Mode == "proxy" {
+		s.Error, s.Initialized, s.Interfaces = "", true, nil
 	} else {
-		s.Error = ""
-		names := make([]string, 0, len(reading.Counters))
-		for name, c := range reading.Counters {
-			names = append(names, name)
-			if m.state.Previous.Boot != "" {
-				prev, ok := m.state.Previous.Counters[name]
-				reset := !ok || reading.Boot != m.state.Previous.Boot || c.Identity != prev.Identity
-				s.RX = add(s.RX, delta(c.RX, prev.RX, reset))
-				s.TX = add(s.TX, delta(c.TX, prev.TX, reset))
+		reading, err := m.reader(p.Interfaces)
+		if m.lost {
+			s.Error, s.Initialized = "state_lost", false
+		} else if err != nil || len(reading.Counters) == 0 || reading.Boot == "" {
+			s.Error = "interfaces_unavailable"
+		} else {
+			s.Error = ""
+			names := make([]string, 0, len(reading.Counters))
+			for name, c := range reading.Counters {
+				names = append(names, name)
+				if m.state.Previous.Boot != "" {
+					prev, ok := m.state.Previous.Counters[name]
+					reset := !ok || reading.Boot != m.state.Previous.Boot || c.Identity != prev.Identity
+					s.RX = add(s.RX, delta(c.RX, prev.RX, reset))
+					s.TX = add(s.TX, delta(c.TX, prev.TX, reset))
+				}
 			}
+			slices.Sort(names)
+			s.Interfaces, s.Initialized = names, true
+			m.state.Previous = reading
 		}
-		slices.Sort(names)
-		s.Interfaces, s.Initialized = names, true
-		m.state.Previous = reading
 	}
 	if err := m.saveLocked(); err != nil {
 		s.Error = "state_write_failed"
 	}
-	return m.sampleLocked(), m.blockedLocked()
+	return m.sampleLocked(), m.blockedLocked(now)
 }
 
 func (m *Meter) Snapshot() (Sample, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.sampleLocked(), m.blockedLocked()
+	return m.sampleLocked(), m.blockedLocked(time.Now())
 }
 func (m *Meter) HasPolicy() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.loaded || m.lost }
 func (m *Meter) sampleLocked() Sample {
 	s := m.state.Sample
+	s.Revision, s.Mode = m.state.Policy.Revision, m.state.Policy.Mode
 	s.Interfaces = append([]string{}, s.Interfaces...)
 	return s
 }
-func (m *Meter) blockedLocked() bool {
+func (m *Meter) blockedLocked(now time.Time) bool {
 	p, s := m.state.Policy, m.state.Sample
 	if !m.loaded {
 		return true
@@ -239,6 +260,10 @@ func (m *Meter) blockedLocked() bool {
 	}
 	if p.Limit == 0 {
 		return false
+	}
+	if p.Mode == "proxy" {
+		// 面板负责累计，断线后不能继续用过期额度放行；管理连接保持运行。
+		return m.writeFailed || !s.Initialized || s.Error != "" || m.confirmedAt.IsZero() || now.Sub(m.confirmedAt) >= 30*time.Second || add(p.ProxyRX, p.ProxyTX) >= p.Limit
 	}
 	used := add(p.Baseline, s.TX)
 	if p.Mode == "both" {

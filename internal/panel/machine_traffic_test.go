@@ -35,21 +35,21 @@ func TestMachineTrafficProtocol(t *testing.T) {
 		if body.Sample != nil {
 			reports = append(reports, *body.Sample)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"traffic": map[string]any{"limit": 100, "mode": "both", "epoch": 2, "revision": 3, "period_start": 1, "period_end": 200, "reset_day": 31, "timezone": "Asia/Shanghai", "active": true}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"traffic": map[string]any{"limit": 100, "mode": "proxy", "proxy_rx": 20, "proxy_tx": 30, "epoch": 2, "revision": 3, "period_start": 1, "period_end": 200, "reset_day": 31, "timezone": "Asia/Shanghai", "active": true}})
 	}))
 	defer server.Close()
 	client := NewClient(config.PanelConfig{URL: server.URL, MachineID: 7})
 	p, err := client.ExchangeMachineTraffic(context.Background(), nil)
-	if err != nil || p == nil || p.Limit != 100 || p.Mode != "both" {
+	if err != nil || p == nil || p.Limit != 100 || p.Mode != "proxy" || p.ProxyRX != 20 || p.ProxyTX != 30 {
 		t.Fatalf("policy decode: %v", err)
 	}
-	sample := machinetraffic.Sample{Epoch: 2, PeriodStart: 1, Sequence: 4, RX: 20, TX: 30, Initialized: true, Interfaces: []string{"eth0"}}
+	sample := machinetraffic.Sample{Epoch: 2, Revision: 3, Mode: "proxy", PeriodStart: 1, Sequence: 4, RX: 20, TX: 30, Initialized: true, Interfaces: []string{}}
 	for range 2 {
 		if _, err := client.ExchangeMachineTraffic(context.Background(), &sample); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(reports) != 2 || reports[0].Sequence != 4 || reports[1].RX != 20 {
+	if len(reports) != 2 || reports[0].Sequence != 4 || reports[1].RX != 20 || reports[1].Revision != 3 || reports[1].Mode != "proxy" {
 		t.Fatal("retry changed report identity or counters")
 	}
 	status = http.StatusNotFound
