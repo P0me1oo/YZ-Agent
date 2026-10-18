@@ -37,7 +37,7 @@ func TestWireGuardRealityClients(t *testing.T) {
 	relayStartCore(t, "singbox", landing, nil, kernel.TLSCert{}, relayMarkerEcho(t, "wg"))
 	node := runtimeNode(t, "vless")
 	node.TLS = 2
-	node.TLSSettings = map[string]any{"server_name": "reality.test", "private_key": base64.RawURLEncoding.EncodeToString(fixture.Config.PrivateKey), "short_id": shortID}
+	node.TLSSettings = map[string]any{"server_name": "reality.test", "private_key": base64.RawURLEncoding.EncodeToString(fixture.Config.PrivateKey.Bytes()), "short_id": shortID}
 	node.TLSSettings["dest"] = fixture.Config.Dest
 	node.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{{NodeID: 7, RouteID: 12, Tag: "relay-7", Protocol: "wireguard", Address: "127.0.0.1", Port: landing.ServerPort, WireGuard: sender}}}
 	user := runtimeUser(t, 810)
