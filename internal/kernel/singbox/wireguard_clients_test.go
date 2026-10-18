@@ -4,9 +4,12 @@ package singbox
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -18,6 +21,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	singM "github.com/sagernet/sing/common/metadata"
 	"github.com/xtls/xray-core/testing/realitytest"
 )
 
@@ -100,6 +104,38 @@ func TestWireGuardRealityClients(t *testing.T) {
 		t.Fatalf("隔离 Mihomo 客户端未就绪: %s", message)
 	}
 	client := runtimeClient(t, proxyNode, model.UserSpec{})
+	// Mihomo 会先开放监听，再启用转发；用完整代理收发确认就绪。
+	probe := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		conn, err := runtimeConnect(ctx, client, singM.ParseSocksaddr("198.51.100.10:80"))
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		if _, err := io.WriteString(conn, runtimePayload); err != nil {
+			return err
+		}
+		want := []byte("wg:" + runtimePayload)
+		got := make([]byte, len(want))
+		if _, err := io.ReadFull(conn, got); err != nil {
+			return err
+		}
+		if !bytes.Equal(got, want) {
+			return fmt.Errorf("Mihomo 就绪探测的出口标记不匹配")
+		}
+		return nil
+	}
+	deadline = time.Now().Add(20 * time.Second)
+	for {
+		if err := probe(); err == nil {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("Mihomo REALITY/WG 转发未就绪: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	for _, network := range []string{"tcp", "udp"} {
 		relayMarkerExchange(t, client, "wg", network)
 	}
