@@ -13,11 +13,55 @@ import (
 	"testing"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/sagernet/sing-box/adapter"
 	singM "github.com/sagernet/sing/common/metadata"
 )
+
+func TestAccessLogWireGuardRelay(t *testing.T) {
+	for _, entryKind := range []string{"xray", "singbox"} {
+		for _, landingKind := range []string{"xray", "singbox"} {
+			t.Run(entryKind+"/"+landingKind, func(t *testing.T) {
+				r, landingLog := &accesslog.Recorder{NodeID: 3}, &accesslog.Recorder{NodeID: 7}
+				r.Enable(true)
+				landingLog.Enable(true)
+				sender, receiver := runtimeWireGuardPair(t)
+				landing := runtimeNode(t, "wireguard")
+				landing.Relay = &model.RelayConfig{Mode: "landing", Protocol: "wireguard", WireGuard: receiver}
+				relayStartCore(t, landingKind, landing, nil, kernel.TLSCert{}, relayMarkerEcho(t, "wg"), landingLog)
+				entry := runtimeNode(t, "vless")
+				entry.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{
+					{NodeID: 7, RouteID: 12, Tag: "relay-7", Protocol: "wireguard", Address: "127.0.0.1", Port: landing.ServerPort, WireGuard: sender},
+				}}
+				user := runtimeUser(t, 950)
+				core := relayStartCore(t, entryKind, entry, []model.UserSpec{user}, kernel.TLSCert{}, relayMarkerEcho(t, "direct"), r)
+				selected := user
+				selected.UUID = relayCredential(user, 12)
+				for run := 0; run < 2; run++ {
+					if run > 0 {
+						if err := core.Reload(entry, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
+							t.Fatal(err)
+						}
+					}
+					client := runtimeClient(t, entry, selected)
+					for _, network := range []string{"tcp", "udp"} {
+						relayMarkerExchange(t, client, "wg", network)
+					}
+					for _, record := range accessRecords(t, r, 2) {
+						if record.NodeID != 7 || record.UserID != user.ID || record.Destination != "198.51.100.10" {
+							t.Fatal("WG 中转未归属实际落地或目标错误")
+						}
+					}
+				}
+				if batch, _ := landingLog.Next(); batch != nil {
+					t.Fatal("WG 落地重复采集")
+				}
+			})
+		}
+	}
+}
 
 func runtimeWireGuardPair(t *testing.T) (*model.RelayWireGuardConfig, *model.RelayWireGuardConfig) {
 	t.Helper()

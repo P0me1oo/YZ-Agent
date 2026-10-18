@@ -131,7 +131,7 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 		return nil, fmt.Errorf("decode handshake: %w", err)
 	}
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
-	c.accessLog.Store(hs.AccessLog.Version == 1)
+	c.accessLog.Store(hs.AccessLog.Version == 2)
 	c.deviceHandover.Store(hs.Realtime.DeviceHandover == 1)
 	c.deviceHandoverWS.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverWS == 1)
 	c.deviceHandoverRenewal.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverRenewal == 1)

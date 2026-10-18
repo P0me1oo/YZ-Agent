@@ -39,10 +39,10 @@ func TestHostOnlyAndIPFallback(t *testing.T) {
 
 func TestRetryCheckpointRestoreAndNewConnections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pending.json")
-	r := &Recorder{}
+	r := &Recorder{NodeID: 3}
 	r.Enable(true)
 	for i := 0; i < MaxBatch+3; i++ {
-		r.Add(7, "example.test", "", 443)
+		r.AddForNode(9, 7, "example.test", "", 443)
 	}
 	first, _ := r.Next()
 	r.Add(8, "", "2001:db8::1", 80)
@@ -61,6 +61,9 @@ func TestRetryCheckpointRestoreAndNewConnections(t *testing.T) {
 	if !reflect.DeepEqual(first, got) {
 		t.Fatal("重启未保留批次和内容")
 	}
+	if got.Records[0].NodeID != 9 {
+		t.Fatal("恢复后落地归属丢失")
+	}
 	restored.Ack("错误确认")
 	got, _ = restored.Next()
 	if got.ID != first.ID {
@@ -68,7 +71,7 @@ func TestRetryCheckpointRestoreAndNewConnections(t *testing.T) {
 	}
 	restored.Ack(first.ID)
 	next, _ := restored.Next()
-	if next.ID == first.ID || len(next.Records) != 4 || next.Records[3].UserID != 8 {
+	if next.ID == first.ID || len(next.Records) != 4 || next.Records[3].UserID != 8 || next.Records[3].NodeID != 3 {
 		t.Fatal("新连接丢失或混入旧批次")
 	}
 	restored.Ack(next.ID)

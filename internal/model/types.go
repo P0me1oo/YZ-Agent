@@ -56,7 +56,7 @@ type NodeSpec struct {
 	TrafficPattern    string
 
 	Multiplex           *MultiplexConfig
-	AcceptProxyProtocol bool
+	AcceptProxyProtocol *bool
 
 	Relay *RelayConfig
 
@@ -253,17 +253,44 @@ func (n *NodeSpec) GetProxyProtocol() bool {
 	if n == nil {
 		return false
 	}
-	if n.AcceptProxyProtocol {
-		return true
+	if n.AcceptProxyProtocol != nil {
+		return *n.AcceptProxyProtocol
 	}
-	if n.NetworkSettings != nil {
-		if v, ok := n.NetworkSettings["acceptProxyProtocol"]; ok {
-			if b, ok := v.(bool); ok {
-				return b
-			}
-		}
+	value, _ := n.NetworkSettings["acceptProxyProtocol"].(bool)
+	return value
+}
+
+// ProxyProtocolSetting 只返回节点明确设置的开关，缺失时保留旧名单信任范围。
+func (n *NodeSpec) ProxyProtocolSetting() *bool {
+	if n == nil {
+		return nil
 	}
-	return false
+	if n.AcceptProxyProtocol != nil {
+		value := *n.AcceptProxyProtocol
+		return &value
+	}
+	return nil
+}
+
+func (n *NodeSpec) SupportsProxyProtocol() bool {
+	switch n.Protocol {
+	case "shadowsocks", "vmess", "vless", "trojan", "anytls", "socks", "http", "naive":
+	default:
+		return false
+	}
+	switch strings.ToLower(n.Network) {
+	case "kcp", "mkcp", "quic", "hysteria", "hysteria2":
+		return false
+	}
+	return true
+}
+
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copyValue := *value
+	return &copyValue
 }
 
 func cloneAnyMap(src map[string]any) map[string]any {

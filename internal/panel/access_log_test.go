@@ -22,15 +22,22 @@ func TestAccessLogProtocolAuthCapabilityAndReceipt(t *testing.T) {
 			t.Error("请求认证身份错误")
 		}
 		if r.URL.Path == "/api/v2/server/handshake" {
-			version := 1
+			version := 2
 			if mode == "legacy" {
 				version = 0
+			}
+			if mode == "entry-only" {
+				version = 1
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"access_log": map[string]int{"version": version}})
 			return
 		}
 		if r.URL.Path != "/api/v2/server/access-log" {
 			t.Error("上报路径错误")
+		}
+		records := data["records"].([]any)
+		if records[0].(map[string]any)["node_id"] != float64(9) {
+			t.Error("实际落地归属丢失或覆盖了入口认证")
 		}
 		if mode == "fail" {
 			w.WriteHeader(500)
@@ -45,7 +52,7 @@ func TestAccessLogProtocolAuthCapabilityAndReceipt(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewClient(config.PanelConfig{URL: server.URL, MachineID: 3, Token: "access-test-only"}).ForNode(7)
-	batch := &accesslog.Batch{ID: strings.Repeat("a", 32), Records: []accesslog.Record{{UserID: 11, Destination: "example.test", Port: 443, ConnectedAt: time.Now().Unix()}}}
+	batch := &accesslog.Batch{ID: strings.Repeat("a", 32), Records: []accesslog.Record{{NodeID: 9, UserID: 11, Destination: "example.test", Port: 443, ConnectedAt: time.Now().Unix()}}}
 	if err := client.ReportAccessLog(t.Context(), batch); err == nil {
 		t.Fatal("握手前不得上报")
 	}
@@ -66,5 +73,9 @@ func TestAccessLogProtocolAuthCapabilityAndReceipt(t *testing.T) {
 	mode = "legacy"
 	if _, err := client.Handshake(); err != nil || client.AccessLogEnabled() {
 		t.Fatal("旧面板能力回退失败")
+	}
+	mode = "entry-only"
+	if _, err := client.Handshake(); err != nil || client.AccessLogEnabled() {
+		t.Fatal("只支持入口归属的旧面板不得启用新版采集")
 	}
 }

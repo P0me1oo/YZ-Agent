@@ -154,7 +154,7 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 				base = singbox.New(cfg)
 			}
 			k := directwg.Wrap(base)
-			recorder := &accesslog.Recorder{}
+			recorder := &accesslog.Recorder{NodeID: 5}
 			recorder.Enable(true)
 			k.(interface{ SetAccessLog(*accesslog.Recorder) }).SetAccessLog(recorder)
 			t.Cleanup(k.Stop)
@@ -172,7 +172,7 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 				t.Fatal("普通 WG 的 TCP/UDP 访问记录不完整或重复")
 			}
 			for _, record := range batch.Records {
-				if record.UserID != 1 || record.Destination != "198.51.100.10" || record.Port == 0 {
+				if record.NodeID != 5 || record.UserID != 1 || record.Destination != "198.51.100.10" || record.Port == 0 {
 					t.Fatal("普通 WG 访问记录身份或目标错误")
 				}
 			}

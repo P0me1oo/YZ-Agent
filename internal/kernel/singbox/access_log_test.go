@@ -23,7 +23,7 @@ func TestAccessLogTrackerDomainIPAndRelayLanding(t *testing.T) {
 	udp := tracker.RoutedPacketConnection(context.Background(), &counterTestPacketConn{}, metadata, nil, nil)
 	_ = udp.Close()
 	metadata.Inbound = relayLandingInboundTag
-	tracker.recordAccess(5, metadata)
+	tracker.recordAccess(5, metadata, nil)
 	batch, err := r.Next()
 	if err != nil || batch == nil || len(batch.Records) != 2 {
 		t.Fatal("记录数量或落地去重不正确")

@@ -89,7 +89,7 @@ func NodeSpecFromStandalone(cfg *config.Config) *NodeSpec {
 		Transport:           sc.Node.Transport,
 		TrafficPattern:      sc.Node.TrafficPattern,
 		Multiplex:           multiplex,
-		AcceptProxyProtocol: sc.Node.AcceptProxyProtocol,
+		AcceptProxyProtocol: cloneBool(sc.Node.AcceptProxyProtocol),
 	}
 }
 

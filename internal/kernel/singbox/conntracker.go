@@ -361,7 +361,7 @@ func (t *ConnTracker) RoutedConnection(
 	}
 	permit.Bind(func() { _ = wrapped.Close() })
 	if registered && permit.Valid() {
-		t.recordAccess(uid, metadata)
+		t.recordAccess(uid, metadata, outbound)
 	}
 	return wrapped
 }
@@ -445,7 +445,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 	}
 	permit.Bind(func() { _ = wrapped.Close() })
 	if registered && permit.Valid() {
-		t.recordAccess(uid, metadata)
+		t.recordAccess(uid, metadata, outbound)
 	}
 	return wrapped
 }

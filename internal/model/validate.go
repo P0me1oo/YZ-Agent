@@ -12,6 +12,9 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if n == nil {
 		return nil
 	}
+	if n.AcceptProxyProtocol != nil && *n.AcceptProxyProtocol && !n.SupportsProxyProtocol() {
+		return fmt.Errorf("当前协议或传输不支持接收 TCP PROXY 协议")
+	}
 	if err := n.SourcePolicy.Validate(); err != nil {
 		return err
 	}

@@ -25,6 +25,7 @@ const MaxRecords = 32768
 const Retention = 7 * 24 * time.Hour
 
 type Record struct {
+	NodeID      int    `json:"node_id,omitempty"`
 	UserID      int    `json:"user_id"`
 	ConnectedAt int64  `json:"connected_at"`
 	Destination string `json:"destination"`
@@ -44,6 +45,8 @@ type savedState struct {
 }
 
 type Recorder struct {
+	// 创建后不再改变；中转出站可为单条记录指定实际落地。
+	NodeID  int
 	enabled atomic.Bool
 	dropped atomic.Uint64
 	mu      sync.Mutex
@@ -83,8 +86,16 @@ func Host(value string) string {
 
 // Add 的调用方只提供核心已经取得的目标信息；不做 DNS 反查或网络请求。
 func (r *Recorder) Add(user int, domain, address string, port uint16) {
-	if r == nil || !r.enabled.Load() || user <= 0 || port == 0 {
+	r.AddForNode(0, user, domain, address, port)
+}
+
+// 节点 0 表示本节点直出，已入队的节点归属不随重载或重试改变。
+func (r *Recorder) AddForNode(node, user int, domain, address string, port uint16) {
+	if r == nil || !r.enabled.Load() || node < 0 || user <= 0 || port == 0 {
 		return
+	}
+	if node == 0 {
+		node = r.NodeID
 	}
 	host := Host(domain)
 	if host == "" {
@@ -112,7 +123,7 @@ func (r *Recorder) Add(user int, domain, address string, port uint16) {
 		batch = &Batch{ID: hex.EncodeToString(id[:])}
 		r.queue = append(r.queue, batch)
 	}
-	batch.Records = append(batch.Records, Record{user, time.Now().Unix(), host, port})
+	batch.Records = append(batch.Records, Record{NodeID: node, UserID: user, ConnectedAt: time.Now().Unix(), Destination: host, Port: port})
 	r.count++
 }
 
@@ -263,7 +274,7 @@ func (r *Recorder) Restore(path string) error {
 	}
 	validate := func(records []Record) error {
 		for _, record := range records {
-			if record.UserID <= 0 || record.Port == 0 || record.ConnectedAt <= 0 || record.ConnectedAt > time.Now().Add(5*time.Minute).Unix() || Host(record.Destination) != record.Destination {
+			if record.NodeID < 0 || record.UserID <= 0 || record.Port == 0 || record.ConnectedAt <= 0 || record.ConnectedAt > time.Now().Add(5*time.Minute).Unix() || Host(record.Destination) != record.Destination {
 				return fmt.Errorf("访问记录缓存包含无效记录")
 			}
 		}

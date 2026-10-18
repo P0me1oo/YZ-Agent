@@ -49,7 +49,7 @@ type StandaloneNodeConfig struct {
 	TrafficPattern    string `yaml:"traffic_pattern,omitempty"`
 
 	Multiplex           *StandaloneMultiplexConfig `yaml:"multiplex,omitempty"`
-	AcceptProxyProtocol bool                       `yaml:"accept_proxy_protocol,omitempty"`
+	AcceptProxyProtocol *bool                      `yaml:"accept_proxy_protocol,omitempty"`
 }
 
 type StandaloneRouteRule struct {

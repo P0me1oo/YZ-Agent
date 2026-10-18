@@ -229,7 +229,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 	}
 
 	k = directwg.Wrap(k)
-	accessRecorder := &accesslog.Recorder{}
+	accessRecorder := &accesslog.Recorder{NodeID: cfg.Panel.NodeID}
 	if consumer, ok := k.(interface{ SetAccessLog(*accesslog.Recorder) }); ok {
 		consumer.SetAccessLog(accessRecorder)
 	}
@@ -1793,7 +1793,7 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 }
 
 // applyDeviceIPExclude 更新当前实例的前置服务器名单，不影响同进程其他节点。
-// 名单内的来源不计入设备数；它们在连接开头附带的真实用户地址会被 Xray 内核采用。
+// 名单内的来源不计入设备数；没有节点开关的旧配置继续按名单信任 PROXY 头。
 func (s *Service) applyDeviceIPExclude(cfg *model.NodeSpec) {
 	setter, ok := s.kernel.(interface {
 		SetDeviceIPExclude([]string) ([]string, bool)

@@ -224,6 +224,7 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	access := relayTrackingFor(ctx, cancel)
 	access.devicePermit = permit
 	permit.Bind(cancel)
+	ctx = d.accessContext(ctx, uid, dest)
 	link, err := d.innerDisp.Dispatch(ctx, dest)
 	if err != nil {
 		cancel()
@@ -243,7 +244,6 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	if !permit.Valid() {
 		return nil, devicegate.ErrRevoked
 	}
-	d.recordAccess(ctx, uid, dest)
 	return link, nil
 }
 
@@ -273,8 +273,7 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 	if !permit.Valid() {
 		return devicegate.ErrRevoked
 	}
-	// DispatchLink 会持续到转发结束，连接时间应在交给核心时记录。
-	d.recordAccess(ctx, uid, dest)
+	ctx = d.accessContext(ctx, uid, dest)
 	err = d.innerDisp.DispatchLink(ctx, dest, link)
 	if err != nil && release != nil {
 		// 内层可能已经关闭 writer；与关闭回调共用一次性回收，避免重复扣减。

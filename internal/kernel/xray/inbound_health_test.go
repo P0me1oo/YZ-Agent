@@ -32,7 +32,7 @@ func TestVLESSInboundTCPHealthParsedByXray(t *testing.T) {
 				name += "/relay-entry"
 			}
 			t.Run(name, func(t *testing.T) {
-				node := &model.NodeSpec{Protocol: "vless", Network: network, ServerPort: 10086, AcceptProxyProtocol: true}
+				node := &model.NodeSpec{Protocol: "vless", Network: network, ServerPort: 10086, AcceptProxyProtocol: new(true)}
 				if entry {
 					node.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11}
 				}

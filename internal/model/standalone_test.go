@@ -20,7 +20,7 @@ func TestNodeSpecFromStandalone(t *testing.T) {
 				TLS:                 1,
 				Host:                "node.example.com",
 				ServerName:          "node.example.com",
-				AcceptProxyProtocol: true,
+				AcceptProxyProtocol: new(true),
 				PaddingScheme:       "stop=8\n0=30-30",
 				Routes:              []config.StandaloneRouteRule{{ID: 1, Match: []string{"example.com"}, Action: "direct"}},
 				Multiplex:           &config.StandaloneMultiplexConfig{Enabled: true, Protocol: "smux", MaxConnections: 4},

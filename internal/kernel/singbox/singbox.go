@@ -70,6 +70,7 @@ type SingBox struct {
 	deviceFilter     *deviceip.Filter
 	ownsDeviceFilter bool
 	proxyTrust       *listener.ProxyProtocolTrust
+	proxyProtocol    *bool
 }
 
 func New(cfg config.KernelConfig) *SingBox {
@@ -87,9 +88,7 @@ func (s *SingBox) SetDeviceIPExclude(entries []string) ([]string, bool) {
 		s.ownsDeviceFilter = true
 	}
 	invalid, changed := s.deviceFilter.SetExcluded(entries)
-	if changed {
-		s.proxyTrust.Set(s.deviceFilter.Prefixes())
-	}
+	s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol, s.deviceFilter.Prefixes()))
 	return invalid, changed
 }
 
@@ -154,6 +153,15 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 		cancel()
 		return err
 	}
+	previousProxyProtocol := s.proxyProtocol
+	s.proxyProtocol = nodeConfig.ProxyProtocolSetting()
+	s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol, s.deviceFilter.Prefixes()))
+	defer func() {
+		if !started {
+			s.proxyProtocol = previousProxyProtocol
+			s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol, s.deviceFilter.Prefixes()))
+		}
+	}()
 	ctx = listener.ContextWithProxyProtocolTrust(ctx, s.proxyTrust)
 	service.MustRegister[ntp.TimeService](ctx, timesync.Default())
 
@@ -257,7 +265,8 @@ func (s *SingBox) Reload(nodeConfig *model.NodeSpec, users []model.UserSpec, tls
 		return err
 	}
 	// 原生绑定与旧式单地址绑定可能生成相同字段，但连接时的地址族约束不同。
-	if !onlyRouteRulesChanged(previous, cfgMap) || !reflect.DeepEqual(s.nodeConfig.CustomOutbounds, nodeConfig.CustomOutbounds) {
+	if !onlyRouteRulesChanged(previous, cfgMap) || !reflect.DeepEqual(s.nodeConfig.CustomOutbounds, nodeConfig.CustomOutbounds) ||
+		!reflect.DeepEqual(s.proxyProtocol, nodeConfig.ProxyProtocolSetting()) {
 		return s.startLocked(nodeConfig, users, tls)
 	}
 

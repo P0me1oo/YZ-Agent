@@ -165,7 +165,7 @@ type NodeConfig struct {
 	Multiplex *MultiplexConfig `json:"multiplex,omitempty"`
 
 	// Proxy Protocol (supports both top-level and networkSettings for compatibility)
-	AcceptProxyProtocol bool `json:"accept_proxy_protocol,omitempty"`
+	AcceptProxyProtocol *bool `json:"accept_proxy_protocol,omitempty"`
 
 	// Relay describes the transit topology (Xboard extension). Nil for plain nodes.
 	Relay *RelayConfig `json:"relay,omitempty"`
@@ -260,8 +260,8 @@ func (r *RelayConfig) IsLanding() bool {
 // GetProxyProtocol returns true if AcceptProxyProtocol is set either at node level
 // or in networkSettings (for panel compatibility).
 func (nc *NodeConfig) GetProxyProtocol() bool {
-	if nc.AcceptProxyProtocol {
-		return true
+	if nc.AcceptProxyProtocol != nil {
+		return *nc.AcceptProxyProtocol
 	}
 	if nc.NetworkSettings != nil {
 		if v, ok := nc.NetworkSettings["acceptProxyProtocol"]; ok {

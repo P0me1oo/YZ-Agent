@@ -89,6 +89,7 @@ type Xray struct {
 	deviceGate         *devicegate.Manager
 	deviceFilter       *deviceip.Filter
 	proxyTrust         *internet.ProxyProtocolTrust
+	proxyProtocol      *bool
 	ownsDeviceFilter   bool
 	globalDevices      map[int][]string
 	globalDeviceUpdate time.Time
@@ -109,7 +110,7 @@ func New(cfg config.KernelConfig) *Xray {
 	}
 }
 
-// SetDeviceIPExclude 只更新本实例的名单，既用于设备限制，也用于 PROXY 头信任。
+// SetDeviceIPExclude 更新设备排除名单；没有节点开关的旧配置继续使用名单信任策略。
 func (x *Xray) SetDeviceIPExclude(entries []string) ([]string, bool) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -118,9 +119,7 @@ func (x *Xray) SetDeviceIPExclude(entries []string) ([]string, bool) {
 		x.ownsDeviceFilter = true
 	}
 	invalid, changed := x.deviceFilter.SetExcluded(entries)
-	if changed {
-		x.proxyTrust.Set(x.deviceFilter.Prefixes())
-	}
+	x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol, x.deviceFilter.Prefixes()))
 	return invalid, changed
 }
 
@@ -188,9 +187,23 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	// ── Phase 2: Create instance (global lock for LD capture) ───────────
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = systemWGContext(ctx, wgRuntime)
+	x.mu.Lock()
+	previousProxyProtocol := x.proxyProtocol
+	x.proxyProtocol = nodeConfig.ProxyProtocolSetting()
+	x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol, x.deviceFilter.Prefixes()))
+	x.mu.Unlock()
+	defer func() {
+		if !started {
+			x.mu.Lock()
+			x.proxyProtocol = previousProxyProtocol
+			x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol, x.deviceFilter.Prefixes()))
+			x.mu.Unlock()
+		}
+	}()
 	ctx = internet.ContextWithProxyProtocolTrust(ctx, x.proxyTrust)
 	ctx = context.WithValue(ctx, deviceFilterContextKey{}, x.deviceFilter)
 	ctx = context.WithValue(ctx, accessLogContextKey{}, x.accessLog)
+	ctx = context.WithValue(ctx, accessLogNodesContextKey{}, nodeConfig.RelayNodeIDByTag())
 	ctx = singService.ContextWithDefaultRegistry(ctx)
 	singService.MustRegister[ntp.TimeService](ctx, timesync.Default())
 	xrayCreationMu.Lock()
