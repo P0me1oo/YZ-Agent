@@ -1,11 +1,17 @@
 # YZ-Agent 兼容矩阵
 
-## v2.18.0 发布准备
+## v2.18.0 正式发布核验（2026-10-18）
 
 - 发布范围为升级镜像自动选择和 SS2022 账户转换兼容调整，沿用面板 `1.93.0`、管理端 `0.65.0`。正式核心仍为 YZ-sing-box `v1.15.0` 和 YZ-Xray-core `v0.0.0-20261011032238-77d29e684aed`；下方 Xray 新核心联调不进入本次发布依赖。
+- 核心来源核对：sing-box fork `9dbebd69f3a7634b97d44a0948d86b3965cd6cb6`，官方基线 `v1.14.0` / `0b8995879f29a9b98ee027bc17b75e101445b238`；Xray fork `77d29e684aed88a4dba02e9e51cd63b83d5a3d4b`，官方基线 `v26.9.9` / `52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120`。
 - 发布前复验：Windows / Go `1.27.0` 的升级命令整包测试通过；本地 Linux 安装器语法、镜像回退、版本检查、服务管理、默认核心、20 个安装目录场景、68 个名称迁移场景和两组恢复检查通过。
 - 当前固定 Xray 核心的桥接包和原生 SS2022 包测试通过。Windows Xray 整包测试遇到 Hysteria2 UDP 端口绑定权限拒绝，不能记为通过；本次 SS2022 账户转换、静态与热更新密钥一致性、真实握手后的连接释放专项通过，Linux 协议回归仍由发布 CI 核对。
-- 发布流程继续检查当前固定核心的桥接包，并增加原生 SS2022 包检查；完整 Linux 竞态回归、原生防火墙矩阵、Mihomo WG 客户端、amd64 / arm64 二进制和镜像由现有 CI 验证。来源、产物校验值、镜像摘要及可获取状态在发布完成后补记。
+- 固定来源 `b4a8b396a8431799376a8bf50be95e737ef1505e`，正式标签与 [Release](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.18.0) 为 `v2.18.0`，GitHub 最新正式 Release 已指向本版本。正式 [CI](https://github.com/P0me1oo/YZ-Agent/actions/runs/39135988193) 全部通过：Linux 全仓与兼容模块竞态回归、四组原生防火墙、Mihomo WG 客户端、安装器检查、两架构构建与镜像运行版本检查。当前固定核心的桥接包检查继续保留，并增加原生 SS2022 包检查。
+- 12 个附件已下载核验，11 项 SHA256SUMS、GitHub 摘要和大小全部一致；安装器与固定源码一致，历史 xboard-node 附件与同架构 yz-agent 相同。实际 ELF 架构、Go `1.27.1`、固定核心依赖、`CGO_ENABLED=0`、`-trimpath=true`、来源 revision、`vcs.modified=false` 与随附构建信息均正确。
+- yz-agent amd64 SHA-256 为 `9c6f8e5875b799c2acca9997c2676ea0d24def0e054b9e9cc2bb17dbf5f9c7ae`，arm64 为 `b82781f4149123086024b869fd487a238bdc3b3edd137a9ea650fa67dde2d4ea`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.18.0`、完整提交标签与 `latest` 均为 `sha256:b62fabbcb7047b1219334aaf9be1ae881a28177a483a592252131834cd4f7363`。amd64 清单为 `sha256:305502e42cd2481454b1adac5818f311d0e61860e7340e4c1c574bae37a4de1d`，arm64 为 `sha256:0cfed2c2ef4c68e36b24beb9feed7e4a26dd665e61af588af7f7cbbe9c5da651`；两个架构全部镜像层均已匿名下载校验，OCI 版本、来源与镜像内程序实际构建信息一致。
+- 下载后的 amd64 Release 程序及镜像内程序均已在本地 Linux 实际运行版本命令，输出 `v2.18.0` 与固定来源；两架构镜像运行版本由正式 CI 验证。
+- 本次仅更新 Agent，配套面板版本沿用 `1.93.0`；回滚参考 `v2.17.0` / `929fb1627c160446c3139eb0022e705f561a89b5`，镜像摘要 `sha256:dac078de90a7c6bb33c48e044256ec267dc5d2ed5ec346386393debd937b9263`，两架构清单仍可匿名获取。未连接或更新生产服务器；核验文件位于 `D:/codex-tmp/yz-agent-v2.18.0-release-20261018/`。发布后文档提交不移动正式标签。
 
 ## Xray v26.10.17 同步联调（本地，正式依赖待固定）
 
