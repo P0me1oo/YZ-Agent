@@ -14,11 +14,11 @@ func TestProxyProtocolConfigCompatibility(t *testing.T) {
 		raw  string
 		want *bool
 	}{
-		{`{}`, nil},
+		{`{}`, new(false)},
 		{`{"accept_proxy_protocol":true}`, new(true)},
 		{`{"accept_proxy_protocol":false,"networkSettings":{"acceptProxyProtocol":true}}`, new(false)},
-		{`{"networkSettings":{"acceptProxyProtocol":true}}`, nil},
-		{`{"networkSettings":{"acceptProxyProtocol":false}}`, nil},
+		{`{"networkSettings":{"acceptProxyProtocol":true}}`, new(true)},
+		{`{"networkSettings":{"acceptProxyProtocol":false}}`, new(false)},
 	} {
 		t.Run(tc.raw, func(t *testing.T) {
 			var cfg panel.NodeConfig

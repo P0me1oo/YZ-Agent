@@ -1,5 +1,9 @@
 # 自动防火墙与 Hysteria2 端口跳跃
 
+## 来源 IP 限制（v2.21.0 开发中）
+
+面板开启来源限制后，Agent 在固定监听端口先安装并核验系统过滤，再启动核心。无权限、缺少后端、管理关闭、规则冲突或核验失败均停止对应节点，包括中转落地。详细后端选择、UFW 兼容、恢复周期、PROXY 与动态 UDP 范围见[来源限制](source-policy.md)。该版本尚未发布；下文“没有 UFW/firewalld 时跳过端口放行”仅适用于普通自动放行，不允许开启来源限制的节点绕过系统过滤检查。
+
 ## 移除中转来源限制（v2.3.0）
 
 面板 `1.37.0`、Node `v2.3.0`、管理端 `0.18.0` 移除自动来源 IP 白名单、出口核对、手动确认和待确认提示，恢复已有自动端口放行。中转绑定、运行开关和端口跳跃不变。
@@ -48,6 +52,7 @@ firewall:
 | `enabled` | `true` | 同时控制自动放行和跳跃转发；设为 `false` 后清理之前的托管规则，由管理员管理端口 |
 | `backend` | `auto` | `auto` 检查 UFW、firewalld；可指定 `ufw`、`firewalld`；`none` 仅关闭放行管理，仍允许跳跃转发 |
 | `redirect_backend` | `auto` | 优先使用已安装的 `nft`，没有时使用 `iptables`；也可指定 `nftables` 或 `iptables` |
+| `source_backend` | `auto` | 来源过滤；UFW 运行且工具齐全时使用 iptables/ip6tables、restore 和 ipset，否则优先 nft，再尝试 iptables 组合；可固定 `nftables` 或 `iptables` |
 | `zone` | 空 | firewalld 自动使用活动区域及默认区域；填写区域名时仅管理该区域 |
 | `state_dir` | 配置文件目录下的 `firewall/` | 归属记录目录；相对路径以配置文件目录为基准 |
 

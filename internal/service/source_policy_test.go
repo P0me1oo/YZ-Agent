@@ -40,6 +40,7 @@ func TestSourcePolicyInitialFailureRecoveryRefreshAndDisable(t *testing.T) {
 	k := &sourceKernelRecorder{fakeKernel: &fakeKernel{}}
 	s := newTestService(k.fakeKernel)
 	s.kernel = k
+	s.SetFirewallController(&lifecycleFirewall{kernel: k.fakeKernel})
 	store := &sourceStoreStub{err: errors.New("测试下载失败")}
 	s.sourcePolicyStore = store
 	s.lastConfig = &model.NodeSpec{Protocol: "vless", ServerPort: 12345, SourcePolicy: &sourcepolicy.Policy{BlockCN: true}}
@@ -71,7 +72,7 @@ func TestSourcePolicyInitialFailureRecoveryRefreshAndDisable(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.applySourcePolicyRefresh(ctx, sourcePolicyResult{snapshot: second})
-	if k.reloadCalls != 1 || k.prepared.SourceBlockCIDRs[0] != "203.0.113.0/24" {
+	if k.startCalls != 2 || k.reloadCalls != 0 || k.prepared.SourceBlockCIDRs[0] != "203.0.113.0/24" {
 		t.Fatal("新网段未应用到运行内核")
 	}
 	disabled := *s.lastConfig
@@ -120,6 +121,7 @@ func TestSourcePolicyManualListsDoNotDownloadAndReload(t *testing.T) {
 	k := &sourceKernelRecorder{fakeKernel: &fakeKernel{}}
 	s := newTestService(k.fakeKernel)
 	s.kernel = k
+	s.SetFirewallController(&lifecycleFirewall{kernel: k.fakeKernel})
 	store := &sourceStoreStub{err: errors.New("不应访问网段库")}
 	s.sourcePolicyStore = store
 	n := &model.NodeSpec{Protocol: "vless", ServerPort: 12345,
@@ -138,14 +140,14 @@ func TestSourcePolicyManualListsDoNotDownloadAndReload(t *testing.T) {
 	if computeConfigHash(&changed) == before {
 		t.Fatal("名单模式未进入配置哈希")
 	}
-	if !s.applyConfigUpdate(ctx, &changed, computeConfigHash(&changed)) || k.reloadCalls != 1 {
+	if !s.applyConfigUpdate(ctx, &changed, computeConfigHash(&changed)) || k.startCalls != 2 || k.reloadCalls != 0 {
 		t.Fatal("白名单切换未重载")
 	}
 	for range 2 {
 		s.refreshSourcePolicyAsync(ctx)
 	}
 	s.applySourcePolicyRefresh(ctx, sourcePolicyResult{err: store.err})
-	if store.calls != 0 || s.sourcePolicyActive || k.reloadCalls != 1 {
+	if store.calls != 0 || s.sourcePolicyActive || k.startCalls != 2 || k.reloadCalls != 0 {
 		t.Fatal("手动名单受到地区库刷新影响")
 	}
 	prepared, err := s.prepareSourcePolicy(ctx, &changed)

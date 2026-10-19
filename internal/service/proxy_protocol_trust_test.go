@@ -4,15 +4,16 @@ import (
 	"context"
 	"io"
 	"net"
-	"net/netip"
 	"testing"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/kernel"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/xtls/xray-core/transport/internet"
 )
 
-// 面板下发的前置服务器名单同时交给 Xray：名单内来源附带的真实地址被采用，名单外的被忽略。
-func TestDeviceIPExcludeListTrustsProxyHeadersFromListedSources(t *testing.T) {
+// 新旧配置均按布尔开关接收，不以统计排除名单决定信任范围。
+func TestProxyProtocolBooleanSwitchControlsTrustedHeaders(t *testing.T) {
 	trust := &internet.ProxyProtocolTrust{}
 	ctx := internet.ContextWithProxyProtocolTrust(context.Background(), trust)
 	listener, err := internet.ListenSystem(ctx, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}, &internet.SocketConfig{AcceptProxyProtocol: true})
@@ -44,17 +45,19 @@ func TestDeviceIPExcludeListTrustsProxyHeadersFromListedSources(t *testing.T) {
 		return remote
 	}
 
-	trust.Set([]netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")})
-	if got := remoteSeen(); got != "203.0.113.9" {
-		t.Fatalf("名单内来源的真实地址应被采用，实际 %s", got)
-	}
-
-	trust.Set([]netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")})
-	if got := remoteSeen(); got != "127.0.0.1" {
-		t.Fatalf("名单外来源附带的地址应被忽略，实际 %s", got)
-	}
-	trust.Set(nil)
-	if got := remoteSeen(); got != "127.0.0.1" {
-		t.Fatalf("清空名单后旧开关不能重新信任伪造地址，实际 %s", got)
+	for _, node := range []*model.NodeSpec{
+		{AcceptProxyProtocol: new(true)},
+		{AcceptProxyProtocol: new(false), NetworkSettings: map[string]any{"acceptProxyProtocol": true}},
+		{DeviceIPExclude: []string{"127.0.0.1"}},
+		{NetworkSettings: map[string]any{"acceptProxyProtocol": true}},
+	} {
+		trust.Set(kernel.ProxyProtocolPrefixes(node.ProxyProtocolSetting()))
+		want := "127.0.0.1"
+		if node.GetProxyProtocol() {
+			want = "203.0.113.9"
+		}
+		if got := remoteSeen(); got != want {
+			t.Fatalf("开关与接收行为不一致: got=%s want=%s", got, want)
+		}
 	}
 }

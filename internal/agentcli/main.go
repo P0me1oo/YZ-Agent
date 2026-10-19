@@ -1119,7 +1119,7 @@ func hasTimeSyncConfig(cfg config.TimeSyncConfig) bool {
 }
 
 func hasFirewallConfig(cfg config.FirewallConfig) bool {
-	return cfg.Enabled != nil || cfg.Backend != "" || cfg.RedirectBackend != "" || cfg.Zone != "" || cfg.StateDir != ""
+	return cfg.Enabled != nil || cfg.Backend != "" || cfg.RedirectBackend != "" || cfg.SourceBackend != "" || cfg.Zone != "" || cfg.StateDir != ""
 }
 
 func pruneCredentialKeys(path string, removed []config.Config) error {

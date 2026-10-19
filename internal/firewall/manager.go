@@ -27,6 +27,10 @@ type reconciler interface {
 	Close() error
 }
 
+type sourceReconciler interface {
+	ApplySources(context.Context, map[string]Plan) error
+}
+
 type Manager struct {
 	mu        sync.Mutex
 	plans     map[string]Plan
@@ -74,6 +78,10 @@ func New(cfg config.FirewallConfig, configPath string) (*Manager, error) {
 		backend.Close()
 		return nil, fmt.Errorf("清理遗留防火墙规则: %w", err)
 	}
+	if err := backend.ApplySources(ctx, nil); err != nil {
+		backend.Close()
+		return nil, fmt.Errorf("清理遗留来源规则: %w", err)
+	}
 	return m, nil
 }
 
@@ -116,9 +124,15 @@ func (m *Manager) Apply(ctx context.Context, owner string, node *model.NodeSpec,
 		return fmt.Errorf("防火墙管理器已停止")
 	}
 	if !m.enabled {
+		if node != nil && node.SourcePolicy.Enabled() {
+			return fmt.Errorf("来源限制已开启，但系统防火墙管理已关闭")
+		}
 		return nil
 	}
 	plan, err := PlanForNode(node, kernelType)
+	if err == nil && plan.Restricted && (!m.linux || m.backend == nil) {
+		return fmt.Errorf("来源限制需要具备防火墙管理权限的 Linux 环境")
+	}
 	if m.expected != nil {
 		m.expected[owner] = true
 	}
@@ -189,7 +203,19 @@ func (m *Manager) reconcile(parent context.Context) error {
 	if err == nil {
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
-		err = m.backend.Apply(ctx, allows, redirects)
+		if source, ok := m.backend.(sourceReconciler); ok {
+			err = source.ApplySources(ctx, m.plans)
+		} else {
+			for _, plan := range m.plans {
+				if plan.Restricted {
+					err = fmt.Errorf("防火墙后端不支持来源过滤")
+					break
+				}
+			}
+		}
+		if err == nil {
+			err = m.backend.Apply(ctx, allows, redirects)
+		}
 	}
 	m.lastErr = err
 	return err

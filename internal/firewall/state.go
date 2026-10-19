@@ -16,12 +16,15 @@ type ownedRule struct {
 }
 
 type savedState struct {
-	Version          int         `json:"version"`
-	Scope            string      `json:"scope"`
-	Namespace        string      `json:"namespace,omitempty"`
-	Owned            []ownedRule `json:"owned,omitempty"`
-	Redirect         string      `json:"redirect_backend,omitempty"`
-	RedirectFamilies []int       `json:"redirect_families,omitempty"`
+	Version          int          `json:"version"`
+	Scope            string       `json:"scope"`
+	Namespace        string       `json:"namespace,omitempty"`
+	Owned            []ownedRule  `json:"owned,omitempty"`
+	Redirect         string       `json:"redirect_backend,omitempty"`
+	RedirectFamilies []int        `json:"redirect_families,omitempty"`
+	SourceDriver     string       `json:"source_backend,omitempty"`
+	SourcePlans      []sourcePlan `json:"source_plans,omitempty"`
+	SourceSets       []string     `json:"source_sets,omitempty"`
 }
 
 type systemBackend struct {
@@ -68,11 +71,14 @@ func newSystemBackend(cfg config.FirewallConfig, scope string, runner commands) 
 }
 
 func (b *systemBackend) validateState() error {
-	if (b.state.Version != 1 && b.state.Version != 2) || b.state.Scope != b.scope {
+	if (b.state.Version != 1 && b.state.Version != 2 && b.state.Version != 3) || b.state.Scope != b.scope {
 		return fmt.Errorf("防火墙状态版本或实例标识不匹配")
 	}
 	if b.state.Namespace != "" && b.state.Namespace != "yz-agent" {
 		return fmt.Errorf("未知的防火墙规则名称空间")
+	}
+	if err := b.validateSourceState(); err != nil {
+		return err
 	}
 	if b.state.Redirect != "" && b.state.Redirect != "nftables" && b.state.Redirect != "iptables" {
 		return fmt.Errorf("无效的端口转发状态")
@@ -104,6 +110,9 @@ func (b *systemBackend) save() error {
 		if owned.Rule.Source != "" {
 			b.state.Version = 2
 		}
+	}
+	if b.state.SourceDriver != "" || len(b.state.SourcePlans) > 0 || len(b.state.SourceSets) > 0 {
+		b.state.Version = 3
 	}
 	data, err := json.MarshalIndent(b.state, "", "  ")
 	if err != nil {

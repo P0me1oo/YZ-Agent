@@ -88,7 +88,6 @@ func (s *SingBox) SetDeviceIPExclude(entries []string) ([]string, bool) {
 		s.ownsDeviceFilter = true
 	}
 	invalid, changed := s.deviceFilter.SetExcluded(entries)
-	s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol, s.deviceFilter.Prefixes()))
 	return invalid, changed
 }
 
@@ -155,11 +154,11 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 	}
 	previousProxyProtocol := s.proxyProtocol
 	s.proxyProtocol = nodeConfig.ProxyProtocolSetting()
-	s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol, s.deviceFilter.Prefixes()))
+	s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol))
 	defer func() {
 		if !started {
 			s.proxyProtocol = previousProxyProtocol
-			s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol, s.deviceFilter.Prefixes()))
+			s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol))
 		}
 	}()
 	ctx = listener.ContextWithProxyProtocolTrust(ctx, s.proxyTrust)

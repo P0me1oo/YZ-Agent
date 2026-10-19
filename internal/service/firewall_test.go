@@ -8,13 +8,15 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
 )
 
 type lifecycleFirewall struct {
-	kernel   *fakeKernel
-	ports    []int
-	releases int
-	err      error
+	kernel         *fakeKernel
+	ports          []int
+	releases       int
+	err            error
+	runningAtApply []bool
 }
 
 func TestRelayFirewallFailureKeepsRuntimeAndIgnoresLegacyPolicy(t *testing.T) {
@@ -70,10 +72,14 @@ func TestRelayFirewallReportsLaterConflictAndRecoveryWithoutConfigChange(t *test
 }
 
 func (f *lifecycleFirewall) Apply(_ context.Context, _ string, node *model.NodeSpec, _ string) error {
-	if !f.kernel.IsRunning() {
+	if !f.kernel.IsRunning() && !node.SourcePolicy.Enabled() {
 		return errors.New("不能在内核启动前开放端口")
 	}
+	if node.SourcePolicy.Enabled() && !node.SourcePolicyReady {
+		return errors.New("来源集合未准备完成")
+	}
 	f.ports = append(f.ports, node.ServerPort)
+	f.runningAtApply = append(f.runningAtApply, f.kernel.IsRunning())
 	return f.err
 }
 
@@ -134,5 +140,75 @@ func TestFirewallFailureCannotReportRunning(t *testing.T) {
 	}
 	if k.running || status != RuntimeFailed || s.appliedState.Config != nil || fw.releases != 1 {
 		t.Fatal("防火墙失败后仍保留运行状态或没有回收部分规则")
+	}
+}
+
+func TestSourceFirewallMustSucceedBeforeFirstListenAndRecovers(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		k := &fakeKernel{}
+		s := newTestService(k)
+		fw := &lifecycleFirewall{kernel: k, err: errors.New("无防火墙权限")}
+		if !missing {
+			s.SetFirewallController(fw)
+		}
+		s.lastConfig = &model.NodeSpec{Protocol: "vless", ServerPort: 18443,
+			SourcePolicy: &sourcepolicy.Policy{Mode: "whitelist", AllowIPs: []string{"198.51.100.7"}}}
+		s.lastUsers = []model.UserSpec{{ID: 1}}
+		if s.startKernel(context.Background(), s.lastConfig, s.lastUsers) || k.startCalls != 0 || k.running || s.runtimeError == nil {
+			t.Fatal("防火墙失败时出现了监听或未报告失败")
+		}
+		fw.err = nil
+		s.SetFirewallController(fw)
+		s.retrySourceFirewall(context.Background())
+		if k.startCalls != 0 {
+			t.Fatal("没有遵守失败重试间隔")
+		}
+		s.lastFirewallRetry = time.Now().Add(-31 * time.Second)
+		s.retrySourceFirewall(context.Background())
+		if k.startCalls != 1 || !k.running || s.runtimeError != nil {
+			t.Fatal("防火墙恢复后未重新核验并启动")
+		}
+		for _, running := range fw.runningAtApply {
+			if running {
+				t.Fatal("首次监听早于防火墙规则核验")
+			}
+		}
+	}
+}
+
+func TestSourceFirewallRuntimeFailureStopsLandingAndDoesNotBypassOtherErrors(t *testing.T) {
+	k := &fakeKernel{protocols: []string{"shadowsocks"}}
+	s := newTestService(k)
+	fw := &lifecycleFirewall{kernel: k}
+	s.SetFirewallController(fw)
+	s.lastConfig = landingConfig()
+	s.lastConfig.Relay.EntryNodeID = 1
+	s.lastConfig.SourcePolicy = &sourcepolicy.Policy{Mode: "blacklist", BlockIPs: []string{"198.51.100.7"}}
+	if !s.startKernel(context.Background(), s.lastConfig, nil) {
+		t.Fatal("初始启动失败")
+	}
+	fw.err = errors.New("规则损坏且无权限恢复")
+	s.lastFirewallRetry = time.Now().Add(-6 * time.Second)
+	s.trackAndEnforce(context.Background())
+	if k.running || s.runtimeError == nil || s.firewallFailureHash == "" {
+		t.Fatal("来源限制失败时错误地沿用了落地保留监听逻辑")
+	}
+	fw.err = nil
+	s.lastFirewallRetry = time.Now().Add(-31 * time.Second)
+	s.retrySourceFirewall(context.Background())
+	if !k.running || k.startCalls != 2 {
+		t.Fatal("落地防火墙恢复后未恢复节点")
+	}
+	fw.err = errors.New("再次失败")
+	s.applyFirewall(context.Background(), s.lastConfig, nil)
+	fw.err = nil
+	k.startErr = errors.New("独立的内核配置错误")
+	s.lastFirewallRetry = time.Now().Add(-31 * time.Second)
+	s.retrySourceFirewall(context.Background())
+	starts := k.startCalls
+	s.lastFirewallRetry = time.Now().Add(-31 * time.Second)
+	s.retrySourceFirewall(context.Background())
+	if k.startCalls != starts || k.running {
+		t.Fatal("防火墙重试绕过了其他内核错误")
 	}
 }

@@ -28,6 +28,7 @@
 #   enabled: true                 # Linux 上按节点实际运行状态管理端口
 #   backend: auto                 # auto / ufw / firewalld / none
 #   redirect_backend: auto        # auto / nftables / iptables，用于 HY2 跳跃
+#   source_backend: auto          # auto / nftables / iptables；来源过滤必须成功才启动节点
 #   zone: ""                      # firewalld 留空使用活动区域和默认区域
 #   state_dir: "firewall"          # 相对配置文件目录，同进程实例必须共用
 # instances:

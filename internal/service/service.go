@@ -37,15 +37,16 @@ import (
 )
 
 type Service struct {
-	accessLog         *accesslog.Recorder
-	accessLogFailed   bool
-	cfg               *config.Config
-	source            controlplane.Source
-	sink              controlplane.Sink
-	kernel            kernel.Kernel
-	firewall          firewall.Controller
-	firewallNotice    atomic.Pointer[string]
-	lastFirewallRetry time.Time
+	accessLog           *accesslog.Recorder
+	accessLogFailed     bool
+	cfg                 *config.Config
+	source              controlplane.Source
+	sink                controlplane.Sink
+	kernel              kernel.Kernel
+	firewall            firewall.Controller
+	firewallNotice      atomic.Pointer[string]
+	lastFirewallRetry   time.Time
+	firewallFailureHash string
 	sourcePolicyState
 	tracker      *tracker.Tracker
 	limiter      *limiter.Limiter
@@ -967,11 +968,14 @@ func (s *Service) startKernel(ctx context.Context, nc *model.NodeSpec, users []m
 		s.sourcePolicyFailureHash = s.failedRuntimeHash
 		return false
 	}
+	if nc.SourcePolicy.Enabled() && !s.applyFirewall(ctx, nc, users) {
+		return false
+	}
 	if err := s.kernel.Start(prepared, users, s.tlsCert()); err != nil {
 		s.failRuntime("启动内核失败", nc, users, err)
 		return false
 	}
-	if !s.applyFirewall(ctx, nc, users) {
+	if !nc.SourcePolicy.Enabled() && !s.applyFirewall(ctx, nc, users) {
 		return false
 	}
 
@@ -1217,6 +1221,12 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 
 	// If config changed, delegate to kernel.Reload. The kernel implementation
 	// decides whether to hot-swap users, reconstruct inbounds, or restart itself.
+	// 来源规则变更先停旧监听，避免重载过程中出现没有保护的监听窗口。
+	if s.kernel.IsRunning() && (s.lastConfig.SourcePolicy.Enabled() ||
+		(s.appliedState.Config != nil && s.appliedState.Config.SourcePolicy.Enabled())) {
+		s.stopKernel()
+		return s.startKernel(ctx, s.lastConfig, s.lastUsers)
+	}
 	prepared, err := s.prepareSourcePolicy(ctx, s.lastConfig)
 	if err != nil {
 		s.failRuntime("准备来源拦截失败", s.lastConfig, s.lastUsers, err)
@@ -1238,8 +1248,14 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 }
 
 func (s *Service) trackAndEnforce(ctx context.Context) bool {
+	s.retrySourceFirewall(ctx)
+	checkSource := s.lastConfig != nil && s.lastConfig.SourcePolicy.Enabled()
+	interval := 30 * time.Second
+	if checkSource {
+		interval = 5 * time.Second
+	}
 	checkLanding := s.lastConfig.IsRelayLanding() && s.lastConfig.Relay.EntryNodeID > 0
-	if (checkLanding || s.firewallNotice.Load() != nil) && s.kernel.IsRunning() && time.Since(s.lastFirewallRetry) >= 30*time.Second {
+	if (checkSource || checkLanding || s.firewallNotice.Load() != nil) && s.kernel.IsRunning() && time.Since(s.lastFirewallRetry) >= interval {
 		s.lastFirewallRetry = time.Now()
 		s.applyFirewall(ctx, s.lastConfig, s.lastUsers)
 	}

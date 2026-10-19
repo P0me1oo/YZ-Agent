@@ -96,14 +96,16 @@ jobs:
           go-version: '1.27.1'
           cache: true
       - name: Build isolated firewall tests
-        run: CGO_ENABLED=0 go test -mod=readonly -c -o "$RUNNER_TEMP/firewall-linux.test" ./internal/firewall
+        run: |
+          CGO_ENABLED=0 go test -mod=readonly -c -o "$RUNNER_TEMP/firewall-linux.test" ./internal/firewall
+          CGO_ENABLED=0 go test -mod=readonly -c -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api" -o "$RUNNER_TEMP/service-linux.test" ./internal/service
       - name: Prepare disposable rootfs
         shell: bash
         run: |
           set -euo pipefail
           docker build --tag yz-firewall-test-rootfs - <<'DOCKERFILE'
           FROM ubuntu:24.04
-          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ufw firewalld nftables iptables iproute2 dbus python3 util-linux kmod
+          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ufw firewalld nftables iptables ipset iproute2 dbus python3 util-linux kmod
           DOCKERFILE
           rootfs="$RUNNER_TEMP/yz-firewall-rootfs"
           mkdir -p "$rootfs"
@@ -114,6 +116,7 @@ jobs:
           sudo mkdir -p "$rootfs/work" "$rootfs/dev" "$rootfs/proc" "$rootfs/sys" "$rootfs/run"
           sudo touch "$rootfs/.yz-firewall-test-rootfs"
           sudo install -m 0755 "$RUNNER_TEMP/firewall-linux.test" "$rootfs/work/firewall-linux.test"
+          sudo install -m 0755 "$RUNNER_TEMP/service-linux.test" "$rootfs/work/service-linux.test"
           for spec in 'null 1 3' 'zero 1 5' 'random 1 8' 'urandom 1 9'; do
             read -r name major minor <<< "$spec"
             if [[ ! -e "$rootfs/dev/$name" ]]; then
@@ -130,7 +133,10 @@ jobs:
         env:
           FIREWALL_BACKEND: ${{ matrix.backend }}
           REDIRECT_BACKEND: ${{ matrix.redirect }}
-        run: sudo sh scripts/test-firewall-linux.sh "$RUNNER_TEMP/yz-firewall-rootfs" "$FIREWALL_BACKEND" "$REDIRECT_BACKEND" backend
+        run: |
+          sudo sh scripts/test-firewall-linux.sh "$RUNNER_TEMP/yz-firewall-rootfs" "$FIREWALL_BACKEND" "$REDIRECT_BACKEND" backend
+          sudo sh scripts/test-firewall-linux.sh "$RUNNER_TEMP/yz-firewall-rootfs" "$FIREWALL_BACKEND" "$REDIRECT_BACKEND" source
+          sudo sh scripts/test-firewall-linux.sh "$RUNNER_TEMP/yz-firewall-rootfs" "$FIREWALL_BACKEND" "$REDIRECT_BACKEND" source-node
 
   build:
     name: Build

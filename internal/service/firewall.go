@@ -16,20 +16,52 @@ func (s *Service) SetFirewallController(controller firewall.Controller) { s.fire
 
 func (s *Service) applyFirewall(ctx context.Context, node *model.NodeSpec, users []model.UserSpec) bool {
 	if s.firewall == nil {
+		if node != nil && node.SourcePolicy.Enabled() {
+			s.failRuntime("来源限制无法执行", node, users, errors.New("系统防火墙管理器不可用"))
+			s.firewallFailureHash = s.failedRuntimeHash
+			s.lastFirewallRetry = time.Now()
+			return false
+		}
 		return true
 	}
-	if err := s.firewall.Apply(ctx, s.timeConsumer, node, s.cfg.Kernel.Type); err != nil {
-		if node.IsRelayLanding() && node.Relay.EntryNodeID > 0 {
+	prepared := node
+	if node != nil && node.SourcePolicy.Enabled() {
+		var err error
+		prepared, err = s.prepareSourcePolicy(ctx, node)
+		if err != nil {
+			s.failRuntime("准备防火墙来源集合失败", node, users, err)
+			return false
+		}
+	}
+	if err := s.firewall.Apply(ctx, s.timeConsumer, prepared, s.cfg.Kernel.Type); err != nil {
+		if !node.SourcePolicy.Enabled() && node.IsRelayLanding() && node.Relay.EntryNodeID > 0 {
 			message := fmt.Sprintf("落地端口放行失败，保留现有监听并重试：%v", err)
 			s.firewallNotice.Store(&message)
 			nlog.Core().Warn(message)
 			return true
 		}
 		s.failRuntime("应用防火墙规则失败", node, users, err)
+		if node.SourcePolicy.Enabled() {
+			s.firewallFailureHash = s.failedRuntimeHash
+			s.lastFirewallRetry = time.Now()
+		}
 		return false
 	}
 	s.firewallNotice.Store(nil)
+	s.firewallFailureHash = ""
 	return true
+}
+
+// 环境恢复后只重试来源防火墙错误，不绕过证书或其他配置错误。
+func (s *Service) retrySourceFirewall(ctx context.Context) {
+	if s.firewallFailureHash == "" || s.failedRuntimeHash != s.firewallFailureHash || s.kernel.IsRunning() ||
+		time.Since(s.lastFirewallRetry) < 30*time.Second || s.lastConfig == nil ||
+		(len(s.lastUsers) == 0 && !s.lastConfig.IsRelayLanding()) {
+		return
+	}
+	s.lastFirewallRetry = time.Now()
+	s.failedRuntimeHash = ""
+	s.startKernel(ctx, s.lastConfig, s.lastUsers)
 }
 
 func computeKernelConfigHash(node *model.NodeSpec) string {

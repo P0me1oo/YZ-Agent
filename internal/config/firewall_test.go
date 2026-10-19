@@ -10,7 +10,7 @@ import (
 
 func TestFirewallConfigInheritanceAndSharedState(t *testing.T) {
 	t.Setenv("YZ_FIREWALL_TEST_TOKEN", rand.Text())
-	for _, settings := range []string{"", "firewall:\n  enabled: false\n  backend: ufw\n  redirect_backend: iptables\n  state_dir: state/firewall\n"} {
+	for _, settings := range []string{"", "firewall:\n  enabled: false\n  backend: ufw\n  redirect_backend: iptables\n  source_backend: iptables\n  state_dir: state/firewall\n"} {
 		path := writeTemp(t, settings+`
 instances:
   - panel:
@@ -29,6 +29,9 @@ instances:
 		first, second := root.Instances[0], root.Instances[1]
 		if !first.Firewall.Equal(second.Firewall) || first.Firewall.IsEnabled() != (settings == "") {
 			t.Fatal("进程共享防火墙配置继承错误")
+		}
+		if settings != "" && first.Firewall.SourceBackend != "iptables" {
+			t.Fatal("来源过滤后端没有继承")
 		}
 		want := filepath.Join(filepath.Dir(path), "firewall")
 		if settings != "" {
@@ -69,7 +72,7 @@ instances:
 
 func TestFirewallConfigRejectsInvalidBackendsAndZones(t *testing.T) {
 	for _, cfg := range []FirewallConfig{
-		{Backend: "iptables"}, {RedirectBackend: "ufw"}, {Zone: "public --permanent"}, {Zone: "../public"},
+		{Backend: "iptables"}, {RedirectBackend: "ufw"}, {SourceBackend: "ufw"}, {Zone: "public --permanent"}, {Zone: "../public"},
 	} {
 		t.Run(fmt.Sprint(cfg), func(t *testing.T) {
 			if err := ValidateFirewall(cfg); err == nil {

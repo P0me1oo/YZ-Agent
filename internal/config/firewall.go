@@ -13,6 +13,7 @@ type FirewallConfig struct {
 	Enabled         *bool  `yaml:"enabled,omitempty"`
 	Backend         string `yaml:"backend,omitempty"`
 	RedirectBackend string `yaml:"redirect_backend,omitempty"`
+	SourceBackend   string `yaml:"source_backend,omitempty"`
 	Zone            string `yaml:"zone,omitempty"`
 	StateDir        string `yaml:"state_dir,omitempty"`
 }
@@ -53,7 +54,7 @@ func (c FirewallConfig) IsEnabled() bool { return c.Enabled == nil || *c.Enabled
 
 func (c FirewallConfig) Equal(other FirewallConfig) bool {
 	return c.IsEnabled() == other.IsEnabled() && c.Backend == other.Backend &&
-		c.RedirectBackend == other.RedirectBackend && c.Zone == other.Zone && c.StateDir == other.StateDir
+		c.RedirectBackend == other.RedirectBackend && c.SourceBackend == other.SourceBackend && c.Zone == other.Zone && c.StateDir == other.StateDir
 }
 
 func (c *FirewallConfig) inheritFrom(parent FirewallConfig) {
@@ -66,6 +67,9 @@ func (c *FirewallConfig) inheritFrom(parent FirewallConfig) {
 	}
 	if c.RedirectBackend == "" {
 		c.RedirectBackend = parent.RedirectBackend
+	}
+	if c.SourceBackend == "" {
+		c.SourceBackend = parent.SourceBackend
 	}
 	if c.Zone == "" {
 		c.Zone = parent.Zone
@@ -82,6 +86,9 @@ func (c *FirewallConfig) setDefaults(baseDir string) {
 	if c.RedirectBackend == "" {
 		c.RedirectBackend = "auto"
 	}
+	if c.SourceBackend == "" {
+		c.SourceBackend = "auto"
+	}
 	if c.StateDir == "" {
 		c.StateDir = filepath.Join(baseDir, "firewall")
 	}
@@ -92,6 +99,11 @@ func (c *FirewallConfig) setDefaults(baseDir string) {
 }
 
 func ValidateFirewall(c FirewallConfig) error {
+	switch c.SourceBackend {
+	case "", "auto", "nftables", "iptables":
+	default:
+		return fmt.Errorf("firewall.source_backend 必须为 auto、nftables 或 iptables")
+	}
 	switch c.Backend {
 	case "", "auto", "ufw", "firewalld", "none":
 	default:

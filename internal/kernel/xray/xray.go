@@ -110,7 +110,7 @@ func New(cfg config.KernelConfig) *Xray {
 	}
 }
 
-// SetDeviceIPExclude 更新设备排除名单；没有节点开关的旧配置继续使用名单信任策略。
+// SetDeviceIPExclude 更新设备排除名单，不改变 PROXY 接收开关。
 func (x *Xray) SetDeviceIPExclude(entries []string) ([]string, bool) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -119,7 +119,6 @@ func (x *Xray) SetDeviceIPExclude(entries []string) ([]string, bool) {
 		x.ownsDeviceFilter = true
 	}
 	invalid, changed := x.deviceFilter.SetExcluded(entries)
-	x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol, x.deviceFilter.Prefixes()))
 	return invalid, changed
 }
 
@@ -138,7 +137,7 @@ func (x *Xray) Capabilities() kernel.Capabilities {
 
 func (x *Xray) Protocols() []string {
 	return []string{
-		"vmess", "vless", "trojan", "shadowsocks",
+		"vmess", "vless", "trojan", "shadowsocks", "socks", "http",
 		"hysteria", "wireguard",
 	}
 }
@@ -190,13 +189,13 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	x.mu.Lock()
 	previousProxyProtocol := x.proxyProtocol
 	x.proxyProtocol = nodeConfig.ProxyProtocolSetting()
-	x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol, x.deviceFilter.Prefixes()))
+	x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol))
 	x.mu.Unlock()
 	defer func() {
 		if !started {
 			x.mu.Lock()
 			x.proxyProtocol = previousProxyProtocol
-			x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol, x.deviceFilter.Prefixes()))
+			x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol))
 			x.mu.Unlock()
 		}
 	}()

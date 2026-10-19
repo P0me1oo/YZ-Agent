@@ -260,16 +260,10 @@ func (n *NodeSpec) GetProxyProtocol() bool {
 	return value
 }
 
-// ProxyProtocolSetting 只返回节点明确设置的开关，缺失时保留旧名单信任范围。
+// ProxyProtocolSetting 将新旧配置统一为布尔开关，缺失按关闭处理。
 func (n *NodeSpec) ProxyProtocolSetting() *bool {
-	if n == nil {
-		return nil
-	}
-	if n.AcceptProxyProtocol != nil {
-		value := *n.AcceptProxyProtocol
-		return &value
-	}
-	return nil
+	value := n.GetProxyProtocol()
+	return &value
 }
 
 func (n *NodeSpec) SupportsProxyProtocol() bool {

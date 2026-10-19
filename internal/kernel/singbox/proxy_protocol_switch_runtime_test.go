@@ -125,7 +125,7 @@ func TestNodeProxyProtocolSwitchLifecycleAndIsolation(t *testing.T) {
 	}
 }
 
-func TestNodeProxyProtocolLegacyTrust(t *testing.T) {
+func TestNodeProxyProtocolLegacySwitch(t *testing.T) {
 	for _, kind := range []string{"singbox", "xray"} {
 		t.Run(kind, func(t *testing.T) {
 			node := runtimeNode(t, "vless")
@@ -140,11 +140,24 @@ func TestNodeProxyProtocolLegacyTrust(t *testing.T) {
 			forwarded := *node
 			forwarded.ServerPort = proxyProtocolForwarder(t, node.ServerPort, 2, "203.0.114.98")
 			client := runtimeClient(t, &forwarded, user)
-			runtimeReject(t, client, echo)
+			runtimeExchange(t, runtimeDial(t, client, echo))
 			setter.SetDeviceIPExclude([]string{"127.0.0.1"})
 			runtimeExchange(t, runtimeDial(t, client, echo))
 			setter.SetDeviceIPExclude(nil)
-			runtimeReject(t, client, echo)
+			runtimeExchange(t, runtimeDial(t, client, echo))
+			for _, setting := range []map[string]any{nil, {"acceptProxyProtocol": false}} {
+				changed := *node
+				changed.NetworkSettings = setting
+				if err := core.Reload(&changed, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
+					t.Fatal(err)
+				}
+				setter.SetDeviceIPExclude([]string{"127.0.0.1"})
+				for _, version := range []byte{1, 2} {
+					disabled := changed
+					disabled.ServerPort = proxyProtocolForwarder(t, changed.ServerPort, version, "203.0.114.98")
+					runtimeReject(t, runtimeClient(t, &disabled, user), echo)
+				}
+			}
 			runtimeExchange(t, runtimeDial(t, runtimeClient(t, node, user), echo))
 		})
 	}

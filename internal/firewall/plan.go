@@ -56,6 +56,7 @@ type Plan struct {
 	Listeners  []Rule
 	Redirects  []Rule
 	Restricted bool
+	Blocked    []string
 }
 
 // ConfirmationRequired 表示策略无法安全确定；调用方须保留现有监听和规则。
@@ -87,8 +88,23 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	// 来源限制已移除；旧策略仅作协议兼容读取，不参与端口放行。
 	plan := Plan{}
+	if nc.SourcePolicy.Enabled() {
+		if err := nc.SourcePolicy.Validate(); err != nil {
+			return Plan{}, err
+		}
+		if !nc.SourcePolicyReady {
+			return Plan{}, fmt.Errorf("系统防火墙来源集合尚未准备完成")
+		}
+		plan.Restricted = true
+		for _, raw := range nc.SourceBlockCIDRs {
+			prefix, err := netip.ParsePrefix(raw)
+			if err != nil || prefix.Addr().Zone() != "" || prefix.Addr().Is4In6() {
+				return Plan{}, fmt.Errorf("系统防火墙来源集合包含无效网段")
+			}
+			plan.Blocked = append(plan.Blocked, prefix.Masked().String())
+		}
+	}
 	for _, address := range addresses {
 		for _, protocol := range protocols {
 			rule := address

@@ -9,7 +9,7 @@ mode=${4:-backend}
 kernel=${5:-xray}
 case "$backend" in ufw|firewalld) ;; *) exit 2 ;; esac
 case "$redirect" in nftables|iptables) ;; *) exit 2 ;; esac
-case "$mode" in backend|node) ;; *) exit 2 ;; esac
+case "$mode" in backend|node|source|source-node) ;; *) exit 2 ;; esac
 case "$kernel" in xray|singbox) ;; *) exit 2 ;; esac
 if [ "$root" = / ] || [ ! -f "$root/.yz-firewall-test-rootfs" ]; then
     echo '拒绝操作：需要带 .yz-firewall-test-rootfs 标记的专用 rootfs' >&2
@@ -21,9 +21,20 @@ set -eu
 root=$1
 mount --make-rprivate /
 mount --bind "$root" "$root"
+mkdir -p "$root/proc" "$root/sys" "$root/run" "$root/dev"
 mount -t proc proc "$root/proc"
 mount -t sysfs sysfs "$root/sys"
 mount -t tmpfs tmpfs "$root/run"
+mount -t tmpfs tmpfs "$root/tmp"
+mount -t tmpfs tmpfs "$root/dev"
+for device in null zero random urandom; do
+    case "$device" in null) minor=3 ;; zero) minor=5 ;; random) minor=8 ;; urandom) minor=9 ;; esac
+    mknod -m 666 "$root/dev/$device" c 1 "$minor"
+done
+ln -s /proc/self/fd "$root/dev/fd"
+ln -s /proc/self/fd/0 "$root/dev/stdin"
+ln -s /proc/self/fd/1 "$root/dev/stdout"
+ln -s /proc/self/fd/2 "$root/dev/stderr"
 exec chroot "$root" /bin/sh -s -- "$2" "$3" "$4" "$5" <<'GUEST'
 set -eu
 export LC_ALL=C LANG=C
@@ -63,6 +74,12 @@ fi
 
 if [ "$3" = backend ]; then
     exec /work/firewall-linux.test -test.run='^TestNativeFirewallLifecycle$' -test.v -test.timeout=8m
+fi
+if [ "$3" = source ]; then
+    exec /work/firewall-linux.test -test.run='^TestNativeSourceFirewallLifecycle$' -test.v -test.timeout=8m
+fi
+if [ "$3" = source-node ]; then
+    exec /work/service-linux.test -test.run='^TestNativeSourceSOCKSRuntime$' -test.v -test.timeout=8m
 fi
 exec python3 /work/test-firewall-node.py --kernel "$4" --backend "$1" --redirect "$2"
 GUEST

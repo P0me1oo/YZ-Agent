@@ -1,5 +1,22 @@
 # YZ-Agent 兼容矩阵
 
+## v2.21.1 PROXY 接收开关统一（本地未发布）
+
+- 基线 `dev` / `9337a9af93bf21179785bc912119aee2cbe69370`，配套面板 `1.100.1`、管理端 `0.71.1`；保留工作区系统防火墙来源过滤修改，不修改两个核心或固定依赖。
+- 新旧配置统一为布尔开关：明确关闭优先于旧选项，未填写且没有旧接收选项默认关闭；旧接收选项为开启时恢复同样的全来源接收。前置名单增删只影响统计排除，不改变监听器信任范围。见 [接收说明](docs/proxy-protocol.md)。
+- 使用正式固定依赖和完整功能标签运行 `go test -mod=readonly -count=1 -timeout 6m -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' -run 'Test.*(ProxyProtocol|DeviceIPExclude|DeviceFilter)' ./internal/model ./internal/kernel/... ./internal/service`，所有受影响测试包已输出通过。实连包含两核心 SS、SS2022 AES-128/AES-256、VLESS、Trojan 的 v1/v2 与普通连接，覆盖真实来源、协议头不计业务流量、重复重载、停止恢复、实例隔离、前置名单独立、旧布尔选项及面板内置中转。所有测试进程结束后 Go 工具长时间继续遍历本地缓存，核对无子进程后终止工具进程；外层命令因此退出码为 1，不能表述为整条命令正常退出。
+- Linux amd64 完整功能标签构建通过，在本机 WSL 实际运行版本为 `v2.21.1`。Go `1.27.0`、`CGO_ENABLED=0`、`-trimpath=true`、来源 revision 为 `9337a9af93bf21179785bc912119aee2cbe69370`、`vcs.modified=true`；程序 SHA-256 为 `d7452f7dcf7177216b866e1cb1728ae386dac3d878c5cfb32dcab9d63816db45`，仅用于开发验证，未注入发布时的构建时间及来源展示字段。固定核心实际解析与原依赖一致，无依赖变更。
+- 验证文件在 `D:/codex-tmp/yz-proxy-switch-20261019/`，尚未发布或操作服务器。
+
+## v2.21.0 系统防火墙来源过滤（开发中，未发布）
+
+- 开发基线 `dev` / `9337a9af93bf21179785bc912119aee2cbe69370`；沿用面板 `1.99.0`、管理端 `0.70.0` 的名单和接口，无数据库、协议字段或核心依赖变更。
+- 固定监听端口在启动前安装并回读核验来源过滤。UFW 环境复用系统 iptables/ip6tables 与 ipset，另支持独立 nftables；自动选择、显式后端、归属恢复与精确清理见 [来源限制](docs/source-policy.md)。来源过滤不可用时停止对应节点，落地不再豁免；运行检测失败后停止，环境恢复后重新核验再启动。
+- 模式、名单和受保护运行配置变更先停止旧监听，再重新安装规则并启动；已有连接会中断。核心检查继续保留，PROXY、动态 SOCKS UDP、容器及 REALITY 行为边界见同一说明。
+- Linux 原生测试中，UFW + nftables、UFW + iptables、firewalld + nftables、firewalld + iptables 四种组合均通过，覆盖双栈 TCP/UDP、名单更新、重复应用、手工规则保留、服务重载、规则损坏恢复与异常退出清理。双核心 SOCKS5 实测中，名单外来源在 TCP/SOCKS5 握手前无响应，名单内来源可完成认证协商；白名单、黑名单和重复重载均通过。
+- 来源防火墙、配置、服务和 Xray 相关 Go 测试通过。Linux amd64/arm64 完整功能标签构建通过，Go 1.27.0、CGO_ENABLED=0、-trimpath=true，固定核心模块解析正确；构建来源为 `9337a9af93bf21179785bc912119aee2cbe69370` 加未提交修改，`vcs.modified=true`，仅用于开发验证。amd64 SHA256 `B039C4FE502B3ACD936895189E27E229EA66D23C253B11CDF1B07FA012F00457`；arm64 SHA256 `69543E7D2BA567FBB93F74B6EE17376FA6DBF055C028A742EB358CE67B128CFF`。
+- Xray 已将已有的 SOCKS、HTTP 入站加入协议能力列表，使运行校验允许启动这些已实现的入站。以上均为本地验证；尚未发布或操作服务器。
+
 ## v2.20.0 来源 IP 黑白名单正式发布核验（2026-10-19）
 
 - 开发基线 dev / dc32a5ea66d3a42d2e325a9cec48d9fcea74c961；配套面板 1.99.0、管理端 0.70.0。复用两种核心和普通 WG 的来源集合，仅改变 Node 的名单校验、集合生成及地区库使用条件。

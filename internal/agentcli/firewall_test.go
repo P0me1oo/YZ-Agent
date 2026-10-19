@@ -11,7 +11,7 @@ import (
 
 func TestWriteRootConfigPreservesFirewall(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
-		fw := config.FirewallConfig{Enabled: &enabled, Backend: "firewalld", RedirectBackend: "iptables", Zone: "public", StateDir: "state/firewall"}
+		fw := config.FirewallConfig{Enabled: &enabled, Backend: "firewalld", RedirectBackend: "iptables", SourceBackend: "nftables", Zone: "public", StateDir: "state/firewall"}
 		root := &config.RootConfig{
 			Config:    config.Config{Firewall: fw},
 			Instances: []config.Config{{Firewall: fw, Panel: config.PanelConfig{URL: "https://panel.example.invalid", TokenEnv: "YZ_FIREWALL_TEST_TOKEN", NodeID: 1}}},

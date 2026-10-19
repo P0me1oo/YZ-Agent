@@ -21,6 +21,7 @@ func TestProxyProtocolRuntime(t *testing.T) {
 		for _, version := range []byte{1, 2} {
 			t.Run(fmt.Sprintf("%s/v%d", protocol, version), func(t *testing.T) {
 				node := runtimeNode(t, protocol)
+				node.AcceptProxyProtocol = new(true)
 				user := runtimeUser(t, 2401)
 				core := New(config.KernelConfig{Type: "singbox", LogLevel: "fatal", ConfigDir: t.TempDir()})
 				core.SetDeviceIPExclude([]string{"127.0.0.1"})
@@ -51,6 +52,7 @@ func TestProxyProtocolRuntime(t *testing.T) {
 
 func TestProxyProtocolRuntimePolicyLifecycle(t *testing.T) {
 	node := runtimeNode(t, "shadowsocks2022-128")
+	node.AcceptProxyProtocol = new(false)
 	user := runtimeUser(t, 2402)
 	core := New(config.KernelConfig{Type: "singbox", LogLevel: "fatal", ConfigDir: t.TempDir()})
 	if err := core.Start(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
@@ -65,6 +67,10 @@ func TestProxyProtocolRuntimePolicyLifecycle(t *testing.T) {
 	direct := runtimeDial(t, runtimeClient(t, node, user), echo)
 	runtimeExchange(t, direct)
 	direct.Close()
+	node.AcceptProxyProtocol = new(true)
+	if err := core.Reload(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
+		t.Fatal(err)
+	}
 	for step := range 2 {
 		invalid, changed := core.SetDeviceIPExclude([]string{"127.0.0.1"})
 		if len(invalid) != 0 || !changed {
@@ -78,10 +84,12 @@ func TestProxyProtocolRuntimePolicyLifecycle(t *testing.T) {
 		runtimeExchange(t, conn)
 		core.SetDeviceIPExclude(nil)
 		if core.box != instance {
-			t.Fatal("更新可信名单重建了监听器")
+			t.Fatal("更新统计排除名单重建了监听器")
 		}
 		runtimeExchange(t, conn)
-		runtimeReject(t, client, echo)
+		withoutList := runtimeDial(t, client, echo)
+		runtimeExchange(t, withoutList)
+		withoutList.Close()
 		conn.Close()
 		if step == 0 {
 			core.Stop()
@@ -103,7 +111,7 @@ func TestProxyProtocolRuntimePolicyLifecycle(t *testing.T) {
 	}
 	forwarded.ServerPort = proxyProtocolForwarder(t, reloaded.ServerPort, 1, "203.0.114.92")
 	runtimeExchange(t, runtimeDial(t, runtimeClient(t, &forwarded, user), echo))
-	runtimeWaitTraffic(t, core, user.ID, [2]int64{7 * int64(len(runtimePayload)), 7 * int64(len(runtimePayload))})
+	runtimeWaitTraffic(t, core, user.ID, [2]int64{9 * int64(len(runtimePayload)), 9 * int64(len(runtimePayload))})
 }
 
 func TestProxyProtocolRuntimeInstanceIsolation(t *testing.T) {
@@ -111,10 +119,9 @@ func TestProxyProtocolRuntimeInstanceIsolation(t *testing.T) {
 	echo := runtimeEcho(t)
 	for _, trusted := range []bool{true, false} {
 		node := runtimeNode(t, "shadowsocks2022-128")
+		node.AcceptProxyProtocol = new(trusted)
 		core := New(config.KernelConfig{Type: "singbox", LogLevel: "fatal", ConfigDir: t.TempDir()})
-		if trusted {
-			core.SetDeviceIPExclude([]string{"127.0.0.1"})
-		}
+		core.SetDeviceIPExclude([]string{"127.0.0.1"})
 		if err := core.Start(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
 			t.Fatal(err)
 		}
@@ -133,6 +140,7 @@ func TestProxyProtocolRuntimeInstanceIsolation(t *testing.T) {
 
 func TestProxyProtocolRuntimeSourcePolicy(t *testing.T) {
 	node := runtimeNode(t, "shadowsocks2022-128")
+	node.AcceptProxyProtocol = new(true)
 	node.SourcePolicy = &sourcepolicy.Policy{BlockCN: true}
 	node.SourcePolicyReady = true
 	node.SourceBlockCIDRs = []string{"203.0.114.94/32"}
