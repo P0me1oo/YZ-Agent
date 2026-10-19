@@ -19,7 +19,7 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 		return err
 	}
 	if n.SourcePolicy.Enabled() && n.IsRelayLanding() && n.Relay.Protocol == "wireguard" {
-		return fmt.Errorf("WireGuard 暂不支持大陆来源拦截")
+		return fmt.Errorf("WireGuard 中转落地请在前置入口设置来源限制")
 	}
 	if err := ValidateDirectWireGuard(n); err != nil {
 		return err

@@ -55,6 +55,63 @@ func TestPolicyRejectsInvalidExceptions(t *testing.T) {
 	}
 }
 
+func TestPolicyModesAndDatabaseIndependence(t *testing.T) {
+	snapshot, err := Parse([]byte(testData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name             string
+		policy           *Policy
+		snapshot         Snapshot
+		blocked, allowed []string
+	}{
+		{"blacklist", &Policy{Mode: "blacklist", BlockIPs: []string{"::ffff:198.51.100.7", "2001:db8::7"}}, Snapshot{},
+			[]string{"198.51.100.7", "2001:db8::7"}, []string{"198.51.100.8", "2001:db8::8", "203.0.113.1"}},
+		{"whitelist", &Policy{Mode: "whitelist", BlockCN: true, AllowIPs: []string{"::ffff:198.51.100.7", "2001:db8::7"}, BlockIPs: []string{"198.51.100.7"}}, Snapshot{},
+			[]string{"198.51.100.8", "2001:db8::8", "203.0.113.1", "::1"}, []string{"198.51.100.7", "2001:db8::7"}},
+		{"region exceptions and explicit blacklist", &Policy{Mode: "blacklist", BlockCN: true, AllowIPs: []string{"198.51.100.7", "198.51.100.8"}, BlockIPs: []string{"198.51.100.7", "203.0.113.1"}}, snapshot,
+			[]string{"198.51.100.7", "198.51.100.9", "2001:db8::8", "203.0.113.1"}, []string{"198.51.100.8", "203.0.113.2"}},
+		{"disabled retains drafts", &Policy{Mode: "disabled", BlockCN: true, AllowIPs: []string{"198.51.100.7"}, BlockIPs: []string{"203.0.113.1"}}, Snapshot{},
+			nil, []string{"198.51.100.7", "2001:db8::7", "203.0.113.1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := tc.policy.Blocked(tc.snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			contains := func(value string) bool {
+				for _, entry := range entries {
+					if netip.MustParsePrefix(entry).Contains(netip.MustParseAddr(value)) {
+						return true
+					}
+				}
+				return false
+			}
+			for _, ip := range tc.blocked {
+				if !contains(ip) {
+					t.Fatalf("应屏蔽 %s", ip)
+				}
+			}
+			for _, ip := range tc.allowed {
+				if contains(ip) {
+					t.Fatalf("应放行 %s", ip)
+				}
+			}
+		})
+	}
+	for _, p := range []*Policy{
+		{Mode: "invalid"}, {Mode: "whitelist"},
+		{Mode: "blacklist", BlockIPs: []string{"198.51.100.7", "::ffff:198.51.100.7"}},
+		{Mode: "blacklist", BlockIPs: []string{"198.51.100.0/24"}},
+		{Mode: "blacklist", BlockIPs: make([]string, 129)},
+	} {
+		if _, err := p.Blocked(Snapshot{}); err == nil {
+			t.Fatalf("未拒绝无效策略: %+v", p)
+		}
+	}
+}
+
 func TestDatabaseValidationAndStableRevision(t *testing.T) {
 	base, err := Parse([]byte(testData))
 	if err != nil {

@@ -114,3 +114,45 @@ func TestSourcePolicyHashAndExceptionsRemainIndependent(t *testing.T) {
 		t.Fatal("网段变更没有进入内核哈希")
 	}
 }
+
+func TestSourcePolicyManualListsDoNotDownloadAndReload(t *testing.T) {
+	ctx := context.Background()
+	k := &sourceKernelRecorder{fakeKernel: &fakeKernel{}}
+	s := newTestService(k.fakeKernel)
+	s.kernel = k
+	store := &sourceStoreStub{err: errors.New("不应访问网段库")}
+	s.sourcePolicyStore = store
+	n := &model.NodeSpec{Protocol: "vless", ServerPort: 12345,
+		SourcePolicy: &sourcepolicy.Policy{Mode: "blacklist", BlockIPs: []string{"198.51.100.7"}}}
+	s.lastConfig = n
+	s.updateUserState([]model.UserSpec{{ID: 1}})
+	if !s.startKernel(ctx, n, s.lastUsers) {
+		t.Fatal("手动名单不应依赖大陆库")
+	}
+	if !k.prepared.SourcePolicyReady || len(k.prepared.SourceBlockCIDRs) != 1 {
+		t.Fatal("黑名单未准备")
+	}
+	before := computeConfigHash(n)
+	changed := *n
+	changed.SourcePolicy = &sourcepolicy.Policy{Mode: "whitelist", AllowIPs: []string{"198.51.100.7"}}
+	if computeConfigHash(&changed) == before {
+		t.Fatal("名单模式未进入配置哈希")
+	}
+	if !s.applyConfigUpdate(ctx, &changed, computeConfigHash(&changed)) || k.reloadCalls != 1 {
+		t.Fatal("白名单切换未重载")
+	}
+	for range 2 {
+		s.refreshSourcePolicyAsync(ctx)
+	}
+	s.applySourcePolicyRefresh(ctx, sourcePolicyResult{err: store.err})
+	if store.calls != 0 || s.sourcePolicyActive || k.reloadCalls != 1 {
+		t.Fatal("手动名单受到地区库刷新影响")
+	}
+	prepared, err := s.prepareSourcePolicy(ctx, &changed)
+	if err != nil || len(prepared.SourceBlockCIDRs) < 2 || !prepared.SourcePolicyReady {
+		t.Fatal("白名单重建失败")
+	}
+	if changed.SourcePolicyReady || len(changed.SourceBlockCIDRs) != 0 {
+		t.Fatal("运行集合污染配置")
+	}
+}

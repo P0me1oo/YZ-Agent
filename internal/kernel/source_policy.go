@@ -15,10 +15,10 @@ func ValidateSourcePolicy(nc *model.NodeSpec) error {
 		return err
 	}
 	if nc.SourcePolicy.Enabled() && nc.IsRelayLanding() && nc.Relay.Protocol == "wireguard" {
-		return fmt.Errorf("WireGuard 暂不支持大陆来源拦截")
+		return fmt.Errorf("WireGuard 中转落地请在前置入口设置来源限制")
 	}
 	if nc != nil && nc.SourcePolicy.Enabled() && !nc.SourcePolicyReady {
-		return fmt.Errorf("大陆来源拦截未准备完成")
+		return fmt.Errorf("来源限制未准备完成")
 	}
 	return nil
 }

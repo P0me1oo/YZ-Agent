@@ -49,7 +49,7 @@ func (s *Service) prepareSourcePolicy(ctx context.Context, nc *model.NodeSpec) (
 		s.sourcePolicyFailureHash = ""
 		return nc, nil
 	}
-	if !s.sourcePolicySnapshot.Ready() {
+	if nc.SourcePolicy.NeedsCN() && !s.sourcePolicySnapshot.Ready() {
 		snapshot, err := s.policyStore().Get(ctx)
 		if !snapshot.Ready() {
 			s.sourcePolicyDataFailed = true
@@ -75,7 +75,7 @@ func (s *Service) prepareSourcePolicy(ctx context.Context, nc *model.NodeSpec) (
 }
 
 func (s *Service) refreshSourcePolicyAsync(ctx context.Context) {
-	if s.lastConfig == nil || !s.lastConfig.SourcePolicy.Enabled() || s.sourcePolicyActive || time.Since(s.sourcePolicyLastCheck) < time.Minute {
+	if s.lastConfig == nil || !s.lastConfig.SourcePolicy.NeedsCN() || s.sourcePolicyActive || time.Since(s.sourcePolicyLastCheck) < time.Minute {
 		return
 	}
 	if s.sourcePolicyResults == nil {
@@ -95,7 +95,7 @@ func (s *Service) refreshSourcePolicyAsync(ctx context.Context) {
 
 func (s *Service) applySourcePolicyRefresh(ctx context.Context, result sourcePolicyResult) {
 	s.sourcePolicyActive = false
-	if s.lastConfig == nil || !s.lastConfig.SourcePolicy.Enabled() {
+	if s.lastConfig == nil || !s.lastConfig.SourcePolicy.NeedsCN() {
 		return
 	}
 	if result.err != nil {

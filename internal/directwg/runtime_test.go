@@ -263,6 +263,43 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 			}
 			recovered := wgClient(t, clientPriv, serverPub, port, users[0].WireGuard.Address)
 			exchange(t, recovered, "tcp", tcp)
+			for _, mode := range []string{"blacklist", "whitelist"} {
+				manual := *n
+				manual.SourcePolicy = &sourcepolicy.Policy{Mode: mode, BlockIPs: []string{"127.0.0.1"}, AllowIPs: []string{"198.51.100.7"}}
+				manual.SourcePolicyReady = true
+				manual.SourceBlockCIDRs, e = manual.SourcePolicy.Blocked(sourcepolicy.Snapshot{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e = k.Reload(&manual, users, kernel.TLSCert{}); e != nil {
+					t.Fatal(e)
+				}
+				blockedClient := wgClient(t, clientPriv, serverPub, port, users[0].WireGuard.Address)
+				denyCtx, denyCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+				conn, err := blockedClient.DialContext(denyCtx, "tcp", M.ParseSocksaddr(net.JoinHostPort("198.51.100.10", targetPort)))
+				denyCancel()
+				if err == nil {
+					conn.Close()
+					t.Fatalf("%s 未拦截 WG 来源", mode)
+				}
+				manual.SourcePolicy = &sourcepolicy.Policy{Mode: mode, AllowIPs: []string{"127.0.0.1"}}
+				manual.SourceBlockCIDRs, e = manual.SourcePolicy.Blocked(sourcepolicy.Snapshot{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				for range 2 {
+					if e = k.Reload(&manual, users, kernel.TLSCert{}); e != nil {
+						t.Fatal(e)
+					}
+					allowedClient := wgClient(t, clientPriv, serverPub, port, users[0].WireGuard.Address)
+					exchange(t, allowedClient, "tcp", tcp)
+					exchange(t, allowedClient, "udp", udp)
+				}
+			}
+			if e = k.Reload(n, users, kernel.TLSCert{}); e != nil {
+				t.Fatal(e)
+			}
+			recovered = wgClient(t, clientPriv, serverPub, port, users[0].WireGuard.Address)
 			rotatedPrivate, rotatedPublic := keys(t)
 			rotated := users[0]
 			rotated.WireGuard = model.CloneWireGuardPeer(rotated.WireGuard)

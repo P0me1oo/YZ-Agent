@@ -18,7 +18,7 @@ type NodeSpec struct {
 	NetworkSettings map[string]any
 	Routes          []RouteRule
 	SourcePolicy    *sourcepolicy.Policy
-	// 仅由运行层从已校验的本地网段库生成，不接受面板直接填写网段。
+	// 仅由运行层从来源名单和已校验的地区库生成，不接受面板直接填写网段。
 	SourceBlockCIDRs  []string
 	SourcePolicyReady bool
 
