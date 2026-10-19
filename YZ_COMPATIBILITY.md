@@ -11,7 +11,7 @@
 - 12 个附件全部实际下载，11 项 SHA256SUMS 与 GitHub 摘要、大小一致；安装器与固定源码逐字节一致，历史程序附件与同架构 yz-agent 相同。实际 ELF 架构、Go 1.27.1、CGO_ENABLED=0、-trimpath=true、来源 revision、vcs.modified=false 及固定核心模块均已核对。amd64 程序 SHA-256 为 f93a4f9112a0e743afca3427cf20611e76a8875e8920b5389f4e7c1390873621，arm64 为 d78f79d442dc18bbc4488531ed185ddc845489d1ca15570e944cca8e928b59a5。
 - 镜像 ghcr.io/p0me1oo/yz-agent:v2.20.0、完整提交标签和 latest 均为 sha256:ad04152f83139093af76403c6d2f8b3c8e04344a815890a30ae8e645faba23c1；两个架构的清单、配置、来源和版本已匿名获取核对，CI 已实际运行两种架构镜像。下载的 amd64 Agent 与迁移 CLI 也在本机 WSL 实际运行版本命令，输出 v2.20.0 与固定来源。
 - 两个核心保持不变：sing-box 固定 YZ fork v1.15.0 / 9dbebd69f3a7634b97d44a0948d86b3965cd6cb6，上游提交 0b8995879f29a9b98ee027bc17b75e101445b238；Xray 固定 YZ fork v26.10.0 / fb2f909b7987c651741e34798881657733161e30，上游 v26.10.17 / 92ccc939aaf4f8965f369cf0b142e005aeaa11d5。
-- 安装器已匿名下载，SHA-256 为 d54efc94d08a7a8d62636f425aedb096a9fb2c292f7833e5686591d91eef273f。上一版 v2.19.3 镜像 sha256:10befcdbca3ff19f9a9dd1acca4e70d381721051867be41f314bb93c32872050 及两个架构仍可匿名获取。回退旧 Agent 前先关闭来源限制。未操作服务器；完整核验记录位于 D:/codex-tmp/yz-source-policy-20261019/，发布后文档提交不移动正式标签。
+- 安装器已匿名下载，SHA-256 为 d54efc94d08a7a8d62636f425aedb096a9fb2c292f7833e5686591d91eef273f。上一版 v2.19.3 镜像 sha256:10befcdbca3ff19f9a9dd1acca4e70d381721051867be41f314bb93c32872050 及两个架构仍可匿名获取。回退旧面板或旧 Agent 前先关闭来源限制。未操作服务器；完整核验记录位于 D:/codex-tmp/yz-source-policy-20261019/，发布后文档提交不移动正式标签。
 
 ## v2.19.3 防火墙命令超时与安装恢复修复（2026-10-19）
 
