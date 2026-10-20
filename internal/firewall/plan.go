@@ -53,6 +53,7 @@ func (r Rule) key() string {
 }
 
 type Plan struct {
+	Ready      bool
 	Listeners  []Rule
 	Redirects  []Rule
 	Restricted bool
@@ -88,7 +89,7 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{}
+	plan := Plan{Ready: true}
 	if nc.SourcePolicy.Enabled() {
 		if err := nc.SourcePolicy.Validate(); err != nil {
 			return Plan{}, err

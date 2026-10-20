@@ -928,7 +928,7 @@ func (s *Service) applyConfigUpdate(ctx context.Context, config *model.NodeSpec,
 	s.metricsMu.Unlock()
 	s.lastConfigHash = hash
 	if policyOnly {
-		if !s.applyFirewall(ctx, config, s.lastUsers) {
+		if config.ManagesFirewall() && !s.applyFirewall(ctx, config, s.lastUsers) {
 			return false
 		}
 		s.appliedState.Config = config
@@ -968,14 +968,18 @@ func (s *Service) startKernel(ctx context.Context, nc *model.NodeSpec, users []m
 		s.sourcePolicyFailureHash = s.failedRuntimeHash
 		return false
 	}
-	if nc.SourcePolicy.Enabled() && !s.applyFirewall(ctx, nc, users) {
+	if !nc.ManagesFirewall() {
+		if !s.applyFirewall(ctx, nc, users) {
+			return false
+		}
+	} else if nc.SourcePolicy.Enabled() && !s.prepareFirewall(ctx, nc, users) {
 		return false
 	}
 	if err := s.kernel.Start(prepared, users, s.tlsCert()); err != nil {
 		s.failRuntime("启动内核失败", nc, users, err)
 		return false
 	}
-	if !nc.SourcePolicy.Enabled() && !s.applyFirewall(ctx, nc, users) {
+	if nc.ManagesFirewall() && !s.applyFirewall(ctx, nc, users) {
 		return false
 	}
 
@@ -1222,8 +1226,9 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 	// If config changed, delegate to kernel.Reload. The kernel implementation
 	// decides whether to hot-swap users, reconstruct inbounds, or restart itself.
 	// 来源规则变更先停旧监听，避免重载过程中出现没有保护的监听窗口。
-	if s.kernel.IsRunning() && (s.lastConfig.SourcePolicy.Enabled() ||
-		(s.appliedState.Config != nil && s.appliedState.Config.SourcePolicy.Enabled())) {
+	if s.kernel.IsRunning() && ((s.lastConfig.ManagesFirewall() && s.lastConfig.SourcePolicy.Enabled()) ||
+		(s.appliedState.Config != nil && s.appliedState.Config.ManagesFirewall() && s.appliedState.Config.SourcePolicy.Enabled()) ||
+		(s.appliedState.Config != nil && s.appliedState.Config.ManagesFirewall() != s.lastConfig.ManagesFirewall())) {
 		s.stopKernel()
 		return s.startKernel(ctx, s.lastConfig, s.lastUsers)
 	}
@@ -1237,7 +1242,7 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 		s.failRuntime("重载内核失败", s.lastConfig, s.lastUsers, err)
 		return false
 	}
-	if !s.applyFirewall(ctx, s.lastConfig, s.lastUsers) {
+	if s.lastConfig.ManagesFirewall() && !s.applyFirewall(ctx, s.lastConfig, s.lastUsers) {
 		return false
 	}
 	s.runtimeApplied(s.lastConfig, s.lastUsers)
@@ -1249,12 +1254,12 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 
 func (s *Service) trackAndEnforce(ctx context.Context) bool {
 	s.retrySourceFirewall(ctx)
-	checkSource := s.lastConfig != nil && s.lastConfig.SourcePolicy.Enabled()
+	checkSource := s.lastConfig != nil && s.lastConfig.ManagesFirewall() && s.lastConfig.SourcePolicy.Enabled()
 	interval := 30 * time.Second
 	if checkSource {
 		interval = 5 * time.Second
 	}
-	checkLanding := s.lastConfig.IsRelayLanding() && s.lastConfig.Relay.EntryNodeID > 0
+	checkLanding := s.lastConfig.ManagesFirewall() && s.lastConfig.IsRelayLanding() && s.lastConfig.Relay.EntryNodeID > 0
 	if (checkSource || checkLanding || s.firewallNotice.Load() != nil) && s.kernel.IsRunning() && time.Since(s.lastFirewallRetry) >= interval {
 		s.lastFirewallRetry = time.Now()
 		s.applyFirewall(ctx, s.lastConfig, s.lastUsers)

@@ -17,7 +17,7 @@ func (b *systemBackend) checkUFWSourceConflicts(allows []Rule, existing []ufwRul
 			if !overlaps(wanted, current.Rule) {
 				continue
 			}
-			if !current.ScopedSource && current.Action == "ALLOW" && current.Comment == b.ufwComment(current.Rule) &&
+			if !current.ScopedSource && current.Action == "ALLOW" && b.ownsUFWComment(current.Rule, current.Comment) &&
 				b.hasOwned(ownedRule{Backend: "ufw", Rule: current.Rule}) {
 				continue
 			}
@@ -43,7 +43,7 @@ func (b *systemBackend) checkFirewalldSourceConflicts(ctx context.Context, zone 
 	for text := range existing {
 		owned := false
 		for _, rule := range b.state.Owned {
-			if rule.Backend == "firewalld" && rule.Zone == zone && b.richRule(rule.Rule) == text {
+			if rule.Backend == "firewalld" && rule.Zone == zone && b.ownedRichRule(rule) == text {
 				owned = true
 				break
 			}
@@ -138,5 +138,14 @@ func richRuleMayOverlap(text string, wanted Rule) bool {
 	if strings.Contains(tail, `protocol="udp"`) {
 		protocol = "udp"
 	}
-	return publicPortsOverlap(ports+"/"+protocol, []Rule{wanted})
+	ranges, err := portset.Parse(ports)
+	if err != nil {
+		return true
+	}
+	for _, ports := range ranges {
+		if wanted.Protocol == protocol && wanted.Ports.Overlaps(ports) {
+			return true
+		}
+	}
+	return false
 }

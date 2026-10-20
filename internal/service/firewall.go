@@ -15,13 +15,32 @@ import (
 func (s *Service) SetFirewallController(controller firewall.Controller) { s.firewall = controller }
 
 func (s *Service) applyFirewall(ctx context.Context, node *model.NodeSpec, users []model.UserSpec) bool {
+	return s.updateFirewall(ctx, node, users, false)
+}
+
+func (s *Service) prepareFirewall(ctx context.Context, node *model.NodeSpec, users []model.UserSpec) bool {
+	return s.updateFirewall(ctx, node, users, true)
+}
+
+func (s *Service) updateFirewall(ctx context.Context, node *model.NodeSpec, users []model.UserSpec, prepare bool) bool {
 	if s.firewall == nil {
-		if node != nil && node.SourcePolicy.Enabled() {
+		if node != nil && node.ManagesFirewall() && node.SourcePolicy.Enabled() {
 			s.failRuntime("来源限制无法执行", node, users, errors.New("系统防火墙管理器不可用"))
 			s.firewallFailureHash = s.failedRuntimeHash
 			s.lastFirewallRetry = time.Now()
 			return false
 		}
+		return true
+	}
+	if !node.ManagesFirewall() {
+		if err := s.firewall.Release(ctx, s.timeConsumer); err != nil {
+			s.failRuntime("撤回节点防火墙规则失败", node, users, err)
+			s.firewallFailureHash = s.failedRuntimeHash
+			s.lastFirewallRetry = time.Now()
+			return false
+		}
+		s.firewallNotice.Store(nil)
+		s.firewallFailureHash = ""
 		return true
 	}
 	prepared := node
@@ -33,7 +52,13 @@ func (s *Service) applyFirewall(ctx context.Context, node *model.NodeSpec, users
 			return false
 		}
 	}
-	if err := s.firewall.Apply(ctx, s.timeConsumer, prepared, s.cfg.Kernel.Type); err != nil {
+	apply := s.firewall.Apply
+	if preflight, ok := s.firewall.(interface {
+		Prepare(context.Context, string, *model.NodeSpec, string) error
+	}); prepare && ok {
+		apply = preflight.Prepare
+	}
+	if err := apply(ctx, s.timeConsumer, prepared, s.cfg.Kernel.Type); err != nil {
 		if !node.SourcePolicy.Enabled() && node.IsRelayLanding() && node.Relay.EntryNodeID > 0 {
 			message := fmt.Sprintf("落地端口放行失败，保留现有监听并重试：%v", err)
 			s.firewallNotice.Store(&message)
@@ -52,7 +77,7 @@ func (s *Service) applyFirewall(ctx context.Context, node *model.NodeSpec, users
 	return true
 }
 
-// 环境恢复后只重试来源防火墙错误，不绕过证书或其他配置错误。
+// 环境恢复后重试来源过滤或撤回错误，不绕过证书及其他配置错误。
 func (s *Service) retrySourceFirewall(ctx context.Context) {
 	if s.firewallFailureHash == "" || s.failedRuntimeHash != s.firewallFailureHash || s.kernel.IsRunning() ||
 		time.Since(s.lastFirewallRetry) < 30*time.Second || s.lastConfig == nil ||

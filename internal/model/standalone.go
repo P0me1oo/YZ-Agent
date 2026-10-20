@@ -90,6 +90,7 @@ func NodeSpecFromStandalone(cfg *config.Config) *NodeSpec {
 		TrafficPattern:      sc.Node.TrafficPattern,
 		Multiplex:           multiplex,
 		AcceptProxyProtocol: cloneBool(sc.Node.AcceptProxyProtocol),
+		AutoFirewall:        cloneBool(sc.Node.AutoFirewall),
 	}
 }
 

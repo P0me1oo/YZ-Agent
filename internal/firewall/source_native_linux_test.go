@@ -79,15 +79,15 @@ func TestNativeSourceFirewallLifecycle(t *testing.T) {
 	node.SourcePolicy = &sourcepolicy.Policy{Mode: "blacklist", BlockIPs: []string{"192.0.2.2"}}
 	apply()
 	probe(false, true)
-	node.SourcePolicy.BlockIPs=[]string{"192.0.2.2","2001:db8:1::2"}
-	node.ListenIP="192.0.2.1"
+	node.SourcePolicy.BlockIPs = []string{"192.0.2.2", "2001:db8:1::2"}
+	node.ListenIP = "192.0.2.1"
 	apply()
-	probe(false,true)
-	node.ListenIP="2001:db8:1::1"
+	probe(false, true)
+	node.ListenIP = "2001:db8:1::1"
 	apply()
-	probe(true,false)
-	node.ListenIP=""
-	node.SourcePolicy.BlockIPs=[]string{"192.0.2.2"}
+	probe(true, false)
+	node.ListenIP = ""
+	node.SourcePolicy.BlockIPs = []string{"192.0.2.2"}
 	apply()
 	if driver == "iptables" {
 		// 破坏集合内容后须使用交换恢复，不能只检查集合存在。
@@ -115,6 +115,26 @@ func TestNativeSourceFirewallLifecycle(t *testing.T) {
 	}
 	apply()
 	probe(false, true)
+	if backend == "ufw" {
+		// 接管后按面板名单放行新增来源；关闭后原手工规则恢复。
+		nativeCommand(t, "ufw", "--force", "delete", "allow", "28453")
+		nativeCommand(t, "ufw", "allow", "from", "192.0.2.2", "to", "any", "port", "28453", "comment", "manual-source-whitelist")
+		nativeCommand(t, "ufw", "deny", "28453", "comment", "manual-source-deny")
+		node.SourcePolicy = &sourcepolicy.Policy{Mode: "whitelist", AllowIPs: []string{"192.0.2.2", "2001:db8:1::2"}}
+		apply()
+		apply()
+		probe(true, true)
+		node.SourcePolicy.AllowIPs = []string{"198.51.100.7"}
+		apply()
+		probe(false, false)
+		node.AutoFirewall = new(false)
+		apply()
+		probe(true, false)
+		node.AutoFirewall = new(true)
+		node.SourcePolicy.AllowIPs = []string{"192.0.2.2", "2001:db8:1::2"}
+		apply()
+		probe(true, true)
+	}
 	// 异常退出只释放状态锁，重启读取旧归属后精确清理。
 	if err := b.Close(); err != nil {
 		t.Fatal(err)

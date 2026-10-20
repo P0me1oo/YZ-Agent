@@ -50,6 +50,7 @@ type StandaloneNodeConfig struct {
 
 	Multiplex           *StandaloneMultiplexConfig `yaml:"multiplex,omitempty"`
 	AcceptProxyProtocol *bool                      `yaml:"accept_proxy_protocol,omitempty"`
+	AutoFirewall        *bool                      `yaml:"auto_firewall,omitempty"`
 }
 
 type StandaloneRouteRule struct {

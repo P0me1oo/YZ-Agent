@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -223,6 +224,36 @@ func TestNativeFirewallLifecycle(t *testing.T) {
 	release("tcp-second")
 	probe("tcp", 28443, false)
 
+	if backend == "ufw" {
+		// 用真实 UFW 验证旧注释原位迁移和共享节点变化，不能重排或重复添加规则。
+		var oldAllows []Rule
+		for _, family := range []int{4, 6} {
+			oldAllows = append(oldAllows, Rule{Family: family, Protocol: "tcp", Ports: portset.Range{From: 28443, To: 28443}})
+		}
+		if err := b.Apply(ctx, oldAllows, nil); err != nil {
+			t.Fatal(err)
+		}
+		for _, label := range []string{"node=123", "nodes=7,123", "node=7"} {
+			switch label {
+			case "node=123":
+				apply("native/node/123", tcp)
+			case "nodes=7,123":
+				apply("native/node/7", tcp)
+			case "node=7":
+				release("native/node/123")
+			}
+			status := nativeCommand(t, "ufw", "status", "numbered")
+			if strings.Count(status, "yz-agent:"+label+":"+b.scope+":") != 2 {
+				t.Fatalf("双栈规则未原位更新节点注释: %s", status)
+			}
+			apply("native/node/7", tcp)
+			probe("tcp", 28443, true)
+		}
+		release("native/node/7")
+		probe("tcp", 28443, false)
+		t.Log("旧注释迁移、节点 ID、共享变更及重复应用通过")
+	}
+
 	// 先模拟旧版来源规则，再验证新版恢复普通放行和停用清理。
 	legacy := []Rule{}
 	for _, family := range []int{4, 6} {
@@ -318,22 +349,63 @@ func TestNativeFirewallLifecycle(t *testing.T) {
 	t.Log("规则恢复、范围重载、指定地址和重复停止通过")
 
 	if backend == "ufw" {
-		nativeCommand(t, "ufw", "deny", "28446/tcp", "comment", "manual-deny")
-		blocked := &model.NodeSpec{Protocol: "vless", ServerPort: 28446}
-		if err := m.Apply(ctx, "blocked", blocked, "xray"); err == nil {
-			t.Fatal("应报告已有拒绝规则的冲突")
+		nativeEcho(t, 28446)
+		nativeCommand(t, "ufw", "allow", "from", "192.0.2.2", "to", "any", "port", "28446", "comment", "manual-whitelist")
+		nativeCommand(t, "ufw", "deny", "28446", "comment", "manual-deny")
+		beforeConflict := nativeCommand(t, "ufw", "status", "numbered")
+		blocked := &model.NodeSpec{Protocol: "shadowsocks", ServerPort: 28446}
+		if err := m.Apply(ctx, "native/node/888", blocked, "xray"); err != nil {
+			t.Fatalf("节点未能接管手工限制的端口: %v", err)
 		}
-		release("blocked")
+		for _, protocol := range []string{"tcp", "udp"} {
+			probeNative(t, nativeProbe{protocol, "192.0.2.1", 28446, true}, nativeProbe{protocol, "2001:db8:1::1", 28446, true})
+		}
+		blocked.AutoFirewall = new(false)
+		if err := m.Apply(ctx, "native/node/888", blocked, "xray"); err != nil {
+			t.Fatal(err)
+		}
+		if after := nativeCommand(t, "ufw", "status", "numbered"); after != beforeConflict {
+			t.Fatalf("退出接管后原规则未完整恢复: %s", after)
+		}
+		for _, protocol := range []string{"tcp", "udp"} {
+			probeNative(t, nativeProbe{protocol, "192.0.2.1", 28446, true}, nativeProbe{protocol, "2001:db8:1::1", 28446, false})
+		}
+		release("native/node/888")
 		if !strings.Contains(nativeCommand(t, "ufw", "status", "numbered"), "manual-deny") {
 			t.Fatal("手工拒绝规则丢失")
 		}
-		apply("tcp", tcp)
+		apply("native/node/123", tcp)
 		nativeCommand(t, "ufw", "disable")
-		release("tcp")
-		if strings.Contains(nativeCommand(t, "ufw", "show", "added"), b.nftOwner()) {
+		release("native/node/123")
+		if strings.Contains(nativeCommand(t, "ufw", "show", "added"), ":"+b.scope+":") {
 			t.Fatal("UFW 停用后仍残留托管持久规则")
 		}
 		nativeCommand(t, "ufw", "--force", "enable")
+	} else {
+		nativeEcho(t, 28446)
+		for _, rule := range []string{
+			`rule priority="-10" family="ipv4" source address="192.0.2.2" port port="28446" protocol="tcp" accept`,
+			`rule family="ipv4" port port="28446" protocol="tcp" drop`,
+			`rule family="ipv6" port port="28446" protocol="tcp" drop`,
+		} {
+			nativeCommand(t, "firewall-cmd", "--zone=public", "--add-rich-rule="+rule)
+		}
+		original, err := b.firewalldRules(ctx, "public")
+		if err != nil {
+			t.Fatal(err)
+		}
+		node := &model.NodeSpec{Protocol: "vless", ServerPort: 28446}
+		apply("native/node/888", node)
+		probe("tcp", 28446, true)
+		node.AutoFirewall = new(false)
+		if err := m.Apply(ctx, "native/node/888", node, "xray"); err != nil {
+			t.Fatal(err)
+		}
+		probeNative(t, nativeProbe{"tcp", "192.0.2.1", 28446, true}, nativeProbe{"tcp", "2001:db8:1::1", 28446, false})
+		restored, err := b.firewalldRules(ctx, "public")
+		if err != nil || !reflect.DeepEqual(original, restored) {
+			t.Fatalf("退出接管未保留原 firewalld 规则: %v", err)
+		}
 	}
 
 	// 模拟进程异常退出：仅释放文件锁，新进程从持久状态回收规则。

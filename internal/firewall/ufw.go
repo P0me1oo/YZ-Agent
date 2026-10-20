@@ -2,7 +2,6 @@ package firewall
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -89,12 +88,23 @@ func parseUFWStatus(output string) []ufwRule {
 	return result
 }
 
-func (b *systemBackend) ufwComment(rule Rule) string {
-	sum := sha256.Sum256([]byte(rule.key()))
-	return fmt.Sprintf("%s:%x", b.nftOwner(), sum[:6])
+// 拒绝、限流和无法精确还原的规则都可能影响自动放行，不能因其写法不同而跳过。
+func checkUFWBlockingRules(wanted []Rule, existing []ufwRule) error {
+	for _, rule := range wanted {
+		for _, current := range existing {
+			if current.Action != "ALLOW" && overlaps(rule, current.Rule) {
+				return fmt.Errorf("UFW 端口 %s/%s 被现有 %s 规则覆盖，自动放行无法保证访问；请确认手工限制，原规则未修改", rule.Ports, rule.Protocol, current.Action)
+			}
+		}
+	}
+	return nil
 }
 
 func (b *systemBackend) ufwArgs(rule Rule, remove bool) []string {
+	return b.ufwArgsWithComment(rule, remove, b.ufwComment(rule))
+}
+
+func (b *systemBackend) ufwArgsWithComment(rule Rule, remove bool, comment string) []string {
 	any := "0.0.0.0/0"
 	if rule.Family == 6 {
 		any = "::/0"
@@ -112,19 +122,31 @@ func (b *systemBackend) ufwArgs(rule Rule, remove bool) []string {
 		args = append(args, "--force", "delete")
 	}
 	return append(args, "allow", "in", "proto", rule.Protocol, "from", source, "to", address,
-		"port", strings.ReplaceAll(rule.Ports.String(), "-", ":"), "comment", b.ufwComment(rule))
+		"port", strings.ReplaceAll(rule.Ports.String(), "-", ":"), "comment", comment)
 }
 
 func (b *systemBackend) ensureUFW(ctx context.Context, owned ownedRule, existing []ufwRule) error {
+	if owned.Priority == -1 {
+		return b.ensureUFWManaged(ctx, owned, existing)
+	}
+	if err := checkUFWBlockingRules([]Rule{owned.Rule}, existing); err != nil {
+		return err
+	}
 	for _, rule := range existing {
 		if rule.ScopedSource || rule.Rule != owned.Rule {
 			continue
 		}
-		if rule.Action != "ALLOW" {
-			return fmt.Errorf("UFW 端口 %s/%s 已有 %s 规则，请先调整冲突规则", owned.Rule.Ports, owned.Rule.Protocol, rule.Action)
-		}
-		if rule.Comment == b.ufwComment(owned.Rule) {
-			return b.remember(owned)
+		if b.ownsUFWComment(owned.Rule, rule.Comment) {
+			if err := b.remember(owned); err != nil {
+				return err
+			}
+			if rule.Comment != b.ufwComment(owned.Rule) {
+				// UFW 对完全相同的规则原位更新注释，不改变规则顺序或短暂撤销放行。
+				if _, err := b.commands.Run(ctx, "ufw", "", b.ufwArgs(owned.Rule, false)...); err != nil {
+					return fmt.Errorf("更新 UFW 节点标识: %w", err)
+				}
+			}
+			return nil
 		}
 		if strings.HasPrefix(rule.Comment, "yz-agent:") || strings.HasPrefix(rule.Comment, "yzboard-node:") {
 			return fmt.Errorf("UFW 端口 %s/%s 已由另一个 Node 进程托管，请合并到同一进程或使用独立监听地址", owned.Rule.Ports, owned.Rule.Protocol)
@@ -142,18 +164,21 @@ func (b *systemBackend) ensureUFW(ctx context.Context, owned ownedRule, existing
 }
 
 func (b *systemBackend) removeUFW(ctx context.Context, owned ownedRule, existing []ufwRule, added string) error {
-	comment := b.ufwComment(owned.Rule)
-	found := false
+	comments := map[string]bool{}
 	for _, rule := range existing {
-		if !rule.ScopedSource && rule.Rule == owned.Rule && rule.Action == "ALLOW" && rule.Comment == comment {
-			found = true
+		if !rule.ScopedSource && rule.Rule == owned.Rule && rule.Action == "ALLOW" && b.ownsUFWComment(owned.Rule, rule.Comment) {
+			comments[rule.Comment] = true
 		}
 	}
-	if ufwAddedOwns(added, owned.Rule, comment) {
-		found = true
+	for _, line := range strings.Split(added, "\n") {
+		_, marker, ok := strings.Cut(line, " comment ")
+		comment := strings.Trim(strings.TrimSpace(marker), "'\"")
+		if ok && b.ownsUFWComment(owned.Rule, comment) && ufwAddedOwns(line, owned.Rule, comment) {
+			comments[comment] = true
+		}
 	}
-	if found {
-		if _, err := b.commands.Run(ctx, "ufw", "", b.ufwArgs(owned.Rule, true)...); err != nil {
+	for comment := range comments {
+		if _, err := b.commands.Run(ctx, "ufw", "", b.ufwArgsWithComment(owned.Rule, true, comment)...); err != nil {
 			return fmt.Errorf("删除 UFW 托管规则: %w", err)
 		}
 	}

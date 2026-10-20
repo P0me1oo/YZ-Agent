@@ -97,9 +97,26 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 		}
 	}
 	wanted := map[ownedRule]bool{}
+	var ufwAllows, manualUFW []Rule
 	// 所有区域先检查，再执行写入；冲突不能造成半套来源策略。
 	if ufwActive && ufwWanted {
-		if hasSources(allows) {
+		if len(b.plans) > 0 {
+			ufwAllows = allows
+		} else {
+			if err := checkUFWRedirectRestrictions(redirects, ufwRules); err != nil {
+				return err
+			}
+			ufwAllows, manualUFW = splitUFWManagedAllows(allows, ufwRules)
+		}
+		// 恢复中的旧合并范围若包含手工限制，仅保留其余部分，避免影响相邻节点。
+		for _, owned := range b.state.Owned {
+			if owned.Backend == "ufw" && b.keepOwned(owned.Rule) && rulesOverlapAny(owned.Rule, manualUFW) {
+				retained, _ := splitUFWManagedAllows([]Rule{owned.Rule}, ufwRules)
+				ufwAllows = append(ufwAllows, retained...)
+			}
+		}
+		ufwAllows = mergeRules(ufwAllows)
+		if hasSources(ufwAllows) {
 			status, err := b.commands.Run(ctx, "ufw", "", "status", "verbose")
 			if err != nil {
 				return err
@@ -108,9 +125,10 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 				return pending("无法确认 UFW 默认入站策略会拦截未授权来源，请确认防火墙默认策略；未修改来源规则")
 			}
 		}
-		if err := b.checkUFWSourceConflicts(allows, ufwRules); err != nil {
+		if err := b.checkUFWSourceConflicts(ufwAllows, ufwRules); err != nil {
 			return err
 		}
+		b.reportUFWManualRestrictions(manualUFW)
 	}
 	fdRules := map[string]map[string]bool{}
 	var fdZones []string
@@ -131,8 +149,11 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 		}
 	}
 	if ufwActive && ufwWanted {
-		for _, rule := range allows {
+		for _, rule := range ufwAllows {
 			owned := ownedRule{Backend: "ufw", Rule: rule}
+			if len(b.plans) > 0 {
+				owned.Priority = -1
+			}
 			wanted[owned] = true
 			if err := b.ensureUFW(ctx, owned, ufwRules); err != nil {
 				return err
@@ -144,6 +165,9 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 			rules := fdRules[zone]
 			for _, rule := range allows {
 				owned := ownedRule{Backend: "firewalld", Zone: zone, Rule: rule}
+				if len(b.plans) > 0 {
+					owned.Priority = -32768
+				}
 				wanted[owned] = true
 				if err := b.ensureFirewalld(ctx, owned, rules); err != nil {
 					return err
@@ -156,7 +180,8 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 	}
 	// 已撤销的转发先移除，再回收放行规则；仍被其他节点引用的规则继续保留。
 	for _, owned := range append([]ownedRule(nil), b.state.Owned...) {
-		if wanted[owned] || b.keepOwned(owned.Rule) {
+		manual := owned.Backend == "ufw" && rulesOverlapAny(owned.Rule, manualUFW)
+		if wanted[owned] || (b.keepOwned(owned.Rule) && !manual) {
 			continue
 		}
 		switch owned.Backend {
@@ -176,11 +201,11 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 				}
 				fdRules[owned.Zone] = rules
 			}
-			if rules[b.richRule(owned.Rule)] {
-				if _, err := b.commands.Run(ctx, "firewall-cmd", "", "--zone="+owned.Zone, "--remove-rich-rule="+b.richRule(owned.Rule)); err != nil {
+			if rules[b.ownedRichRule(owned)] {
+				if _, err := b.commands.Run(ctx, "firewall-cmd", "", "--zone="+owned.Zone, "--remove-rich-rule="+b.ownedRichRule(owned)); err != nil {
 					return err
 				}
-				delete(rules, b.richRule(owned.Rule))
+				delete(rules, b.ownedRichRule(owned))
 			}
 			if err := b.forget(owned); err != nil {
 				return err

@@ -193,7 +193,7 @@ func TestSourceRemovalRestoresPortsAndSurvivesRestart(t *testing.T) {
 	if err := m.reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.rules) != 2 || runner.rules[source] != "" || reopened.state.Version != 1 {
+	if len(runner.rules) != 2 || runner.rules[source] != "" || reopened.state.Version != 4 {
 		t.Fatal("未将旧来源规则替换为双栈普通放行")
 	}
 	writes := runner.writes

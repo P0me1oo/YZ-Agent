@@ -10,9 +10,10 @@ import (
 )
 
 type ownedRule struct {
-	Backend string `json:"backend"`
-	Zone    string `json:"zone,omitempty"`
-	Rule    Rule   `json:"rule"`
+	Backend  string `json:"backend"`
+	Zone     string `json:"zone,omitempty"`
+	Rule     Rule   `json:"rule"`
+	Priority int    `json:"priority,omitempty"`
 }
 
 type savedState struct {
@@ -34,6 +35,8 @@ type systemBackend struct {
 	path       string
 	lock       *os.File
 	state      savedState
+	plans      map[string]Plan
+	manualUFW  map[string]bool
 	recovering bool
 	protected  []Rule
 }
@@ -71,7 +74,7 @@ func newSystemBackend(cfg config.FirewallConfig, scope string, runner commands) 
 }
 
 func (b *systemBackend) validateState() error {
-	if (b.state.Version != 1 && b.state.Version != 2 && b.state.Version != 3) || b.state.Scope != b.scope {
+	if b.state.Version < 1 || b.state.Version > 4 || b.state.Scope != b.scope {
 		return fmt.Errorf("防火墙状态版本或实例标识不匹配")
 	}
 	if b.state.Namespace != "" && b.state.Namespace != "yz-agent" {
@@ -89,6 +92,10 @@ func (b *systemBackend) validateState() error {
 		}
 	}
 	for _, owned := range b.state.Owned {
+		if (owned.Backend == "ufw" && owned.Priority != 0 && owned.Priority != -1) ||
+			(owned.Backend == "firewalld" && owned.Priority != 0 && owned.Priority != -32768) {
+			return fmt.Errorf("无效的防火墙托管优先级")
+		}
 		if (owned.Backend != "ufw" && owned.Backend != "firewalld") || !owned.Rule.valid() || owned.Rule.Target != 0 {
 			return fmt.Errorf("无效的防火墙规则归属记录")
 		}
@@ -113,6 +120,11 @@ func (b *systemBackend) save() error {
 	}
 	if b.state.SourceDriver != "" || len(b.state.SourcePlans) > 0 || len(b.state.SourceSets) > 0 {
 		b.state.Version = 3
+	}
+	for _, owned := range b.state.Owned {
+		if owned.Priority != 0 {
+			b.state.Version = 4
+		}
 	}
 	data, err := json.MarshalIndent(b.state, "", "  ")
 	if err != nil {
@@ -155,6 +167,18 @@ func (b *systemBackend) remember(rule ownedRule) error {
 	if b.hasOwned(rule) {
 		return nil
 	}
+	if rule.Backend == "ufw" {
+		for index, old := range b.state.Owned {
+			if old.Backend == "ufw" && old.Rule == rule.Rule {
+				b.state.Owned[index] = rule
+				if err := b.save(); err != nil {
+					b.state.Owned[index] = old
+					return err
+				}
+				return nil
+			}
+		}
+	}
 	b.state.Owned = append(b.state.Owned, rule)
 	if err := b.save(); err != nil {
 		b.state.Owned = b.state.Owned[:len(b.state.Owned)-1]
@@ -165,7 +189,7 @@ func (b *systemBackend) remember(rule ownedRule) error {
 
 func (b *systemBackend) forget(rule ownedRule) error {
 	for i, existing := range b.state.Owned {
-		if existing == rule {
+		if existing == rule || (existing.Backend == "ufw" && rule.Backend == "ufw" && existing.Rule == rule.Rule) {
 			previous := b.state.Owned
 			b.state.Owned = append(append([]ownedRule(nil), previous[:i]...), previous[i+1:]...)
 			if err := b.save(); err != nil {

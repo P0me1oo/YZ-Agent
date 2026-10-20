@@ -166,6 +166,7 @@ type NodeConfig struct {
 
 	// Proxy Protocol (supports both top-level and networkSettings for compatibility)
 	AcceptProxyProtocol *bool `json:"accept_proxy_protocol,omitempty"`
+	AutoFirewall        *bool `json:"auto_firewall,omitempty"`
 
 	// Relay describes the transit topology (Xboard extension). Nil for plain nodes.
 	Relay *RelayConfig `json:"relay,omitempty"`

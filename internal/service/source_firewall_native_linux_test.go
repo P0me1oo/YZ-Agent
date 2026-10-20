@@ -76,6 +76,16 @@ func TestNativeSourceSOCKSRuntime(t *testing.T) {
 	}
 	for _, kind := range []string{"xray", "singbox"} {
 		t.Run(kind, func(t *testing.T) {
+			if os.Getenv("YZ_FIREWALL_BACKEND") == "ufw" {
+				for _, args := range [][]string{
+					{"allow", "from", "192.0.2.2", "to", "any", "port", "28463", "comment", "manual-service-whitelist"},
+					{"deny", "28463", "comment", "manual-service-deny"},
+				} {
+					if output, err := exec.Command("ufw", args...).CombinedOutput(); err != nil {
+						t.Fatalf("准备隔离手工规则失败: %v %s", err, output)
+					}
+				}
+			}
 			cfg := config.KernelConfig{Type: kind, LogLevel: "fatal", ConfigDir: t.TempDir()}
 			var core kernel.Kernel
 			if kind == "xray" {
@@ -99,9 +109,13 @@ func TestNativeSourceSOCKSRuntime(t *testing.T) {
 			})
 			s.lastConfig = &model.NodeSpec{Protocol: "socks", ServerPort: 28463, ListenIP: "::", SourcePolicy: &sourcepolicy.Policy{Mode: "whitelist", AllowIPs: []string{"198.51.100.7"}}}
 			s.lastUsers = []model.UserSpec{{ID: 1, UUID: randomRelayTestID()}}
-			probe := func(allowed bool) {
+			probe := func(allowed bool, family6 ...bool) {
 				t.Helper()
-				probes := []nativeSourceSOCKSProbe{{Address: "192.0.2.1:28463", Allowed: allowed}, {Address: "[2001:db8:1::1]:28463", Allowed: allowed}}
+				allowed6 := allowed
+				if len(family6) > 0 {
+					allowed6 = family6[0]
+				}
+				probes := []nativeSourceSOCKSProbe{{Address: "192.0.2.1:28463", Allowed: allowed}, {Address: "[2001:db8:1::1]:28463", Allowed: allowed6}}
 				data, _ := json.Marshal(probes)
 				exe, err := os.Executable()
 				if err != nil {
@@ -138,6 +152,19 @@ func TestNativeSourceSOCKSRuntime(t *testing.T) {
 				t.Fatal("黑名单更新失败")
 			}
 			probe(false)
+			if os.Getenv("YZ_FIREWALL_BACKEND") == "ufw" {
+				manual := blocked
+				manual.AutoFirewall = new(false)
+				if !s.applyConfigUpdate(context.Background(), &manual, computeConfigHash(&manual)) {
+					t.Fatalf("退出防火墙接管失败: %v", s.runtimeError)
+				}
+				probe(true, false)
+				allowed.AutoFirewall = new(true)
+				if !s.applyConfigUpdate(context.Background(), &allowed, computeConfigHash(&allowed)) {
+					t.Fatalf("重新接管失败: %v", s.runtimeError)
+				}
+				probe(true)
+			}
 			t.Log(fmt.Sprintf("%s：名单外来源没有 TCP/SOCKS5 响应，允许来源可协商认证，黑白名单变更及重复重载通过", kind))
 		})
 	}

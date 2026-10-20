@@ -12,11 +12,13 @@ import (
 )
 
 type lifecycleFirewall struct {
-	kernel         *fakeKernel
-	ports          []int
-	releases       int
-	err            error
-	runningAtApply []bool
+	kernel           *fakeKernel
+	ports            []int
+	releases         int
+	err              error
+	releaseErr       error
+	runningAtApply   []bool
+	runningAtPrepare []bool
 }
 
 func TestRelayFirewallFailureKeepsRuntimeAndIgnoresLegacyPolicy(t *testing.T) {
@@ -72,7 +74,7 @@ func TestRelayFirewallReportsLaterConflictAndRecoveryWithoutConfigChange(t *test
 }
 
 func (f *lifecycleFirewall) Apply(_ context.Context, _ string, node *model.NodeSpec, _ string) error {
-	if !f.kernel.IsRunning() && !node.SourcePolicy.Enabled() {
+	if !f.kernel.IsRunning() {
 		return errors.New("不能在内核启动前开放端口")
 	}
 	if node.SourcePolicy.Enabled() && !node.SourcePolicyReady {
@@ -83,7 +85,18 @@ func (f *lifecycleFirewall) Apply(_ context.Context, _ string, node *model.NodeS
 	return f.err
 }
 
+func (f *lifecycleFirewall) Prepare(_ context.Context, _ string, node *model.NodeSpec, _ string) error {
+	f.runningAtPrepare = append(f.runningAtPrepare, f.kernel.IsRunning())
+	if f.kernel.IsRunning() || !node.SourcePolicyReady {
+		return errors.New("来源过滤必须在监听前完成准备")
+	}
+	return f.err
+}
+
 func (f *lifecycleFirewall) Release(ctx context.Context, _ string) error {
+	if f.releaseErr != nil {
+		return f.releaseErr
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -169,8 +182,16 @@ func TestSourceFirewallMustSucceedBeforeFirstListenAndRecovers(t *testing.T) {
 			t.Fatal("防火墙恢复后未重新核验并启动")
 		}
 		for _, running := range fw.runningAtApply {
+			if !running {
+				t.Fatal("端口接管发生在监听成功之前")
+			}
+		}
+		if len(fw.runningAtPrepare) == 0 {
+			t.Fatal("启动前没有准备来源过滤")
+		}
+		for _, running := range fw.runningAtPrepare {
 			if running {
-				t.Fatal("首次监听早于防火墙规则核验")
+				t.Fatal("来源过滤准备晚于首次监听")
 			}
 		}
 	}

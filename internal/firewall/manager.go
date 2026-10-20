@@ -115,8 +115,20 @@ func (m *Manager) Start(parent context.Context) {
 }
 
 func (m *Manager) Apply(ctx context.Context, owner string, node *model.NodeSpec, kernelType string) error {
+	return m.apply(ctx, owner, node, kernelType, true)
+}
+
+// Prepare 只建立来源保护；确认核心成功监听后才接管端口放行。
+func (m *Manager) Prepare(ctx context.Context, owner string, node *model.NodeSpec, kernelType string) error {
+	return m.apply(ctx, owner, node, kernelType, false)
+}
+
+func (m *Manager) apply(ctx context.Context, owner string, node *model.NodeSpec, kernelType string, ready bool) error {
 	if m == nil {
 		return nil
+	}
+	if !node.ManagesFirewall() {
+		return m.Release(ctx, owner)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -130,6 +142,7 @@ func (m *Manager) Apply(ctx context.Context, owner string, node *model.NodeSpec,
 		return nil
 	}
 	plan, err := PlanForNode(node, kernelType)
+	plan.Ready = ready
 	if err == nil && plan.Restricted && (!m.linux || m.backend == nil) {
 		return fmt.Errorf("来源限制需要具备防火墙管理权限的 Linux 环境")
 	}
@@ -182,15 +195,24 @@ func (m *Manager) Release(ctx context.Context, owner string) error {
 		return nil
 	}
 	_, wasPending := m.confirm[owner]
+	_, hadPlan := m.plans[owner]
 	delete(m.confirm, owner)
 	if m.expected != nil {
 		m.expected[owner] = true
 	}
-	if _, ok := m.plans[owner]; !ok && m.lastErr == nil && !wasPending {
-		m.updateProtection()
+	delete(m.plans, owner)
+	m.updateProtection()
+	if backend, ok := m.backend.(*systemBackend); ok &&
+		(len(backend.state.Owned) > 0 || backend.state.SourceDriver != "" || backend.state.Redirect != "") {
+		if backend.recovering {
+			return pending("正在确认其他节点的遗留规则，暂未完成防火墙撤回")
+		}
+		// 重启后节点可能尚未建立运行计划，但显式关闭仍须清理本实例遗留规则。
+		return m.reconcile(ctx)
+	}
+	if !hadPlan && m.lastErr == nil && !wasPending {
 		return nil
 	}
-	delete(m.plans, owner)
 	return m.reconcile(ctx)
 }
 
@@ -199,8 +221,18 @@ func (m *Manager) reconcile(parent context.Context) error {
 		return nil
 	}
 	m.updateProtection()
-	allows, redirects, err := combinePlans(m.plans)
+	_, _, err := combinePlans(m.plans)
 	if err == nil {
+		active := make(map[string]Plan)
+		for owner, plan := range m.plans {
+			if plan.Ready {
+				active[owner] = plan
+			}
+		}
+		allows, redirects, _ := combinePlans(active)
+		if backend, ok := m.backend.(*systemBackend); ok {
+			backend.plans = active
+		}
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
 		if source, ok := m.backend.(sourceReconciler); ok {

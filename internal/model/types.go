@@ -57,11 +57,17 @@ type NodeSpec struct {
 
 	Multiplex           *MultiplexConfig
 	AcceptProxyProtocol *bool
+	AutoFirewall        *bool
 
 	Relay *RelayConfig
 
 	// DeviceIPExclude 只影响设备计数，不参与配置哈希，改名单时不重载内核。
 	DeviceIPExclude []string `json:"-"`
+}
+
+// 旧面板未下发开关时沿用默认自动管理，显式关闭只影响系统防火墙。
+func (n *NodeSpec) ManagesFirewall() bool {
+	return n == nil || n.AutoFirewall == nil || *n.AutoFirewall
 }
 
 const (
