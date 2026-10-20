@@ -232,6 +232,11 @@ func (m *Manager) reconcile(parent context.Context) error {
 		allows, redirects, _ := combinePlans(active)
 		if backend, ok := m.backend.(*systemBackend); ok {
 			backend.plans = active
+			// 软件包安装单独限时，不占用规则写入与核验的 30 秒预算。
+			if err = backend.prepareSourceTools(parent, m.plans); err != nil {
+				m.lastErr = err
+				return err
+			}
 		}
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()

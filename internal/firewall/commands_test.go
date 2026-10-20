@@ -43,6 +43,10 @@ func TestSystemCommandsHelper(t *testing.T) {
 		os.Exit(7)
 	case "hold":
 		time.Sleep(4 * time.Second)
+	case "install-env":
+		if os.Getenv("DEBIAN_FRONTEND") != "noninteractive" || os.Getenv("NEEDRESTART_MODE") != "l" || os.Getenv("SYSTEMD_OFFLINE") != "1" {
+			os.Exit(3)
+		}
 	case "fork", "fork-exit":
 		child := exec.Command(os.Args[0], firewallHelperArgs("hold")...)
 		child.Stdout, child.Stderr = os.Stdout, os.Stderr
@@ -61,6 +65,20 @@ func TestSystemCommandsHelper(t *testing.T) {
 		os.Exit(2)
 	}
 	os.Exit(0)
+}
+
+func TestSourceInstallCommandPreservesCancellationAndServiceEnvironment(t *testing.T) {
+	t.Setenv("YZ_FIREWALL_COMMAND_HELPER", "1")
+	if err := runSourceInstallCommand(t.Context(), os.Args[0], firewallHelperArgs("install-env")...); err != nil {
+		t.Fatalf("安装命令没有使用非交互及服务保护环境: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := runSourceInstallCommand(ctx, os.Args[0], firewallHelperArgs("hold")...)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 2*time.Second {
+		t.Fatalf("安装命令没有响应父上下文取消: %v", err)
+	}
 }
 
 func TestSystemCommandsInputOutputAndFailure(t *testing.T) {

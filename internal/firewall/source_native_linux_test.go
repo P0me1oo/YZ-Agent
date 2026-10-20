@@ -20,7 +20,12 @@ func TestNativeSourceFirewallLifecycle(t *testing.T) {
 		t.Fatal("必须指定隔离防火墙测试组合")
 	}
 	ctx := context.Background()
-	cfg := config.FirewallConfig{Backend: backend, SourceBackend: driver, StateDir: t.TempDir()}
+	sourceDriver := driver
+	if driver == "nftables" {
+		// 实测 UFW/firewalld 环境下自动选择 nftables，不只验证显式后端。
+		sourceDriver = "auto"
+	}
+	cfg := config.FirewallConfig{Backend: backend, SourceBackend: sourceDriver, StateDir: t.TempDir()}
 	b, err := newSystemBackend(cfg, "source-native", nativeCommands{t})
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +72,9 @@ func TestNativeSourceFirewallLifecycle(t *testing.T) {
 		}
 	}
 	apply()
+	if b.state.SourceDriver != driver {
+		t.Fatalf("来源后端=%s，希望=%s", b.state.SourceDriver, driver)
+	}
 	probe(false, false)
 	probeNative(t, nativeProbe{"tcp", "192.0.2.1", 28454, true}, nativeProbe{"udp", "2001:db8:1::1", 28454, true})
 	node.SourcePolicy.AllowIPs = []string{"192.0.2.2", "2001:db8:1::2"}

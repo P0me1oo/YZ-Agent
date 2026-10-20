@@ -128,16 +128,32 @@ func (b *systemBackend) selectSourceDriver(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("来源限制需要开启系统防火墙管理")
 	}
 	if configured := b.cfg.SourceBackend; configured != "" && configured != "auto" {
+		if !sourceToolsAvailable(b.commands.Available, configured) {
+			return "", errSourceToolsMissing
+		}
 		return configured, nil
 	}
+	if err := b.checkSourceEnvironment(ctx); err != nil {
+		return "", err
+	}
+	if b.commands.Available("nft") {
+		return "nftables", nil
+	}
+	if b.sourceIPTablesAvailable() {
+		return "iptables", nil
+	}
+	return "", errSourceToolsMissing
+}
+
+func (b *systemBackend) checkSourceEnvironment(ctx context.Context) error {
 	ufwActive, firewalldActive := false, false
 	if b.commands.Available("ufw") {
 		status, err := b.commands.Run(ctx, "ufw", "", "status")
 		if err != nil {
-			return "", fmt.Errorf("检查 UFW 来源过滤权限: %w", err)
+			return fmt.Errorf("检查 UFW 来源过滤权限: %w", err)
 		}
 		if !strings.Contains(status, "Status: active") && !strings.Contains(status, "Status: inactive") {
-			return "", fmt.Errorf("无法识别 UFW 状态")
+			return fmt.Errorf("无法识别 UFW 状态")
 		}
 		ufwActive = strings.Contains(status, "Status: active")
 	}
@@ -146,32 +162,17 @@ func (b *systemBackend) selectSourceDriver(ctx context.Context) (string, error) 
 		if strings.TrimSpace(status) == "running" && err == nil {
 			firewalldActive = true
 		} else if !firewalldInactive(status) {
-			return "", fmt.Errorf("无法确认 firewalld 来源过滤权限或运行状态")
+			return fmt.Errorf("无法确认 firewalld 来源过滤权限或运行状态")
 		}
 	}
 	if ufwActive && firewalldActive {
-		return "", fmt.Errorf("UFW 和 firewalld 同时运行，请明确指定来源过滤后端并消除规则冲突")
+		return fmt.Errorf("UFW 和 firewalld 同时运行，请明确指定来源过滤后端并消除规则冲突")
 	}
-	// UFW 沿用系统的 iptables 入口，兼容 iptables-nft 和传统 xtables。
-	if ufwActive && b.sourceIPTablesAvailable() {
-		return "iptables", nil
-	}
-	if b.commands.Available("nft") {
-		return "nftables", nil
-	}
-	if b.sourceIPTablesAvailable() {
-		return "iptables", nil
-	}
-	return "", fmt.Errorf("来源限制需要 nft，或 iptables、ip6tables、对应 restore 命令与 ipset；请安装所需工具并授予防火墙权限")
+	return nil
 }
 
 func (b *systemBackend) sourceIPTablesAvailable() bool {
-	for _, name := range []string{"iptables", "ip6tables", "iptables-restore", "ip6tables-restore", "ipset"} {
-		if !b.commands.Available(name) {
-			return false
-		}
-	}
-	return true
+	return sourceToolsAvailable(b.commands.Available, "iptables")
 }
 
 func sourcePrefixes(plan sourcePlan, family int) []netip.Prefix {

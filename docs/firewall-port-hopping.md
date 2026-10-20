@@ -1,5 +1,7 @@
 # 自动防火墙与 Hysteria2 端口跳跃
 
+`v2.22.1` 开启系统来源限制时优先 nftables，缺少工具的 Linux root 主机按需补装；已有规则的后端不直接迁移。普通自动放行和手工模式不触发安装，也不启用 nftables、UFW 或 firewalld 服务。安装范围、超时、失败退避与回退条件见[来源限制](source-policy.md)，正式发布状态见[兼容记录](../YZ_COMPATIBILITY.md)。
+
 ## 按节点接管与退出（v2.22.0）
 
 配套面板 `1.101.0`、管理端 `0.72.0`。节点“高级设置 → 连接设置”的“自动管理防火墙”默认开启，配置字段为 `auto_firewall`；旧配置缺少字段也按开启处理，独立模式可在 `standalone.node.auto_firewall` 明确关闭。本机全局 `firewall` 配置仍然优先，程序不自动安装或开启 UFW/firewalld。
@@ -82,7 +84,7 @@ firewall:
 | `zone` | 空 | firewalld 自动使用活动区域及默认区域；填写区域名时仅管理该区域 |
 | `state_dir` | 配置文件目录下的 `firewall/` | 归属记录目录；相对路径以配置文件目录为基准 |
 
-同一进程中所有实例的最终 `firewall` 配置必须一致。`yz-agent` 修改绑定时保留这些字段。Node 不会自动安装或启用防火墙服务；没有运行中的 UFW/firewalld 时不创建过滤规则，跳跃转发仍需要相应的系统工具。
+同一进程中所有实例的最终 `firewall` 配置必须一致。`yz-agent` 修改绑定时保留这些字段。Node 不会自动安装或启用 UFW/firewalld 服务；没有运行中的 UFW/firewalld 时不创建普通放行规则，来源过滤与跳跃转发仍需要相应系统工具。来源过滤工具从 `v2.22.1` 开始按需准备，具体条件见上文。
 
 该功能面向具备系统防火墙权限的 Linux 主机安装。UFW 需要 `ufw`，firewalld 需要 `firewall-cmd` 及可用的系统服务；跳跃需要 `nft`，或所用地址族对应的 `iptables`/`ip6tables` 与 `*-restore`。非 Linux 平台不自动管理防火墙，启用自动跳跃会返回不支持。
 

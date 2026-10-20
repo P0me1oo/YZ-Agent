@@ -32,13 +32,18 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 }
 
 func (systemCommands) Run(parent context.Context, name, input string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	return runSystemCommand(parent, 5*time.Second, name, input, args, nil)
+}
+
+func runSystemCommand(parent context.Context, timeout time.Duration, name, input string, args, env []string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	// 子进程可能继续持有输出管道，单独终止主进程不能保证 Run 按时返回。
 	cmd.WaitDelay = time.Second
 	configureCommandCancellation(cmd)
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	cmd.Env = append(cmd.Env, env...)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}

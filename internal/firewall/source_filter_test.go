@@ -60,7 +60,8 @@ func TestSourceBackendSelectionAndPermissionFailure(t *testing.T) {
 		runner sourceCapabilities
 		want   string
 	}{
-		{"UFW", sourceCapabilities{available: iptables, ufw: "Status: active"}, "iptables"},
+		{"UFW prefers nft", sourceCapabilities{available: iptables, ufw: "Status: active"}, "nftables"},
+		{"iptables fallback", sourceCapabilities{available: map[string]bool{"iptables": true, "ip6tables": true, "iptables-restore": true, "ip6tables-restore": true, "ipset": true}}, "iptables"},
 		{"UFW nft fallback", sourceCapabilities{available: map[string]bool{"ufw": true, "nft": true}, ufw: "Status: active"}, "nftables"},
 		{"native nft", sourceCapabilities{available: map[string]bool{"nft": true}}, "nftables"},
 		{"no tools", sourceCapabilities{}, ""},
