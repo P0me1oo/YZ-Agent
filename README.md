@@ -1,5 +1,9 @@
 # YZ-Agent
 
+`v2.24.0` 开发版本包含独立 REALITY shortId 选路实验入口，尚未发布。入口需通过实验命令显式启动，暂未接入正式面板；已修复资源不足退出、失败重载不恢复、私钥管道阻塞和旧防火墙看护误删规则的问题。配置、零拷贝验证方法及限制见 [实验说明](docs/reality-shortid-relay.md)。下方正式版本说明保留原发布记录。
+
+同一 VLESS/Reality → SS2022 链路的 [Elise 落地补测](docs/elise-ss2022-performance-20261021.md) 已完成：当前 Rust 实现更省内存，大载荷 CPU 开销更高，未据此迁移或正式集成。
+
 正式版 `v2.22.1` 配套面板 `1.101.0`、管理端 `0.72.0`：默认接管节点端口，来源限制以面板为准；节点高级设置可关闭自动管理，撤回本节点托管规则，原手工规则保持原样。来源过滤先核验、监听成功后才接管放行，UFW 注释显示面板节点 ID。发布与双架构核验见[兼容记录](YZ_COMPATIBILITY.md)，使用见[自动防火墙说明](docs/firewall-port-hopping.md)。
 
 [`v2.22.1`](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.22.1) 已正式发布：系统来源过滤优先使用 nftables，Linux root 主机仅在需要且缺少工具时自动补装；来源限制关闭的普通节点不触发安装。已有托管后端和显式选择保留，安装失败不绕过来源保护。正式发布状态见[兼容记录](YZ_COMPATIBILITY.md)，使用见[来源限制](docs/source-policy.md)。

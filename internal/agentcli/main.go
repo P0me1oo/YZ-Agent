@@ -163,6 +163,8 @@ func run(args []string) error {
 		return nil
 	}
 	switch args[0] {
+	case "experiment":
+		return runExperiment(args[1:])
 	case "internal-machine-operation":
 		return runRemote(args[1:])
 	case "status":
@@ -212,6 +214,7 @@ func printUsage() {
 	fmt.Println(`yz-agent commands:
   yz-agent help
   yz-agent run [-c PATH]
+  yz-agent experiment reality-relay --config PATH [--check] [--stats-interval 10s]
   yz-agent status
   yz-agent list [--output text|json]
   yz-agent instance list [--output text|json]

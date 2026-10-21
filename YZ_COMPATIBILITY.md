@@ -1,5 +1,19 @@
 # YZ-Agent 兼容矩阵
 
+## v2.24.0 REALITY shortId 中转实验（未发布）
+
+- 初始实验分支 `feat/reality-shortid-relay`，基线 `c7d1fed7582578fad82851449c9a77e4d42daaf1`；独立工作树 `D:/codex-workspaces/yz-agent-reality-relay`。原型以 `v2.23.0` 完成以下历史验证；修复后纳入 `v2.24.0` 开发主线，沿用主线已有日志及故障上报改动，不修改面板、管理前端或两个核心及其固定依赖。
+- 新入口通过 Agent 的 `experiment reality-relay` 子命令显式启动，校验 ClientHello 的 REALITY 认证字段，按 shortId 选落地，原样转送握手与后续 TCP。用户授权和计费仍须由落地处理；现阶段没有正式面板配置下发、用户计费归属或原始来源地址透传。配置及测试范围见 [实验说明](docs/reality-shortid-relay.md)。
+- 本轮审查修复接收连接资源不足退出、失败重载不恢复、私钥命名管道阻塞和旧防火墙看护误删下一轮规则。Go `1.27.0` 下 Windows 重载、认证和转发专项通过；本机 WSL 的 11 项中转测试通过，资源故障在独立子进程内验证存量连接及新连接恢复。Windows 与 WSL 的 8 项 Python 测试通过，防火墙调用使用模拟命令，没有操作系统规则。以下性能与竞态结果属于原型历史记录，不代表本轮重新执行。
+- Go `1.27.0` 下，Windows 的解析、认证、配置、转发和命令行专项及竞态检查通过；模糊测试累计执行 58,962 次，没有发现崩溃。静态检查通过。Linux WSL 同一模块专项通过，覆盖混合与传统握手、时间窗口、双向完整数据、半关闭、重载失败/重复/恢复、连接撤销、密钥轮换和容量恢复。
+- Linux `strace` 对照中，auto 组实际发生 11 次 splice 调用，包含一次正常 EAGAIN 等待重试，双向数据校验及测试退出成功；buffered 组没有 splice 调用。详细调用记录确认载荷从 TCP 套接字经内核管道转到另一套接字；记录只包含 splice 参数，不包含握手载荷或私钥。
+- 本机 32 MiB 原始 TCP 回显对照仅执行一轮：auto 为 145.90 MB/s、buffered 为 135.34 MB/s。客户端、前置和回显端在同一进程，样本不足且未测试真实跨机 Reality 吞吐；这些数值只说明本地对照工具可用，不能转换为生产提速比例或与旧链式方案的性能结论。
+- Windows 与 Linux WSL 的双核心真实客户端专项均通过：Xray/sing-box 落地、普通 VLESS/Vision、同端口及同 SNI 下的双 shortId 线路、TCP/UDP、用户撤销/保留线路/恢复；Xray 客户端另验证传统和混合 REALITY 握手。删除 Xray 最后一名用户后，按现有生命周期通过 Reload 恢复监听；没有修改或放宽原授权逻辑。
+- Linux `amd64`、`arm64` 完整功能构建通过，均为 Go `1.27.0`、`CGO_ENABLED=0`、`-trimpath=true`，两个核心实际模块替换与既有固定依赖一致。ELF 与目标架构已核对；amd64 的版本在 Linux 实际运行确认，arm64 只完成构建及产物检查，未执行原生运行测试。
+- 历史原型程序保留基线 VCS revision `c7d1fed7582578fad82851449c9a77e4d42daaf1`，`vcs.modified=true`；当时新增功能尚未提交，不能只 checkout 基线提交来复现。原型源码校验清单、构建元数据与无敏感信息的核验记录位于 `D:/codex-tmp/yz-reality-relay-20261020/`。amd64 SHA-256 为 `05467edeac7b0f7d67a596209ba5f39e457681c4defff44b557a38cdce45be48`；arm64 为 `960c6805a93d02beace5f98c2938e0f2a506c2f08394b668a4f16f3d997e2ef0`。
+- 本次不创建正式 Tag、Release 或镜像。经用户授权，真实三机性能对照已完成，见 [实测报告](docs/reality-relay-performance-20261021.md)：最终五组各交错三次，新 splice 没有稳定速度领先，前置 CPU 少于 buffered 和旧链式方案，Realm 的前置 CPU、内存及短连接耗时更低。三台服务器的测试进程、临时配置、身份和隔离目录已删除，两条另行授权的限定来源临时防火墙规则已撤销。仅本地保留程序、源码清单及脱敏测量记录；不因本次性能结果正式集成。
+- [Elise SS2022 落地补测](docs/elise-ss2022-performance-20261021.md) 已完成：保持同一 Go 前置和客户端，将 HTTPS 目标拆为独立进程，两种落地各交错三次。相同 2GiB 大载荷下，Elise 落地 CPU 中位数 9.52 秒，sing-box 6.17 秒；峰值常驻内存 8.3/40.4MiB。36 项、1596 个请求全部成功，三机测试资源及临时规则已清理；不将此结果解释为 Rust 前置或完整 Rust 链路收益。
+
 ## v2.22.1 来源过滤依赖准备正式发布（2026-10-20）
 
 - 基线 `dev` / `c7d1fed7582578fad82851449c9a77e4d42daaf1`，沿用面板 `1.101.0`、管理端 `0.72.0` 和现有接口；两个核心及固定模块依赖不变。
