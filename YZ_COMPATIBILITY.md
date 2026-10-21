@@ -1,5 +1,18 @@
 # YZ-Agent 兼容矩阵
 
+## v2.24.2 正式发布核验（2026-10-22）
+
+- [Release v2.24.2](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.24.2) 已发布，固定来源 `ef041178889f75714bffff2d3e6fbce946992628`，[正式流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/39677523640) 全部成功。发布两边此前已有修改：设备准入取消和首次状态/授权合并、运行日志与重启恢复、Xray 故障事件，以及独立 REALITY shortId 中转实验命令。该实验仍需显式启动，未接入正式面板节点配置和计费。
+- 固定核心为 YZ-sing-box `v1.15.1` / `560816cb3343a9081eff758d988c7fbef767f92b`，官方基线保持 `v1.14.0` / `0b8995879f29a9b98ee027bc17b75e101445b238`；Xray 固定 YZ `v26.10.0` / `fb2f909b7987c651741e34798881657733161e30`，模块版本 `v0.0.0-20261018151951-fb2f909b7987` 不变。外部 Vision 客户端兼容副本随 Node 固定，核心内置服务端副本随核心固定，无本地核心路径替换。
+- Go `1.27.1` / Linux 完整竞态回归、底层兼容模块、Mihomo/WireGuard 实际连接与安装器检查通过，共 43 条包级成功结果、1,669 条测试及子测试通过记录，无失败。完整流程中的 6 条环境型跳过单独保留，5 条原生防火墙测试另由 UFW/firewalld × nftables/iptables 四组隔离检查覆盖；没有关闭竞态或指针校验、删除或弱化用例。双核心正常连接、TCP/UDP、Vision、撤销恢复和错误路径随现有回归通过。
+- Linux amd64、arm64 的 Agent、旧名称兼容程序、管理工具及 4 份构建信息均发布，12 份附件已匿名实际下载，SHA256SUMS 的 11 项全部匹配。两个架构的 ELF、Go 模块、VCS 完整来源、`CGO_ENABLED=0`、`-trimpath=true` 和 `vcs.modified=false` 已核对；amd64 Agent 和管理工具在本机 WSL 实际执行版本查询，确认 `v2.24.2` 与固定核心来源。
+- Agent 程序 SHA-256：amd64 为 `8fcd739e0357b223bfe21fae722bb784e4d0a21872dcebdf9e099d8aaac5ea8f`，arm64 为 `6faa8285373775e51df7f97ed0c1683eefb39e5472df5642b1cd8b78f1f512f6`。旧名称 `xboard-node` 附件与各自 Agent 程序字节一致，安装器与固定提交一致。
+- 不可变镜像 `ghcr.io/p0me1oo/yz-agent:ef041178889f75714bffff2d3e6fbce946992628`、版本别名 `v2.24.2` 和 `latest` 均为 `sha256:8aec645724ca477cd80692b69da5e94c9c5b930e2f8fd00a6828a169955f7b90`。`linux/amd64`、`linux/arm64` 清单、配置、OCI revision 和版本均匿名核对，发布流程实际执行两个架构镜像的版本查询后才更新别名。
+- 配套面板 `1.104.5`、管理端 `0.75.1`，先由用户更新面板，再执行 Agent 常规升级；sing-box 已编入 Agent，无需单独安装。回滚参考 Agent `v2.22.1` / `130d020e9d6076ebfade89d872510a115a75339f`，镜像 digest `sha256:d879f5f618d3e9392b029d25855fafb2305a782cb17b1c18e149c19bf1c9a2bc`，上一版本附件和镜像已核对可获取。两个失败标签 `v2.24.0`、`v2.24.1` 保持原名，没有对应正式安装包。
+- 核验与测试摘要保存在 `D:/codex-tmp/yz-release-panel-node-20261022-c05033a48076487a857e91002c76ec7b/node/verification.json`、`tests-summary.json`。发布后仅更新文档，不移动正式标签或重复已通过的产品检查；现有分支工作流尚未自动去重，不等待文档推送触发的重复 CI。未连接或更新生产服务器。
+
+以下保留开发和发布准备时的状态，最终结果以上方正式记录为准。
+
 ## v2.24.2 双份 Vision 修复与核心配套（2026-10-22，发布准备）
 
 - `v2.24.1` / `746e4ddad28d6ad60161b4619e413a5b46ea9981` 的[流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/39670191859)再次通过四组原生防火墙检查，但实际双核心 Vision 用例揭示 sing-box 的 `third_party/sing-vmess/vless` 内置服务端副本同样触发指针校验。Windows 实际连接专项也复现该处，先前外部模块的构造及垃圾回收用例保持通过；没有把外部模块通过视为完整修复。
