@@ -296,7 +296,7 @@ require (
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
 
-replace github.com/sagernet/sing-box => github.com/P0me1oo/YZ-sing-box v1.15.0
+replace github.com/sagernet/sing-box => github.com/P0me1oo/YZ-sing-box v1.15.1
 
 // 上游 v0.0.11 的流关闭状态存在数据竞争；兼容补丁随 Node 固定提交构建。
 replace github.com/anytls/sing-anytls => ./compat/sing-anytls

@@ -29,7 +29,7 @@ func TestReleaseMetadataIsPinned(t *testing.T) {
 	if SingBoxRequestedVersion != "v1.14.0" {
 		t.Fatalf("SingBoxRequestedVersion = %q", SingBoxRequestedVersion)
 	}
-	if SingBoxResolvedVersion != "v1.15.0" {
+	if SingBoxResolvedVersion != "v1.15.1" {
 		t.Fatalf("SingBoxResolvedVersion = %q", SingBoxResolvedVersion)
 	}
 }

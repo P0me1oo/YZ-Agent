@@ -1,5 +1,11 @@
 # YZ-Agent 兼容矩阵
 
+## v2.24.2 双份 Vision 修复与核心配套（2026-10-22，发布准备）
+
+- `v2.24.1` / `746e4ddad28d6ad60161b4619e413a5b46ea9981` 的[流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/39670191859)再次通过四组原生防火墙检查，但实际双核心 Vision 用例揭示 sing-box 的 `third_party/sing-vmess/vless` 内置服务端副本同样触发指针校验。Windows 实际连接专项也复现该处，先前外部模块的构造及垃圾回收用例保持通过；没有把外部模块通过视为完整修复。
+- 经用户明确授权，核心 `YZ-sing-box v1.15.1` 同步修复内置副本，Node 保留外部客户端模块的最小兼容补丁；这两个副本分别承担客户端和服务端路径。Xray 固定版本不变，两个失败 Node 标签不覆盖，没有发布失败来源的程序或镜像。
+- Windows 本地修复核心的双核心 TCP/UDP、普通 VLESS/Vision、授权撤销与恢复专项通过，10.036 秒。正式 Node 依赖恢复为 `github.com/P0me1oo/YZ-sing-box v1.15.1`，固定核心来源 `560816cb3343a9081eff758d988c7fbef767f92b`；构建标识同步，不保留开发路径。
+
 ## v2.24.1 Vision 指针修复与发布准备（2026-10-22）
 
 - `v2.24.0` / `9f282b97ee235217fa2e98743beff73ed0dacc9b` 的[正式流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/39668074874)四组原生防火墙检查成功，完整竞态回归在 `TestRealityShortIDRelayRuntime/xray/xtls-rprx-vision` 触发 `sing-vmess/vless/vision.go:87` 指针校验崩溃；构建与发布任务未执行，没有 Release、安装包或正式镜像。保留失败标签记录，不覆盖原标签。
