@@ -13,6 +13,7 @@ WORKDIR /build
 COPY go.mod go.sum ./
 COPY compat/sing-anytls/go.mod ./compat/sing-anytls/go.mod
 COPY compat/sing-shadowsocks/go.mod ./compat/sing-shadowsocks/go.mod
+COPY compat/sing-vmess/go.mod ./compat/sing-vmess/go.mod
 RUN go mod download
 
 COPY . .

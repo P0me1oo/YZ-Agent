@@ -304,6 +304,9 @@ replace github.com/anytls/sing-anytls => ./compat/sing-anytls
 // SS2022 关闭路径兼容补丁随 Node 源码固定，来源与删除条件见兼容目录。
 replace github.com/sagernet/sing-shadowsocks => ./compat/sing-shadowsocks
 
+// Vision 保留 TLS 对象指针，避免 uintptr 往返触发 Go 指针校验；来源见兼容目录。
+replace github.com/sagernet/sing-vmess => ./compat/sing-vmess
+
 // 上游 v26.10.17 没有对应的 Go module Tag；保留兼容的 require 版本，
 // 并将实际依赖固定到 YZ fork 的发布提交，避免解析到移动分支。
 replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261018151951-fb2f909b7987
