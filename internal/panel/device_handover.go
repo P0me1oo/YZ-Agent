@@ -10,8 +10,9 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 )
 
-func (c *Client) DeviceHandoverSupported() bool { return c.deviceHandover.Load() }
-func (c *Client) DeviceRenewalSupported() bool  { return c.deviceHandoverRenewal.Load() }
+func (c *Client) DeviceHandoverSupported() bool      { return c.deviceHandover.Load() }
+func (c *Client) DeviceRenewalSupported() bool       { return c.deviceHandoverRenewal.Load() }
+func (c *Client) DeviceAdmissionSyncSupported() bool { return c.deviceHandoverAdmitSync.Load() }
 
 func deviceRequest[T any](c *Client, ctx context.Context, action string, data map[string]interface{}) (T, error) {
 	var empty T
@@ -74,9 +75,19 @@ func (c *Client) BeginDeviceSession(ctx context.Context, run string) (devicegate
 }
 
 func (c *Client) AdmitDeviceSource(ctx context.Context, request devicegate.AdmissionRequest) (devicegate.AdmissionReply, error) {
-	return deviceRequest[devicegate.AdmissionReply](c, ctx, "admit", map[string]interface{}{
+	payload := map[string]interface{}{
 		"run": request.Run, "sequence": request.Sequence, "user_id": request.UserID, "ip": request.IP,
-	})
+	}
+	if request.Snapshot != nil {
+		payload["snapshot"] = request.Snapshot
+	}
+	reply, err := deviceRequest[devicegate.AdmissionReply](c, ctx, "admit", payload)
+	if err == nil && request.Snapshot != nil && reply.Sync == nil {
+		// 面板回滚后可能忽略新增字段；必须重新同步再走旧申请，不能直接接受授权。
+		c.deviceHandoverAdmitSync.Store(false)
+		return devicegate.AdmissionReply{}, devicegate.ErrAdmissionSyncUnsupported
+	}
+	return reply, err
 }
 
 func (c *Client) SyncDeviceSession(ctx context.Context, snapshot devicegate.Snapshot) (devicegate.SyncReply, error) {

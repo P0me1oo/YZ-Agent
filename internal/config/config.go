@@ -249,6 +249,8 @@ type WSConfig struct {
 }
 
 type KernelConfig struct {
+	LogScope  string `yaml:"-"`
+	LogNodeID int    `yaml:"-"`
 	Type      string `yaml:"type"` // "singbox" or "xray"
 	ConfigDir string `yaml:"config_dir"`
 	LogLevel  string `yaml:"log_level"`

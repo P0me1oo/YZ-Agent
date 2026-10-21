@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
+	blog "github.com/sagernet/sing-box/log"
 	"reflect"
 	"sync"
 	"time"
@@ -24,7 +25,6 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
-	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/systemwg"
 	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 )
@@ -144,7 +144,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	nlog.Core().Debug("sing-box config generated", "len", len(data))
+	s.logger().Debug("sing-box config generated", "len", len(data))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx, err = directOutboundContext(ctx, nodeConfig.CustomOutbounds)
@@ -177,6 +177,9 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 	if err != nil {
 		cancel()
 		return fmt.Errorf("create sing-box instance: %w", err)
+	}
+	if factory, ok := instance.LogFactory().(blog.ObservableFactory); ok && s.cfg.LogScope != "" {
+		factory.AttachPlatformWriter(runtimeLogWriter{scope: s.cfg.LogScope, nodeID: s.cfg.LogNodeID, factory: factory})
 	}
 
 	// 在开放监听前注册统计器，首个连接也必须纳入同一份用户统计。
@@ -229,7 +232,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 
 	s.connTracker = tracker
 
-	nlog.Core().Debug("sing-box started", "users", len(users))
+	s.logger().Debug("sing-box started", "users", len(users))
 	return nil
 }
 
@@ -284,7 +287,7 @@ func (s *SingBox) Reload(nodeConfig *model.NodeSpec, users []model.UserSpec, tls
 	if err := updater.UpdateRules(opts.Route.Rules, opts.Route.RuleSet); err != nil {
 		return fmt.Errorf("reload sing-box routes: %w", err)
 	}
-	nlog.Core().Debug("sing-box routing reloaded")
+	s.logger().Debug("sing-box routing reloaded")
 
 	// Trackers remain registered on the Router (which survives ReloadUsers).
 	// Only update the user map — do NOT re-register or traffic is double-counted.
@@ -292,7 +295,7 @@ func (s *SingBox) Reload(nodeConfig *model.NodeSpec, users []model.UserSpec, tls
 		s.connTracker.setNodeUsers(nodeConfig, users)
 	}
 
-	nlog.Core().Debug("sing-box reloaded", "users", len(users))
+	s.logger().Debug("sing-box reloaded", "users", len(users))
 	s.users = users
 	s.nodeConfig = nodeConfig
 	s.tls = tls
@@ -656,7 +659,7 @@ func (s *SingBox) CloseConnection(_ context.Context, connID string) error {
 		return fmt.Errorf("not running")
 	}
 	if !ct.CloseByID(connID) {
-		nlog.Core().Debug("CloseConnection: connection not found (already closed?)", "id", connID)
+		s.logger().Debug("CloseConnection: connection not found (already closed?)", "id", connID)
 	}
 	return nil
 }

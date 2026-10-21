@@ -30,9 +30,17 @@ type sourceState struct {
 }
 
 type flight struct {
-	sequence uint64
-	done     chan struct{}
-	err      error
+	sequence  uint64
+	done      chan struct{}
+	err       error
+	cancel    context.CancelFunc
+	waiters   map[*admissionWaiter]struct{}
+	abandoned bool
+}
+
+type admissionWaiter struct {
+	ctx    context.Context
+	permit *Permit
 }
 
 type retiredSource struct {
@@ -45,7 +53,7 @@ type Manager struct {
 	remote       Remote
 	enabled      atomic.Bool
 	mu           sync.Mutex
-	syncMu       sync.Mutex
+	syncMu       chan struct{}
 	run          string
 	ready        bool
 	closing      bool
@@ -65,7 +73,7 @@ type Manager struct {
 }
 
 func New(remote Remote, onError func(error)) *Manager {
-	return &Manager{remote: remote, sources: make(map[sourceKey]*sourceState),
+	return &Manager{remote: remote, syncMu: make(chan struct{}, 1), sources: make(map[sourceKey]*sourceState),
 		flights: make(map[sourceKey]*flight), revoked: make(map[string]time.Time), retired: make(map[string]retiredSource), onError: onError}
 }
 
@@ -109,8 +117,10 @@ func (m *Manager) Start(ctx context.Context) error {
 }
 
 func (m *Manager) begin(ctx context.Context) error {
-	m.syncMu.Lock()
-	defer m.syncMu.Unlock()
+	if err := m.lockSync(ctx); err != nil {
+		return err
+	}
+	defer m.unlockSync()
 	m.mu.Lock()
 	if m.closing || len(m.sources) != 0 || len(m.flights) != 0 {
 		m.mu.Unlock()
@@ -126,6 +136,8 @@ func (m *Manager) begin(ctx context.Context) error {
 	}
 	run := m.run
 	m.mu.Unlock()
+	// 新会话不能沿用上一代的续期基线；同步锁保护这两个缓存。
+	m.confirmed, m.baseSequence = nil, 0
 	reply, err := m.remote.BeginDeviceSession(ctx, run)
 	if err != nil {
 		return err
@@ -149,8 +161,16 @@ func (m *Manager) Acquire(ctx context.Context, userID int, rawIP string) (*Permi
 		return nil, nil
 	}
 	key := sourceKey{user: userID, ip: ip}
+	// 每个连接独立计算等待时限，重新申请也不能重置已消耗的时间。
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	waiting := false
 	for {
 		m.mu.Lock()
+		if err := ctx.Err(); err != nil {
+			m.mu.Unlock()
+			return nil, err
+		}
 		if !m.ready || m.closing || m.ctx.Err() != nil {
 			m.mu.Unlock()
 			return nil, ErrNotReady
@@ -162,72 +182,147 @@ func (m *Manager) Acquire(ctx context.Context, userID int, rawIP string) (*Permi
 				return p, nil
 			}
 		}
-		if current := m.flights[key]; current != nil {
-			m.mu.Unlock()
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-m.ctx.Done():
-				return nil, ErrNotReady
-			case <-current.done:
-				if current.err != nil {
-					return nil, current.err
-				}
-				continue
-			}
+		if !waiting {
+			// 停止时同时等待连接领取或归还预留引用，不能只等远端任务。
+			m.callWG.Add(1)
+			defer m.callWG.Done()
+			waiting = true
 		}
-		m.seq++
-		current := &flight{sequence: m.seq, done: make(chan struct{})}
-		m.flights[key] = current
-		run := m.run
-		m.callWG.Add(1)
+		current := m.flights[key]
+		if current == nil {
+			m.seq++
+			requestCtx, cancel := context.WithTimeout(m.ctx, 8*time.Second)
+			current = &flight{sequence: m.seq, done: make(chan struct{}), cancel: cancel,
+				waiters: make(map[*admissionWaiter]struct{})}
+			m.flights[key] = current
+			run := m.run
+			m.callWG.Add(1)
+			go m.admit(requestCtx, key, run, current)
+		}
+		waiter := &admissionWaiter{ctx: ctx}
+		current.waiters[waiter] = struct{}{}
 		m.mu.Unlock()
 
-		requestCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		stop := context.AfterFunc(m.ctx, cancel)
-		reply, err := m.request(requestCtx, AdmissionRequest{Run: run, Sequence: current.sequence, UserID: userID, IP: ip})
-		stop()
-		cancel()
+		select {
+		case <-ctx.Done():
+		case <-m.ctx.Done():
+		case <-current.done:
+		}
 		m.mu.Lock()
-		if err == nil && (!m.ready || m.closing || m.run != run || ctx.Err() != nil) {
-			err = ErrNotReady
+		delete(current.waiters, waiter)
+		if len(current.waiters) == 0 && m.flights[key] == current {
+			// 全部连接已退出，取消共享任务。新连接等它清理后重新申请，
+			// 不与尚未结束的旧序号并行，也不继承它的取消结果。
+			current.abandoned = true
+			current.cancel()
 		}
-		if err == nil {
-			if _, revoked := m.revoked[reply.Lease]; revoked {
-				err = ErrRevoked
-			}
-		}
-		var permit *Permit
-		if err == nil {
-			if old := m.sources[key]; old != nil && old.lease != reply.Lease && len(old.permits) != 0 {
-				err = ErrRevoked
-			} else {
-				source := m.sources[key]
-				if source == nil {
-					source = &sourceState{key: key, lease: reply.Lease, permits: make(map[*Permit]struct{})}
-					m.sources[key] = source
-				}
-				permit = m.permitLocked(source)
-			}
-		}
-		delete(m.flights, key)
-		current.err = err
-		close(current.done)
+		permit, err, abandoned := waiter.permit, current.err, current.abandoned
+		stopped := m.closing || m.ctx.Err() != nil
 		m.mu.Unlock()
-		m.callWG.Done()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			permit.Release()
+			return nil, ctxErr
+		}
+		if stopped {
+			permit.Release()
+			return nil, ErrNotReady
+		}
+		if abandoned {
+			continue
+		}
 		return permit, err
 	}
 }
 
+// 共享申请归属于来源，单个连接取消只移除自己的等待和预留授权。
+func (m *Manager) admit(ctx context.Context, key sourceKey, run string, current *flight) {
+	defer m.callWG.Done()
+	defer current.cancel()
+	reply, err := m.request(ctx, AdmissionRequest{Run: run, Sequence: current.sequence, UserID: key.user, IP: key.ip})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err == nil {
+		switch {
+		case !m.ready || m.closing || m.run != run || m.ctx.Err() != nil:
+			err = ErrNotReady
+		case ctx.Err() != nil:
+			err = ctx.Err()
+		case current.abandoned:
+			err = context.Canceled
+		}
+	}
+	if err == nil {
+		if _, revoked := m.revoked[reply.Lease]; revoked {
+			err = ErrRevoked
+		} else if old := m.sources[key]; old != nil && old.lease != reply.Lease && len(old.permits) != 0 {
+			err = ErrRevoked
+		}
+	}
+	if err == nil {
+		for waiter := range current.waiters {
+			if waiter.ctx.Err() != nil {
+				continue
+			}
+			source := m.sources[key]
+			if source == nil {
+				source = &sourceState{key: key, lease: reply.Lease, permits: make(map[*Permit]struct{})}
+				m.sources[key] = source
+			}
+			// 在唤醒前为每个有效连接保留引用，先醒来的短连接释放时
+			// 不会让其他仍在领取授权的连接重新请求面板。
+			waiter.permit = m.permitLocked(source)
+		}
+	}
+	delete(m.flights, key)
+	current.err = err
+	close(current.done)
+}
+
 func (m *Manager) request(ctx context.Context, request AdmissionRequest) (AdmissionReply, error) {
-	// 先同步本节点刚发生的新连接，避免用上一轮采样给本机来源排序。
-	if err := m.syncAtLeast(ctx, request.Sequence); err != nil {
-		return AdmissionReply{}, err
+	combined := false
+	if capability, ok := m.remote.(AdmissionSyncRemote); ok {
+		combined = capability.DeviceAdmissionSyncSupported()
+	}
+	if !combined {
+		// 旧面板先同步本节点的新连接，再申请，保留原协议。
+		if err := m.syncAtLeast(ctx, request.Sequence); err != nil {
+			return AdmissionReply{}, err
+		}
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return AdmissionReply{}, err
+		}
+		if combined {
+			// 每次重试都带当前完整状态，不用旧授权或旧快照放行。
+			// 不持有同步锁等待授权，各来源共享任务仍可独立取消。
+			snapshot := m.Snapshot()
+			request.Snapshot = &snapshot
+		}
 		reply, err := m.remote.AdmitDeviceSource(ctx, request)
+		if combined && errors.Is(err, ErrAdmissionSyncUnsupported) {
+			combined, request.Snapshot = false, nil
+			// 回滚后的面板必须重新确认当前完整状态，不能复用合并响应覆盖的序号。
+			if err := m.Sync(ctx); err != nil {
+				return AdmissionReply{}, err
+			}
+			continue
+		}
+		if errors.Is(err, ErrSessionLost) {
+			m.loseSession(request.Run)
+		}
 		if err != nil {
 			return reply, err
+		}
+		if err := ctx.Err(); err != nil {
+			return AdmissionReply{}, err
+		}
+		if combined {
+			if reply.Sync == nil || reply.Sync.Run != request.Snapshot.Run || reply.Sync.Sequence != request.Snapshot.Sequence {
+				return AdmissionReply{}, fmt.Errorf("设备来源申请的完整快照未被确认")
+			}
+			m.confirmSnapshot(*request.Snapshot, request.UserID)
+			m.ApplyRevocations(reply.Sync.Revoked)
 		}
 		switch reply.Status {
 		case "allowed":
@@ -239,7 +334,7 @@ func (m *Manager) request(ctx context.Context, request AdmissionRequest) (Admiss
 			return reply, &DeniedError{Limit: reply.Limit, Observed: reply.Observed, Reason: reply.Reason, Snapshot: reply.LimitSnapshot}
 		case "waiting":
 			m.ApplyRevocations(reply.Revoked)
-			if len(reply.Revoked) > 0 {
+			if !combined && len(reply.Revoked) > 0 {
 				if err := m.Sync(ctx); err != nil {
 					return reply, err
 				}
@@ -304,8 +399,10 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	if !m.Enabled() {
 		return nil
 	}
-	m.syncMu.Lock()
-	defer m.syncMu.Unlock()
+	if err := m.lockSync(ctx); err != nil {
+		return err
+	}
+	defer m.unlockSync()
 	m.mu.Lock()
 	covered := required != 0 && m.synced >= required
 	m.mu.Unlock()
@@ -323,14 +420,9 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 		reply, err = m.remote.SyncDeviceSession(ctx, wire)
 	}
 	if errors.Is(err, ErrSessionLost) {
-		m.mu.Lock()
-		m.ready = false
-		m.run = ""
-		m.synced = 0
+		m.loseSession(snapshot.Run)
 		m.confirmed = nil
 		m.baseSequence = 0
-		m.mu.Unlock()
-		m.closeAll()
 	}
 	if err != nil {
 		return err
@@ -342,17 +434,53 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	if !wire.Unchanged {
 		m.baseSequence = snapshot.Sequence
 	}
-	m.mu.Lock()
-	m.synced = snapshot.Sequence
-	for lease, retired := range m.retired {
-		if retired.sequence <= snapshot.Sequence {
-			delete(m.retired, lease)
-		}
-	}
-	m.mu.Unlock()
+	m.confirmSnapshot(snapshot, 0)
 	m.ApplyRevocations(reply.Revoked)
 	return nil
 }
+
+func (m *Manager) confirmSnapshot(snapshot Snapshot, userID int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.ready || m.run != snapshot.Run {
+		return
+	}
+	m.synced = max(m.synced, snapshot.Sequence)
+	for lease, retired := range m.retired {
+		if retired.sequence <= snapshot.Sequence && (userID == 0 || retired.item.UserID == userID) {
+			delete(m.retired, lease)
+		}
+	}
+}
+
+func (m *Manager) loseSession(run string) {
+	m.mu.Lock()
+	if m.run != run {
+		m.mu.Unlock()
+		return
+	}
+	m.ready, m.run, m.synced = false, "", 0
+	m.mu.Unlock()
+	m.closeAll()
+}
+
+func (m *Manager) lockSync(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case m.syncMu <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			m.unlockSync()
+			return err
+		}
+		return nil
+	}
+}
+
+func (m *Manager) unlockSync() { <-m.syncMu }
 
 func sameSnapshot(previous *Snapshot, current Snapshot) bool {
 	return previous != nil && previous.Run == current.Run && slices.Equal(previous.Pending, current.Pending) &&

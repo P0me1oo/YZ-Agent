@@ -7,10 +7,11 @@ import (
 )
 
 var (
-	ErrSessionLost      = errors.New("设备来源会话已失效")
-	ErrSnapshotRequired = errors.New("设备来源需要完整快照")
-	ErrNotReady         = errors.New("设备来源协调尚未就绪")
-	ErrRevoked          = errors.New("设备来源已被替换")
+	ErrSessionLost              = errors.New("设备来源会话已失效")
+	ErrSnapshotRequired         = errors.New("设备来源需要完整快照")
+	ErrAdmissionSyncUnsupported = errors.New("面板不支持合并设备申请")
+	ErrNotReady                 = errors.New("设备来源协调尚未就绪")
+	ErrRevoked                  = errors.New("设备来源已被替换")
 )
 
 type BeginReply struct {
@@ -19,10 +20,11 @@ type BeginReply struct {
 }
 
 type AdmissionRequest struct {
-	Run      string `json:"run"`
-	Sequence uint64 `json:"sequence"`
-	UserID   int    `json:"user_id"`
-	IP       string `json:"ip"`
+	Run      string    `json:"run"`
+	Sequence uint64    `json:"sequence"`
+	UserID   int       `json:"user_id"`
+	IP       string    `json:"ip"`
+	Snapshot *Snapshot `json:"snapshot,omitempty"`
 }
 
 type AdmissionReply struct {
@@ -33,6 +35,7 @@ type AdmissionReply struct {
 	Reason        string                `json:"reason"`
 	Revoked       []Revocation          `json:"revoked"`
 	LimitSnapshot *limitreport.Snapshot `json:"limit_snapshot,omitempty"`
+	Sync          *SyncReply            `json:"sync,omitempty"`
 }
 
 type Source struct {
@@ -75,6 +78,11 @@ type Remote interface {
 // RenewalRemote 是可选能力，旧主控和原有协调实现继续使用完整快照。
 type RenewalRemote interface {
 	DeviceRenewalSupported() bool
+}
+
+// AdmissionSyncRemote 可选地在同一请求内先确认完整状态，再申请名额。
+type AdmissionSyncRemote interface {
+	DeviceAdmissionSyncSupported() bool
 }
 
 type DeniedError struct {

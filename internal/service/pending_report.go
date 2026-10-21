@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
 
 // pendingReportStore 把尚未确认的流量写入节点自己的配置目录，进程重启后继续上报。
@@ -22,7 +23,7 @@ import (
 // 累计流量随同保存，它们还没发出过，恢复后并入下一批即可。
 //
 // 文件名包含面板地址和节点编号的摘要：配置目录被改绑到其他节点时，旧文件不会
-// 被误报给新节点。设备、在线人数和超限事件是即时状态，不保存。
+// 被误报给新节点。设备和在线人数是即时状态，不保存；已组成批次的限制事件保存并继续重试。
 type pendingReportStore struct {
 	path     string
 	identity string
@@ -42,9 +43,12 @@ func (p pendingTraffic) empty() bool {
 }
 
 type pendingBatch struct {
-	ID string `json:"id"`
+	ID          string             `json:"id"`
+	LimitEvents []panel.LimitEvent `json:"limit_events,omitempty"`
 	pendingTraffic
 }
+
+func (p pendingBatch) empty() bool { return p.pendingTraffic.empty() && len(p.LimitEvents) == 0 }
 
 type pendingReportFile struct {
 	Version  int            `json:"version"`

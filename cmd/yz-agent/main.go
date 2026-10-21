@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/agentcli"
+	"github.com/P0me1oo/YZ-Agent/internal/agentlog"
 	"github.com/P0me1oo/YZ-Agent/internal/buildinfo"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
@@ -200,6 +201,17 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 		}
 
 		instanceHealthIDs, allHealthIDs := healthComponentIDs(instances)
+		// 多个面板或独立身份共享进程时，全局日志不能可靠归属，保留本地输出。
+		nlog.SetGlobalScope("")
+		if len(instances) == 1 && instances[0].IsMachineMode() {
+			nlog.SetGlobalScope(instances[0].LogScope())
+		}
+		if len(instances) == 1 && !instances[0].IsMachineMode() {
+			nodes := instances[0].ExpandNodes()
+			if len(nodes) == 1 && !nodes[0].IsStandalone() {
+				nlog.SetGlobalScope(nodes[0].LogScope())
+			}
+		}
 		health.reset(allHealthIDs)
 
 		errCh := make(chan error, 1)
@@ -219,6 +231,8 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			go func() {
 				defer wg.Done()
 				if instanceCfg.IsMachineMode() {
+					stopLogs := agentlog.Start(ctx, instanceCfg)
+					defer stopLogs()
 					nlog.Core().Info("starting machine instance", "instance", instanceCfg.InstanceID, "machine_id", instanceCfg.Machine.MachineID, "panel_url", instanceCfg.Panel.URL)
 					orch := machine.New(instanceCfg)
 					orch.SetAgentRuntime(version, processBootID)
@@ -253,6 +267,8 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 							}
 						}
 						svc := service.New(nodeCfg)
+						stopLogs := agentlog.Start(ctx, nodeCfg)
+						defer stopLogs()
 						svc.SetFirewallController(firewallManager)
 						svc.SetStatusHandler(func(status service.RuntimeStatus) {
 							health.set(healthID, status)

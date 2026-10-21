@@ -30,11 +30,12 @@ func (s *Service) tlsCert() kernel.TLSCert {
 
 // 失败只终止当前节点的运行，保留控制通道接收修正配置，不再启动旧配置。
 func (s *Service) failRuntime(operation string, nc *model.NodeSpec, users []model.UserSpec, err error) {
+	s.reportXrayCrash(operation, err)
 	s.failedRuntimeHash = runtimeAttemptHash(nc, users, s.tlsCert())
 	s.runtimeError = fmt.Errorf("%s: %w", operation, err)
-	logger := nlog.Core()
-	if nc != nil {
-		logger = nlog.ForNode(nc.Protocol, nc.ServerPort)
+	logger := s.nodeLog
+	if logger == nil {
+		logger = nlog.Core()
 	}
 	logger.Error(operation+"，内核已停止", "kernel", s.kernel.Name(), "error", err)
 	s.stopKernel()
@@ -69,6 +70,7 @@ func (s *Service) prepareRuntime(ctx context.Context, nc *model.NodeSpec, users 
 }
 
 func (s *Service) runtimeApplied(nc *model.NodeSpec, users []model.UserSpec) {
+	s.xrayCrashReported = false
 	s.failedRuntimeHash = ""
 	s.runtimeError = nil
 	s.appliedState.Config = nc

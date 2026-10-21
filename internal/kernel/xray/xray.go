@@ -59,7 +59,7 @@ const (
 // Lock discipline:
 //   - mu is held only for brief field swaps (microseconds).
 //   - instance.Start() and instance.Close() run OUTSIDE the lock.
-//   - running (atomic) gates fast-path checks in IsRunning / GetConnections.
+//   - running (atomic) skips instance checks when the wrapper is stopped.
 type Xray struct {
 	accessLog *accesslog.Recorder
 	cfg       config.KernelConfig
@@ -95,7 +95,7 @@ type Xray struct {
 	globalDeviceUpdate time.Time
 
 	// running is set after a successful Start and cleared before shutdown.
-	// Atomic so IsRunning / GetConnections never block.
+	// 实例停止前先清除；IsRunning 还会核对实际实例状态。
 	running atomic.Bool
 }
 
@@ -280,7 +280,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	x.updateDispatcherLimits(users)
 	x.closeOld(old)
 
-	nlog.Core().Info("xray started",
+	x.logger().Info("xray started",
 		"users", len(users),
 		"protocol", nodeConfig.Protocol,
 	)
@@ -301,12 +301,12 @@ func (x *Xray) Reload(nodeConfig *model.NodeSpec, users []model.UserSpec, tls ke
 		x.mu.Unlock()
 		x.updateDispatcherLimits(users)
 		x.updateBandwidthLimits(users)
-		nlog.Core().Debug("xray: limits updated, kernel configuration unchanged")
+		x.logger().Debug("xray: limits updated, kernel configuration unchanged")
 		return nil
 	}
 	x.mu.Unlock()
 
-	nlog.Core().Info("xray: configuration changed, performing full restart")
+	x.logger().Info("xray: configuration changed, performing full restart")
 	return x.Start(nodeConfig, users, tls)
 }
 
@@ -351,7 +351,14 @@ func (x *Xray) stop(immediate bool) {
 	}
 }
 
-func (x *Xray) IsRunning() bool { return x.running.Load() }
+func (x *Xray) IsRunning() bool {
+	if !x.running.Load() {
+		return false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.instance != nil && x.instance.IsRunning()
+}
 
 func tlsEqual(a, b kernel.TLSCert) bool {
 	return bytes.Equal(a.CertPEM, b.CertPEM) && bytes.Equal(a.KeyPEM, b.KeyPEM)
@@ -523,7 +530,7 @@ func (x *Xray) AddUsers(users []model.UserSpec) (int, error) {
 		// Protocol doesn't support UserManager → full restart
 		nc, t := x.nodeConfig, x.tls
 		x.mu.Unlock()
-		nlog.Core().Debug("xray: AddUsers requires full rebuild", "reason", err)
+		x.logger().Debug("xray: AddUsers requires full rebuild", "reason", err)
 		if err := x.Start(nc, merged, t); err != nil {
 			return 0, err
 		}
@@ -548,7 +555,7 @@ func (x *Xray) AddUsers(users []model.UserSpec) (int, error) {
 	x.updateDispatcherLimits(merged)
 	x.updateBandwidthLimits(merged)
 
-	nlog.Core().Info("xray: users added via UserManager", "added", added, "total", len(merged))
+	x.logger().Info("xray: users added via UserManager", "added", added, "total", len(merged))
 	return added, nil
 }
 
@@ -592,7 +599,7 @@ func (x *Xray) RemoveUsers(users []model.UserSpec) (int, error) {
 	if err != nil {
 		nc, t := x.nodeConfig, x.tls
 		x.mu.Unlock()
-		nlog.Core().Debug("xray: RemoveUsers requires full rebuild", "reason", err)
+		x.logger().Debug("xray: RemoveUsers requires full rebuild", "reason", err)
 		if err := x.Start(nc, kept, t); err != nil {
 			return 0, err
 		}
@@ -614,7 +621,7 @@ func (x *Xray) RemoveUsers(users []model.UserSpec) (int, error) {
 	x.updateDispatcherLimits(kept)
 	x.updateBandwidthLimits(kept)
 
-	nlog.Core().Info("xray: users removed via UserManager", "removed", actualRemoved, "total", len(kept))
+	x.logger().Info("xray: users removed via UserManager", "removed", actualRemoved, "total", len(kept))
 	return actualRemoved, nil
 }
 
@@ -636,7 +643,7 @@ func (x *Xray) UpdateUsers(users []model.UserSpec) (added, removed int, err erro
 		x.mu.Unlock()
 		x.updateDispatcherLimits(users)
 		x.updateBandwidthLimits(users)
-		nlog.Core().Info("xray: limits updated, kernel unchanged")
+		x.logger().Info("xray: limits updated, kernel unchanged")
 		return 0, 0, nil
 	}
 
@@ -645,7 +652,7 @@ func (x *Xray) UpdateUsers(users []model.UserSpec) (added, removed int, err erro
 		// Protocol doesn't support UserManager → full restart
 		nc, t := x.nodeConfig, x.tls
 		x.mu.Unlock()
-		nlog.Core().Debug("xray: UpdateUsers requires full rebuild", "reason", umErr)
+		x.logger().Debug("xray: UpdateUsers requires full rebuild", "reason", umErr)
 		if err = x.Start(nc, users, t); err != nil {
 			return 0, 0, err
 		}
@@ -676,7 +683,7 @@ func (x *Xray) UpdateUsers(users []model.UserSpec) (added, removed int, err erro
 	x.updateDispatcherLimits(users)
 	x.updateBandwidthLimits(users)
 
-	nlog.Core().Info("xray: users updated via UserManager", "added", added, "removed", removed, "total", len(users))
+	x.logger().Info("xray: users updated via UserManager", "added", added, "removed", removed, "total", len(users))
 	return added, removed, nil
 }
 
@@ -870,7 +877,7 @@ func (x *Xray) ensureGeoData(nc *model.NodeSpec) {
 	}
 	dir := x.cfg.GeoDataDir
 	if err := geodata.Ensure(dir, needIP, needSite, "xray"); err != nil {
-		nlog.Core().Warn("geo database unavailable", "error", err)
+		x.logger().Warn("geo database unavailable", "error", err)
 	}
 	os.Setenv("XRAY_LOCATION_ASSET", dir)
 }
@@ -885,7 +892,7 @@ func marshalConfig(cfg config.KernelConfig, nc *model.NodeSpec, users []model.Us
 	if err != nil {
 		return nil, fmt.Errorf("marshal config: %w", err)
 	}
-	nlog.Core().Debug("xray config generated", "len", len(data))
+	nlog.Scoped(cfg.LogScope, cfg.LogNodeID, "xray").Debug("xray config generated", "len", len(data))
 	return data, nil
 }
 

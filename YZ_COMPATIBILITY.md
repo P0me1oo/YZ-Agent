@@ -1,5 +1,39 @@
 # YZ-Agent 兼容矩阵
 
+## v2.24.0 正式发布准备（2026-10-22）
+
+- 本次按用户要求发布当前 `dev` 全部已开发内容，包括 `v2.23.0` 日志采集、Xray 故障事件、设备准入取消修复及首次状态与授权合并；保留已合入的独立 REALITY shortId 中转实验命令，不将其视为正式节点中转集成。配套面板 `1.104.5`、管理端 `0.75.1`，两个核心与固定模块依赖不变。
+- 复用下方仍适用的本地专项、竞态、双架构构建与协议恢复结果。正式标签流程负责最终 Linux 完整竞态回归、Mihomo 互通、原生防火墙和双架构发布；本地已有成功结果不重复运行。现有工作流未实现自动去重，本次先仅推送正式标签，避免分支与标签对同一来源重复回归；发布后补充文档的分支流程不再重复等待。
+- 正式来源、产物校验值、镜像摘要和最终流程结果在发布完成后补充；发布完成前不提供服务器更新命令。没有授权或执行生产服务器操作。
+
+## v2.24.0 首次状态与授权合并补充（2026-10-22，本地未发布）
+
+- 在下方取消修复基础上继续修改，配套面板开发版 `1.104.4` / `080f93474a532f64631c188f65292cc7f07f010b` 加未提交协议修改。Node 固定基线仍为 `dev` / `e42f2daad99b7cd640ef0a5808fd85ea7eea492f`，保留所有原有未提交内容；两个核心、`go.mod` 和 `go.sum` 未修改。
+- 支持握手声明的单次完整状态与授权请求，各来源不等待周期同步锁；32 个账号并行、32 个同来源有效等待者与单个取消隔离通过。校验状态确认，迟到或无确认结果不放行；撤销后等待真实关闭，重试重新采样，跨账号关闭标记保留到周期同步。会话丢失关闭旧授权并清除续期基线，面板回滚后必须实际重新同步再走旧接口。
+- Windows amd64 / Go `1.27.0` 设备协调与面板客户端整包、CGO 竞态检查及 `go vet` 通过，回滚并发覆盖的新增边界用例另作竞态检查通过。完整功能标签下 Xray、sing-box、普通 WireGuard、服务及控制面设备/授权/快照/重载专项通过；配置和用户应用失败后的 HTTP 恢复专项通过。未运行无关全库检查或实际 Clash、生产服务器链路。
+- Linux amd64 与 arm64 本地构建通过，`CGO_ENABLED=0`、`-trimpath=true`、`vcs.revision=e42f2daad99b7cd640ef0a5808fd85ea7eea492f`、`vcs.modified=true`。实际模块解析仍为 `YZ-sing-box v1.15.0` 与 `YZ-Xray-core v0.0.0-20261018151951-fb2f909b7987`，无本地核心路径；产物在 `D:/codex-tmp/yz-device-admission-sync-20261022/`。amd64 SHA-256 为 `4ea178d83a2c252cb6e4bea418882f6b5b8f2dd994be4b6c9066ffeed5e31fdf`；arm64 为 `0cb15c6113d3fe347e4a57fed35f90e425bc2419248a2579526a3517ed3015ce`。
+- amd64 在本机 WSL 实际执行版本查询，输出 `v2.24.0` 与原固定核心模块；手工构建没有注入显示提交或时间，输出 `commit unknown` / `built unknown`，嵌入 VCS revision 已单独核对。arm64 只完成交叉构建与 ELF/模块检查，未原生运行。没有正式 Tag、Release、附件或镜像。
+
+## v2.24.0 设备准入取消修复（2026-10-21，本地未发布）
+
+- 来源为 `dev` / `e42f2daad99b7cd640ef0a5808fd85ea7eea492f` 加本地修改，保留已有日志与 Xray 故障上报开发改动；沿用现有面板接口与两个固定核心依赖，没有正式 Tag 或发布附件。
+- 同步和握手排队支持取消；同一来源共享申请不再依赖首个连接的取消状态。连接等待最多 8 秒，全部等待者退出后取消共享任务，迟到授权不恢复旧连接。有效等待者在唤醒前保留独立引用，取消与停止归还未领取授权。详细行为见[设备计数](docs/device-counting.md)。
+- Windows amd64、Go `1.27.0` 下设备协调整包、并发竞态检查及 `go vet` 通过；覆盖首个/跟随连接取消、32 个有效并发连接、同步阻塞超时、已有授权复用、全部取消后迟到响应和恢复、设备业务拒绝、重复停止与新实例恢复。面板客户端整包通过，原设备撤销、会话丢失、关闭确认和续期测试保留并通过。
+- 完整功能标签下的 Xray、sing-box、普通 WireGuard 与节点服务相关专项通过，范围为设备替换/关闭确认、准入拒绝和失败回收、快照续期；没有运行无关数据库或全库回归。Linux amd64／arm64 构建通过，`CGO_ENABLED=0`、`-trimpath=true`、`vcs.revision=e42f2daad99b7cd640ef0a5808fd85ea7eea492f`、`vcs.modified=true`，产物实际解析到原固定核心依赖。
+- 本地验证产物在 `D:/codex-tmp/yz-device-cancellation-fix-20261021/`；amd64 SHA-256 为 `45ac7f4d77d9178fbae481015fb0d1e816f31b95acbaed93f370c3a21a6716e1`，arm64 为 `868166df223d37b22060c95f024a706e443d9a86af1a18ac7218115ad38a1e96`。这些包含当前工作区未提交开发内容，不能只检出上述提交复现，不是正式更新附件。
+- amd64 产物在本机 WSL 实际运行版本命令，输出 `v2.24.0` 与上述来源提交；arm64 只核对构建和 ELF 架构，没有原生运行。手工验证构建没有写入构建时间，显示 `built unknown`，不作为正式发布标识。
+- 面板或访问链路慢响应仍可能使首次连接失败；本次未修改面板或服务器，不能把 Node 取消修复视为线上超时已全部解决。正式源码需提交、发布后才能进入服务器更新。
+
+## v2.24.0 Xray 核心故障事件（2026-10-21，本地未发布）
+
+- 配套面板 `1.104.0`、管理端 `0.75.0`，基于 `dev` / `337cae26fb4bd41f5331e0a44e39947c5dbdb588` 加本地修改，包含已有日志采集改动。没有正式标签或发布附件，两个核心及固定依赖不变。
+- Xray 生命周期失败及已应用实例意外停止上报明确事件；同一未恢复故障只登记一次，成功应用后重新允许。核心状态核对实际实例；删除最后一个用户导致的正常停止不告警，sing-box 不生成 Xray 事件。事件复用固定日志批次落盘与重试，旧面板未声明事件能力时省略标记且不改写本地批次。整个进程被强制终止不能保证上报，范围见[Telegram Bot](../YZboard/docs/telegram-bot.md)。
+- `internal/agentlog`、`internal/panel`、`internal/service`、`internal/kernel/xray` 包测试通过，覆盖故障、重复调用、配置修正、正常停止、实际实例状态、旧面板降级与批次恢复。增加最后用户停止排除后，相关 `TestXrayCrash` 和普通节点／落地节点停止专项通过。
+- `internal/controlplane`、`internal/machine`、`cmd/yz-agent` 包测试通过。扩大检查执行 `go test -mod=readonly ./internal/controlplane ./internal/machine ./cmd/yz-agent ./internal/kernel/singbox -count=1 -timeout=120s` 时，sing-box Windows 整包在连接清理路径超时；本次未修改 sing-box，未将该结果描述为通过，也未扩大排查。
+- Linux amd64／arm64 正式功能标签构建通过，Go `1.27.0`、`CGO_ENABLED=0`、`-trimpath=true`、`vcs.revision=337cae26fb4bd41f5331e0a44e39947c5dbdb588`、`vcs.modified=true`；amd64 在本机 WSL 实际输出 `v2.24.0`。解析到 `YZ-sing-box@v1.15.0` 和 `YZ-Xray-core@v0.0.0-20261018151951-fb2f909b7987`，没有本地核心替换。
+- 本地验证产物位于 `D:/codex-tmp/yz-xray-crash-20261021/`，amd64 SHA-256 为 `6f574e49c8f7100af169cddc84ff12a8ea94223d0b1ce7adf73c2cb1b3a6ef8b`，arm64 为 `bf5be0582c3c6eeae52857430bf54dba65cd465fcce386d1ba123e274574fe53`。这些不是正式安装包；没有真实服务器或 Telegram 联调。
+- sing-box 共享日志专项 `go test -mod=readonly ./internal/kernel/singbox -run 'TestRuntimeLog' -count=1 -timeout=60s` 通过，不代替上述整包超时结果。失败测试遗留目录核对没有文件，递归删除仍被自动审批以 `blocked by policy` 拒绝，空目录保留在本次临时目录中。
+
 ## v2.24.0 REALITY shortId 中转实验（未发布）
 
 - 初始实验分支 `feat/reality-shortid-relay`，基线 `c7d1fed7582578fad82851449c9a77e4d42daaf1`；独立工作树 `D:/codex-workspaces/yz-agent-reality-relay`。原型以 `v2.23.0` 完成以下历史验证；修复后纳入 `v2.24.0` 开发主线，沿用主线已有日志及故障上报改动，不修改面板、管理前端或两个核心及其固定依赖。
@@ -13,6 +47,13 @@
 - 历史原型程序保留基线 VCS revision `c7d1fed7582578fad82851449c9a77e4d42daaf1`，`vcs.modified=true`；当时新增功能尚未提交，不能只 checkout 基线提交来复现。原型源码校验清单、构建元数据与无敏感信息的核验记录位于 `D:/codex-tmp/yz-reality-relay-20261020/`。amd64 SHA-256 为 `05467edeac7b0f7d67a596209ba5f39e457681c4defff44b557a38cdce45be48`；arm64 为 `960c6805a93d02beace5f98c2938e0f2a506c2f08394b668a4f16f3d997e2ef0`。
 - 本次不创建正式 Tag、Release 或镜像。经用户授权，真实三机性能对照已完成，见 [实测报告](docs/reality-relay-performance-20261021.md)：最终五组各交错三次，新 splice 没有稳定速度领先，前置 CPU 少于 buffered 和旧链式方案，Realm 的前置 CPU、内存及短连接耗时更低。三台服务器的测试进程、临时配置、身份和隔离目录已删除，两条另行授权的限定来源临时防火墙规则已撤销。仅本地保留程序、源码清单及脱敏测量记录；不因本次性能结果正式集成。
 - [Elise SS2022 落地补测](docs/elise-ss2022-performance-20261021.md) 已完成：保持同一 Go 前置和客户端，将 HTTPS 目标拆为独立进程，两种落地各交错三次。相同 2GiB 大载荷下，Elise 落地 CPU 中位数 9.52 秒，sing-box 6.17 秒；峰值常驻内存 8.3/40.4MiB。36 项、1596 个请求全部成功，三机测试资源及临时规则已清理；不将此结果解释为 Rust 前置或完整 Rust 链路收益。
+
+## v2.23.0 日志管理（2026-10-21，本地未发布）
+
+- 配套面板 `1.103.0`、管理端 `0.74.0`。新面板提供日志采集握手与认证接收接口，旧面板不启用新上报，独立运行不采集。
+- 基于 `337cae26fb4bd41f5331e0a44e39947c5dbdb588` 开发，含未提交修改，无正式标签或安装包。sing-box 与 Xray 固定依赖保持原值，无核心源码修改。
+- 运行日志缓存、限制批次恢复、带宽采样与多身份 Xray 限制见[日志管理](docs/log-management.md)。正式使用先更新面板，再更新 Agent。
+- 日志队列、限速器、面板客户端、控制通道、节点服务、机器调度和启动入口相关包测试通过；两个核心的日志、带宽和连接统计相关专项通过。没有真实服务器联调。
 
 ## v2.22.1 来源过滤依赖准备正式发布（2026-10-20）
 

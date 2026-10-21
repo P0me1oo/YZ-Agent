@@ -17,11 +17,15 @@ type connLimitSpec struct {
 
 // LimitEventStat 是单个用户在一个上报周期内的超限统计。
 type LimitEventStat struct {
-	ConnHits  uint64 // 并发超限被拒次数
-	RateHits  uint64 // 新建速率超限被拒次数
-	ConnLimit int    // 触发时生效的并发上限
-	RateLimit int    // 触发时生效的速率上限
-	PeakConn  int    // 本周期触发并发拒绝时，已占用连接名额的最大值
+	SpeedHits  uint64 // 检测到带宽令牌欠额的秒数，不是连接拒绝次数
+	SpeedLimit int
+	SpeedFirst int64
+	SpeedLast  int64
+	ConnHits   uint64 // 并发超限被拒次数
+	RateHits   uint64 // 新建速率超限被拒次数
+	ConnLimit  int    // 触发时生效的并发上限
+	RateLimit  int    // 触发时生效的速率上限
+	PeakConn   int    // 本周期触发并发拒绝时，已占用连接名额的最大值
 
 	DeviceHits     uint64   // 设备数超限被拒次数
 	DeviceLimit    int      // 触发时生效的设备上限

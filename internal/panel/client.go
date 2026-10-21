@@ -42,13 +42,16 @@ type Client struct {
 	userETag   string
 	etagMu     sync.Mutex
 
-	apiSuccess            atomic.Uint64
-	accessLog             atomic.Bool
-	apiFailure            atomic.Uint64
-	realtime              realtimeClient
-	deviceHandover        atomic.Bool
-	deviceHandoverWS      atomic.Bool
-	deviceHandoverRenewal atomic.Bool
+	apiSuccess              atomic.Uint64
+	accessLog               atomic.Bool
+	agentLog                atomic.Bool
+	agentLogEvents          atomic.Bool
+	apiFailure              atomic.Uint64
+	realtime                realtimeClient
+	deviceHandover          atomic.Bool
+	deviceHandoverWS        atomic.Bool
+	deviceHandoverRenewal   atomic.Bool
+	deviceHandoverAdmitSync atomic.Bool
 }
 
 // NewClient creates a new panel API client.
@@ -109,21 +112,23 @@ func (c *Client) RestoreETags(configETag, userETag string) {
 
 // Handshake calls the new v2 API to get WS config + initial data in one shot.
 func (c *Client) Handshake() (*HandshakeResponse, error) {
+	return c.HandshakeContext(context.Background())
+}
+func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, error) {
 	payload := map[string]interface{}{"device_handover": 1}
 	c.injectAuth(payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.doRequest("POST", "/api/v2/server/handshake", body, "")
+	resp, err := c.doRequestContext(ctx, "POST", "/api/v2/server/handshake", body, "")
 	if err != nil {
 		return nil, fmt.Errorf("handshake: %w", err)
 	}
 	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("handshake status %d: %s", resp.StatusCode, body)
+		return nil, fmt.Errorf("handshake status %d", resp.StatusCode)
 	}
 
 	var hs HandshakeResponse
@@ -132,9 +137,12 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 	}
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
 	c.accessLog.Store(hs.AccessLog.Version == 2)
+	c.agentLog.Store(hs.AgentLog.Version == 1)
+	c.agentLogEvents.Store(hs.AgentLog.Version == 1 && containsXrayCrash(hs.AgentLog.Events))
 	c.deviceHandover.Store(hs.Realtime.DeviceHandover == 1)
 	c.deviceHandoverWS.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverWS == 1)
 	c.deviceHandoverRenewal.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverRenewal == 1)
+	c.deviceHandoverAdmitSync.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverAdmitSync == 1)
 	return &hs, nil
 }
 
@@ -577,7 +585,9 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 		req.Header.Set("If-None-Match", ifNoneMatch)
 	}
 
-	nlog.Core().Debug("panel request", "method", method, "path", path)
+	if !strings.Contains(path, "agent-log") {
+		nlog.Core().Debug("panel request", "method", method, "path", path)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -591,7 +601,9 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 		c.apiFailure.Add(1)
 	}
 
-	nlog.Core().Debug("panel response", "method", method, "path", path, "status", resp.StatusCode)
+	if !strings.Contains(path, "agent-log") {
+		nlog.Core().Debug("panel response", "method", method, "path", path, "status", resp.StatusCode)
+	}
 	return resp, nil
 }
 

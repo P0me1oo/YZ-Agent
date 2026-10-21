@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/monitor"
-	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
 
@@ -31,7 +30,7 @@ func (o *Orchestrator) publishRuntimeState(ctx context.Context) {
 		reportCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		defer cancel()
 		if err := o.client.PublishState(reportCtx, panel.StatePayload{Status: load}); err != nil && ctx.Err() == nil {
-			nlog.Core().Warn("machine realtime state report failed", "error", err)
+			o.logger().Warn("machine realtime state report failed", "error", err)
 		}
 	}()
 }

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/machinetraffic"
-	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
 
 func (o *Orchestrator) initTraffic(ctx context.Context, p *machinetraffic.Policy) error {
@@ -51,7 +50,7 @@ func (o *Orchestrator) setTrafficBlocked(blocked bool) {
 	}
 	o.mu.Unlock()
 	if changed {
-		nlog.Core().Info("machine traffic protection changed", "blocked", blocked)
+		o.logger().Info("machine traffic protection changed", "blocked", blocked)
 		if !blocked && o.runCtx != nil {
 			go o.rediscover(o.runCtx)
 		}

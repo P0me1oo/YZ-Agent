@@ -19,7 +19,6 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/machinetraffic"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/monitor"
-	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/P0me1oo/YZ-Agent/internal/realityscan"
 	"github.com/P0me1oo/YZ-Agent/internal/service"
@@ -138,7 +137,7 @@ func (o *Orchestrator) addressLoop(ctx context.Context) {
 			}
 			if err != nil && ctx.Err() == nil {
 				// 服务器没有某一种地址族的公网出口时，这一路每次都会失败，只在调试日志里记录。
-				nlog.Core().Debug("machine address report failed", "network", network, "error", err)
+				o.logger().Debug("machine address report failed", "network", network, "error", err)
 			}
 		}
 		timer.Reset(next)
@@ -164,7 +163,7 @@ func (o *Orchestrator) controlLoop(ctx context.Context) {
 		}
 		if err == nil && command != nil {
 			if err := agentcli.StartRemote(key, *command); err != nil {
-				nlog.Core().Warn("machine operation could not start")
+				o.logger().Warn("machine operation could not start")
 			}
 		}
 		if err == nil {
@@ -252,7 +251,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	}
 
 	if err := o.initTraffic(ctx, nodesResp.Traffic); err != nil {
-		nlog.Core().Error("machine traffic initialization failed; proxies remain protected", "error", err)
+		o.logger().Error("machine traffic initialization failed; proxies remain protected", "error", err)
 	}
 	if o.trafficMeter != nil {
 		// 首次有效采样可能已经解除面板的等待计量状态，重新取得管理员启用的节点。
@@ -262,7 +261,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		go o.trafficLoop(ctx)
 	}
 	o.applyIntervals(nodesResp.BaseConfig)
-	nlog.Core().Info(fmt.Sprintf("machine %d: discovered %d nodes",
+	o.logger().Info(fmt.Sprintf("machine %d: discovered %d nodes",
 		o.cfg.Machine.MachineID, len(nodesResp.Nodes)))
 
 	wanted := make(map[int]panel.MachineNode, len(nodesResp.Nodes))
@@ -370,7 +369,7 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 			}
 		}
 		if resolved := model.ResolveKernelForTransport(cfgSnapshot.Network, nodeCfg.Kernel.Type); resolved != nodeCfg.Kernel.Type {
-			nlog.Core().Info(fmt.Sprintf("machine: auto-switching kernel for node %d (%s→%s, transport=%s)",
+			o.logger().Info(fmt.Sprintf("machine: auto-switching kernel for node %d (%s→%s, transport=%s)",
 				mn.ID, nodeCfg.Kernel.Type, resolved, cfgSnapshot.Network))
 			nodeCfg.Kernel.Type = resolved
 		}
@@ -400,14 +399,14 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 		o.setNodeStatus(mn.ID, status)
 	})
 
-	nlog.Core().Info(fmt.Sprintf("machine: starting node %d (%s/%s)",
+	o.logger().Info(fmt.Sprintf("machine: starting node %d (%s/%s)",
 		mn.ID, mn.Type, mn.Name))
 
 	go func() {
 		defer close(done)
 		err := svc.Run(nodeCtx)
 		if err != nil {
-			nlog.Core().Error("machine node exited with error",
+			o.logger().Error("machine node exited with error",
 				"node_id", mn.ID, "error", err)
 		}
 		o.unregisterNode(mn.ID)
@@ -453,7 +452,7 @@ func (o *Orchestrator) stopNode(nodeID int) {
 	delete(o.mailboxes, nodeID)
 	o.eventsMu.Unlock()
 
-	nlog.Core().Info(fmt.Sprintf("machine: stopping node %d", nodeID))
+	o.logger().Info(fmt.Sprintf("machine: stopping node %d", nodeID))
 	h.cancel()
 	<-h.done
 	o.mu.Lock()
@@ -473,7 +472,7 @@ func (o *Orchestrator) stopAll() {
 	o.mu.Unlock()
 
 	for id, h := range handles {
-		nlog.Core().Info(fmt.Sprintf("machine: stopping node %d", id))
+		o.logger().Info(fmt.Sprintf("machine: stopping node %d", id))
 		h.cancel()
 	}
 	for _, h := range handles {
@@ -509,7 +508,7 @@ func (o *Orchestrator) rediscoverOnce(ctx context.Context) {
 	}
 	nodesResp, err := o.client.GetMachineNodes()
 	if err != nil {
-		nlog.Core().Warn("machine node discovery failed", "error", err)
+		o.logger().Warn("machine node discovery failed", "error", err)
 		return
 	}
 	if ctx.Err() != nil || o.rediscoverPending.Load() {
@@ -556,7 +555,7 @@ func (o *Orchestrator) reportMachineStatus() {
 		[2]uint64{s.DiskTotal, s.DiskUsed},
 		s.NetInSpeed, s.NetOutSpeed,
 	); err != nil {
-		nlog.Core().Warn("machine status report failed", "error", err)
+		o.logger().Warn("machine status report failed", "error", err)
 	}
 }
 
@@ -569,7 +568,7 @@ func (o *Orchestrator) tryStartWS(ctx context.Context) {
 	defer o.wsDiscovering.Store(false)
 	hs, err := o.client.Handshake()
 	if err != nil {
-		nlog.Core().Warn("machine ws discovery failed", "error", err)
+		o.logger().Warn("machine ws discovery failed", "error", err)
 		return
 	}
 	if ctx.Err() != nil {
@@ -632,14 +631,14 @@ func (o *Orchestrator) currentWebSocket() *panel.WSClient {
 func (o *Orchestrator) onWSEvent(event panel.WSEvent) {
 	// sync.nodes is a machine-level event, not per-node
 	if event.Type == panel.WSEventSyncNodes {
-		nlog.Core().Info("machine received sync.nodes, triggering immediate rediscovery")
+		o.logger().Info("machine received sync.nodes, triggering immediate rediscovery")
 		go o.rediscover(o.runCtx)
 		return
 	}
 
 	nodeID := event.NodeID
 	if nodeID == 0 {
-		nlog.Core().Debug("machine ws event missing node_id, dropping", "type", event.Type)
+		o.logger().Debug("machine ws event missing node_id, dropping", "type", event.Type)
 		return
 	}
 
@@ -650,7 +649,7 @@ func (o *Orchestrator) onWSEvent(event panel.WSEvent) {
 	mailbox, ok := o.mailboxes[nodeID]
 	o.eventsMu.RUnlock()
 	if !ok {
-		nlog.Core().Debug("machine ws event for unknown node", "node_id", nodeID, "type", event.Type)
+		o.logger().Debug("machine ws event for unknown node", "node_id", nodeID, "type", event.Type)
 		return
 	}
 	mailbox.Apply(translated)

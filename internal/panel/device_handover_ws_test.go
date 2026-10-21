@@ -91,12 +91,14 @@ func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *tes
 							result = devicegate.SyncReply{Run: run, Sequence: uint64(payload["sequence"].(float64))}
 						case "device.admit":
 							mu.Lock()
-							admitted = map[string]interface{}{"run": payload["run"], "sequence": payload["sequence"], "user_id": payload["user_id"], "ip": payload["ip"]}
+							admitted = map[string]interface{}{"run": payload["run"], "sequence": payload["sequence"], "user_id": payload["user_id"], "ip": payload["ip"], "snapshot": payload["snapshot"]}
 							mu.Unlock()
 							if lostAck {
 								return
 							}
-							result = devicegate.AdmissionReply{Status: "allowed", Lease: lease}
+							snapshot := payload["snapshot"].(map[string]interface{})
+							result = devicegate.AdmissionReply{Status: "allowed", Lease: lease,
+								Sync: &devicegate.SyncReply{Run: run, Sequence: uint64(snapshot["sequence"].(float64))}}
 						default:
 							t.Errorf("意外事件：%s", msg.Event)
 							return
@@ -124,7 +126,8 @@ func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *tes
 					t.Error("通道切换改变了原申请，可能重复授予来源")
 				}
 				mu.Unlock()
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": devicegate.AdmissionReply{Status: "allowed", Lease: lease}})
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": devicegate.AdmissionReply{Status: "allowed", Lease: lease,
+					Sync: &devicegate.SyncReply{Run: run, Sequence: 4}}})
 			}))
 			t.Cleanup(server.Close)
 			ws := deviceTestSocket(t, server.URL)
@@ -140,7 +143,8 @@ func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *tes
 			if reply, err := client.SyncDeviceSession(t.Context(), devicegate.Snapshot{Run: run, Sequence: 2, Unchanged: true, BaseSequence: 1}); err != nil || reply.Sequence != 2 {
 				t.Fatalf("续期失败：%v", err)
 			}
-			if reply, err := client.AdmitDeviceSource(t.Context(), devicegate.AdmissionRequest{Run: run, Sequence: 3, UserID: 10, IP: "8.8.8.8"}); err != nil || reply.Lease != lease {
+			if reply, err := client.AdmitDeviceSource(t.Context(), devicegate.AdmissionRequest{Run: run, Sequence: 3, UserID: 10, IP: "8.8.8.8",
+				Snapshot: &devicegate.Snapshot{Run: run, Sequence: 4, Pending: []uint64{3}, Sources: []devicegate.Source{}, Retired: []devicegate.Revocation{}}}); err != nil || reply.Lease != lease || reply.Sync == nil || reply.Sync.Sequence != 4 {
 				t.Fatalf("准入失败：%v", err)
 			}
 			wantHTTP := int32(0)

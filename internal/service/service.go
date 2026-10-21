@@ -59,6 +59,7 @@ type Service struct {
 	// 同一份失败配置只尝试一次，配置变化或重新创建 Service 后才允许再启动。
 	failedRuntimeHash string
 	runtimeError      error
+	xrayCrashReported bool
 
 	// nodeLog is the logger with node context for this service instance.
 	nodeLog *nlog.NodeLog
@@ -210,12 +211,15 @@ func (s *Service) SetStatusHandler(handler func(RuntimeStatus)) {
 }
 
 func (s *Service) notifyStatus(status RuntimeStatus) {
+	s.runtimeLog(status)
 	if s.status != nil {
 		s.status(status)
 	}
 }
 
 func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
+	cfg.Kernel.LogScope = cfg.LogScope()
+	cfg.Kernel.LogNodeID = cfg.Panel.NodeID
 	certMgr := cert.NewManager(cfg.Cert)
 
 	var k kernel.Kernel
@@ -225,7 +229,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 	case "xray":
 		k = xray.New(cfg.Kernel)
 	default:
-		nlog.Core().Warn("unsupported kernel type, defaulting to Xray", "type", cfg.Kernel.Type)
+		nlog.Scoped(cfg.LogScope(), cfg.Panel.NodeID, "agent").Warn("unsupported kernel type, defaulting to Xray", "type", cfg.Kernel.Type)
 		k = xray.New(cfg.Kernel)
 	}
 
@@ -238,6 +242,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 	st := limiter.NewSpeedTracker(l)
 
 	return &Service{
+		nodeLog:      nlog.Scoped(cfg.LogScope(), cfg.Panel.NodeID, fmt.Sprintf("node:%d", cfg.Panel.NodeID)),
 		accessLog:    accessRecorder,
 		cfg:          cfg,
 		source:       cp,
@@ -284,7 +289,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := s.deviceGate.Stop(closeCtx); err != nil {
-				nlog.Core().Warn("设备来源退出确认失败", "error", err)
+				s.logger().Warn("设备来源退出确认失败", "error", err)
 			}
 		}
 	}()
@@ -305,6 +310,8 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 		trackInterval = time.Second
 	}
 	trackTicker := time.NewTicker(trackInterval)
+	speedTicker := time.NewTicker(time.Second)
+	defer speedTicker.Stop()
 	pushInterval := time.Duration(math.Max(float64(s.pushInterval), 5)) * time.Second
 	pullInterval := time.Duration(s.pullInterval) * time.Second
 	if s.realtimeEnabled() {
@@ -339,6 +346,8 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			s.pushReportSync()
 			return nil
 
+		case at := <-speedTicker.C:
+			s.speedTracker.SampleThrottled(at)
 		case <-trackTicker.C:
 			s.refreshSourcePolicyAsync(ctx)
 			if s.trackAndEnforce(ctx) {
@@ -362,9 +371,9 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 					continue
 				}
 				lastWSReconcile = time.Now()
-				nlog.Core().Debug("periodic REST reconciliation (ws connected)")
+				s.logger().Debug("periodic REST reconciliation (ws connected)")
 			} else {
-				nlog.Core().Debug("polling from API (ws not connected)")
+				s.logger().Debug("polling from API (ws not connected)")
 			}
 			s.pullViaAPIAsync(ctx)
 
@@ -419,11 +428,11 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	if provider, ok := s.source.(interface{ DeviceHandoverClient() devicegate.Remote }); ok {
 		if consumer, supported := s.kernel.(kernel.DeviceGateConsumer); supported {
 			s.deviceGate = devicegate.New(provider.DeviceHandoverClient(), func(err error) {
-				nlog.Core().Warn("设备来源协调失败", "error", err)
+				s.logger().Warn("设备来源协调失败", "error", err)
 			})
 			consumer.SetDeviceGate(s.deviceGate)
 			if err := s.deviceGate.Start(ctx); err != nil {
-				nlog.Core().Warn("设备来源协调等待恢复", "error", err)
+				s.logger().Warn("设备来源协调等待恢复", "error", err)
 			}
 		}
 	}
@@ -469,7 +478,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	s.lastConfigHash = computeConfigHash(bootstrap.Config)
 	s.updateUserState(bootstrap.Users)
 
-	nlog.Core().Info("initial snapshot ready",
+	s.logger().Info("initial snapshot ready",
 		"protocol", bootstrap.Config.Protocol,
 		"port", bootstrap.Config.ServerPort,
 		"users", len(bootstrap.Users),
@@ -493,7 +502,7 @@ func (s *Service) applyRemoteOverrides(ctx context.Context, nc *model.NodeSpec) 
 
 	// Dynamic Log Level (Kernel)
 	if nc.KernelLogLevel != "" && nc.KernelLogLevel != s.cfg.Kernel.LogLevel {
-		nlog.Core().Info("cert: kernel log level override", "old", s.cfg.Kernel.LogLevel, "new", nc.KernelLogLevel)
+		s.logger().Info("cert: kernel log level override", "old", s.cfg.Kernel.LogLevel, "new", nc.KernelLogLevel)
 		s.cfg.Kernel.LogLevel = nc.KernelLogLevel
 	}
 
@@ -504,7 +513,7 @@ func (s *Service) applyRemoteOverrides(ctx context.Context, nc *model.NodeSpec) 
 
 	// Legacy fields (deprecated: prefer cert_config)
 	if nc.AutoTLS != s.cfg.Cert.AutoTLS {
-		nlog.Core().Info("cert: auto_tls policy changed (deprecated field)", "new", nc.AutoTLS)
+		s.logger().Info("cert: auto_tls policy changed (deprecated field)", "new", nc.AutoTLS)
 		s.cfg.Cert.AutoTLS = nc.AutoTLS
 	}
 	if nc.Domain != "" && nc.Domain != s.cfg.Cert.Domain {
@@ -525,7 +534,7 @@ func (s *Service) applyNodeCert(ctx context.Context, newCfg *config.CertConfig) 
 
 	changed, err := s.cert.Reconfigure(ctx, cfgCopy)
 	if err != nil {
-		nlog.Core().Error("failed to apply runtime cert config", "mode", cfgCopy.CertMode, "error", err)
+		s.logger().Error("failed to apply runtime cert config", "mode", cfgCopy.CertMode, "error", err)
 		return false, fmt.Errorf("runtime certificate configuration: %w", err)
 	}
 	s.cfg.Cert = cfgCopy
@@ -534,7 +543,7 @@ func (s *Service) applyNodeCert(ctx context.Context, newCfg *config.CertConfig) 
 		if s.nodeLog != nil {
 			s.nodeLog.Info(msg)
 		} else {
-			nlog.Core().Info(msg)
+			s.logger().Info(msg)
 		}
 	}
 	return changed, nil
@@ -595,7 +604,7 @@ func (s *Service) requestWSResync(ctx context.Context, reason string) {
 	if s.nodeLog != nil {
 		s.nodeLog.Warn("ws state may be stale, scheduling REST reconciliation", "reason", reason)
 	} else {
-		nlog.Core().Warn("ws state may be stale, scheduling REST reconciliation", "reason", reason)
+		s.logger().Warn("ws state may be stale, scheduling REST reconciliation", "reason", reason)
 	}
 	s.pullViaAPIAsync(ctx)
 }
@@ -624,7 +633,7 @@ func (s *Service) handleWSStatus(ctx context.Context, status controlplane.Status
 		if s.nodeLog != nil {
 			s.nodeLog.Info("ws connected")
 		} else {
-			nlog.Core().Info("ws connected")
+			s.logger().Info("ws connected")
 		}
 		// 先完成一次完整对账，再停止 HTTP 兜底。
 		s.resetPollingState()
@@ -638,7 +647,7 @@ func (s *Service) handleWSStatus(ctx context.Context, status controlplane.Status
 		if s.nodeLog != nil {
 			s.nodeLog.Info("ws disconnected")
 		} else {
-			nlog.Core().Info("ws disconnected")
+			s.logger().Info("ws disconnected")
 		}
 		// 新协议由 HTTP 继续更新全局设备快照，只有超过有效期才清除。
 		if !s.realtimeEnabled() {
@@ -684,7 +693,7 @@ func (s *Service) wsDiscovery(ctx context.Context) {
 func (s *Service) applyWSDiscovery(ctx context.Context, result discoveryResult) {
 	pushClient, err, wasRealtime := result.push, result.err, result.wasRealtime
 	if err != nil {
-		nlog.Core().Debug("push discovery failed", "error", err)
+		s.logger().Debug("push discovery failed", "error", err)
 		return
 	}
 	if wasRealtime && !s.realtimeEnabled() {
@@ -773,7 +782,7 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		s.applyDeviceSnapshot(event.Version, event.DeviceUsers)
 
 	default:
-		nlog.Core().Debug(fmt.Sprintf("unknown ws event: %v", event.Type))
+		s.logger().Debug(fmt.Sprintf("unknown ws event: %v", event.Type))
 	}
 }
 
@@ -784,11 +793,11 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 		return
 	}
 	if !s.pullActive.CompareAndSwap(false, true) {
-		nlog.Core().Debug("pull already in progress, skipping")
+		s.logger().Debug("pull already in progress, skipping")
 		return
 	}
 	if s.pullBackoff.shouldSkip() {
-		nlog.Core().Debug("skipping pull due to backoff")
+		s.logger().Debug("skipping pull due to backoff")
 		s.pullActive.Store(false)
 		return
 	}
@@ -799,7 +808,7 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 		defer s.pullActive.Store(false)
 		snapshot, err := s.source.Poll(ctx)
 		if err != nil {
-			nlog.Core().Error("poll control plane failed", "error", err)
+			s.logger().Error("poll control plane failed", "error", err)
 			s.pullBackoff.onFailure()
 			return
 		}
@@ -865,7 +874,7 @@ func (s *Service) applyPullResult(ctx context.Context, result pullResult) {
 	}
 
 	if result.certChanged {
-		nlog.Core().Info("certificate renewed, kernel restart needed")
+		s.logger().Info("certificate renewed, kernel restart needed")
 	}
 
 	if usersChanged {
@@ -1081,7 +1090,7 @@ func (s *Service) applyUserDelta(ctx context.Context, action string, deltaUsers 
 
 		added, err := s.kernel.AddUsers(deltaUsers)
 		if err != nil {
-			nlog.Core().Error("新增用户热更新失败，尝试完整用户更新", "error", err)
+			s.logger().Error("新增用户热更新失败，尝试完整用户更新", "error", err)
 			if _, _, err := s.kernel.UpdateUsers(merged); err != nil {
 				s.failRuntime("新增用户失败", s.lastConfig, merged, err)
 				return false
@@ -1105,7 +1114,7 @@ func (s *Service) applyUserDelta(ctx context.Context, action string, deltaUsers 
 
 		removed, err := s.kernel.RemoveUsers(deltaUsers)
 		if err != nil {
-			nlog.Core().Error("删除用户热更新失败，尝试完整用户更新", "error", err)
+			s.logger().Error("删除用户热更新失败，尝试完整用户更新", "error", err)
 			if _, _, err := s.kernel.UpdateUsers(filtered); err != nil {
 				s.failRuntime("删除用户失败", s.lastConfig, filtered, err)
 				return false
@@ -1116,7 +1125,7 @@ func (s *Service) applyUserDelta(ctx context.Context, action string, deltaUsers 
 		}
 
 	default:
-		nlog.Core().Warn(fmt.Sprintf("unknown user delta action: %s", action))
+		s.logger().Warn(fmt.Sprintf("unknown user delta action: %s", action))
 		return false
 	}
 	s.appliedState.Users = s.lastUsers
@@ -1264,12 +1273,13 @@ func (s *Service) trackAndEnforce(ctx context.Context) bool {
 		s.lastFirewallRetry = time.Now()
 		s.applyFirewall(ctx, s.lastConfig, s.lastUsers)
 	}
-	if s.appliedState.Config != nil && !s.kernel.IsRunning() {
+	// 删除最后一个用户时，普通节点正常停止；中转落地仍应持续运行。
+	if s.appliedState.Config != nil && (len(s.lastUsers) > 0 || s.lastConfig.IsRelayLanding()) && !s.kernel.IsRunning() {
 		s.failRuntime("内核意外停止", s.lastConfig, s.lastUsers, fmt.Errorf("内核已不在运行"))
 	}
 	connCount, userCount, err := s.collectTraffic(ctx)
 	if err != nil {
-		nlog.Core().Debug("get user traffic failed", "error", err)
+		s.logger().Debug("get user traffic failed", "error", err)
 		return false
 	}
 
@@ -1312,11 +1322,11 @@ func (s *Service) pushReportAsync() {
 		return
 	}
 	if !s.pushActive.CompareAndSwap(false, true) {
-		nlog.Core().Debug("push already in progress, skipping")
+		s.logger().Debug("push already in progress, skipping")
 		return
 	}
 	if s.pushBackoff.shouldSkip() {
-		nlog.Core().Debug("skipping report due to backoff")
+		s.logger().Debug("skipping report due to backoff")
 		s.pushActive.Store(false)
 		return
 	}
@@ -1328,7 +1338,7 @@ func (s *Service) pushReportAsync() {
 		defer s.pushWG.Done()
 		defer s.pushActive.Store(false)
 		if err := s.sendReport(batch); err != nil {
-			nlog.Core().Warn("failed to push report", "error", err)
+			s.logger().Warn("failed to push report", "error", err)
 			s.rememberFailedReport(batch)
 			s.pushBackoff.onFailure()
 			return
@@ -1366,13 +1376,13 @@ func (s *Service) pushReportSync() {
 	select {
 	case <-finished:
 	case <-ctx.Done():
-		nlog.Core().Warn("in-flight report exceeded shutdown budget; pending traffic saved")
+		s.logger().Warn("in-flight report exceeded shutdown budget; pending traffic saved")
 		return
 	}
 
 	// 不调用 trackAndEnforce，避免退出采样把已经停止的内核重新启动。
 	if _, _, err := s.collectTraffic(ctx); err != nil {
-		nlog.Core().Warn("failed to collect final traffic", "error", err)
+		s.logger().Warn("failed to collect final traffic", "error", err)
 	}
 
 	s.reportMu.Lock()
@@ -1407,10 +1417,10 @@ func (s *Service) pushFinalBatch(ctx context.Context, batch *reportBatch) bool {
 		s.rememberFailedReport(batch)
 		deadline, _ := ctx.Deadline()
 		if attempt >= len(finalReportRetryDelays) || time.Now().Add(finalReportRetryDelays[attempt]).After(deadline) {
-			nlog.Core().Warn("failed to push final report, pending traffic saved for next start", "error", err, "report_id", batch.id)
+			s.logger().Warn("failed to push final report, pending traffic saved for next start", "error", err, "report_id", batch.id)
 			return false
 		}
-		nlog.Core().Warn("failed to push final report, retrying", "error", err, "attempt", attempt+1)
+		s.logger().Warn("failed to push final report, retrying", "error", err, "attempt", attempt+1)
 		timer := time.NewTimer(finalReportRetryDelays[attempt])
 		select {
 		case <-timer.C:
@@ -1487,7 +1497,7 @@ func (s *Service) restorePendingReports() {
 	}
 	batch, pending, err := s.pendingStore.load()
 	if err != nil {
-		nlog.Core().Error("failed to restore pending traffic", "error", err)
+		s.logger().Error("failed to restore pending traffic", "error", err)
 		return
 	}
 	if batch != nil {
@@ -1499,6 +1509,7 @@ func (s *Service) restorePendingReports() {
 				Traffic:          batch.Traffic,
 				RelayTraffic:     batch.Relay,
 				RelayUserTraffic: batch.RelayUser,
+				LimitEvents:      batch.LimitEvents,
 			},
 			restored: true,
 		}
@@ -1518,7 +1529,7 @@ func (s *Service) restorePendingReports() {
 		if batch != nil {
 			users += len(batch.Traffic)
 		}
-		nlog.Core().Info("restored pending traffic from previous run", "has_batch", batch != nil, "user_entries", users)
+		s.logger().Info("restored pending traffic from previous run", "has_batch", batch != nil, "user_entries", users)
 	}
 }
 
@@ -1537,7 +1548,7 @@ func (s *Service) persistBatchLocked(batch *reportBatch) error {
 	}
 	var saved *pendingBatch
 	if batch != nil {
-		saved = &pendingBatch{ID: batch.id, pendingTraffic: pendingTraffic{
+		saved = &pendingBatch{ID: batch.id, LimitEvents: batch.payload.LimitEvents, pendingTraffic: pendingTraffic{
 			Traffic:   batch.payload.Traffic,
 			Relay:     batch.payload.RelayTraffic,
 			RelayUser: batch.payload.RelayUserTraffic,
@@ -1545,7 +1556,7 @@ func (s *Service) persistBatchLocked(batch *reportBatch) error {
 	}
 	traffic, relay, relayUser := s.tracker.PendingSnapshot()
 	if err := s.pendingStore.save(saved, pendingTraffic{Traffic: traffic, Relay: relay, RelayUser: relayUser}); err != nil {
-		nlog.Core().Warn("failed to save pending traffic", "error", err)
+		s.logger().Warn("failed to save pending traffic", "error", err)
 		return err
 	}
 	return nil
@@ -1576,6 +1587,10 @@ func (s *Service) collectLimitEvents() []panel.LimitEvent {
 	}
 	events := make([]panel.LimitEvent, 0, len(stats))
 	for userID, stat := range stats {
+		if stat.SpeedHits > 0 {
+			events = append(events, panel.LimitEvent{UserID: userID, Kind: "speed", Limit: stat.SpeedLimit,
+				Count: stat.SpeedHits, OccurredAt: stat.SpeedFirst, LastAt: stat.SpeedLast})
+		}
 		if stat.ConnHits > 0 {
 			events = append(events, panel.LimitEvent{
 				UserID:   userID,
@@ -1626,7 +1641,7 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 	}
 	relay, err := reader.GetRelayTraffic(ctx)
 	if err != nil {
-		nlog.Core().Debug("get relay traffic failed", "error", err)
+		s.logger().Debug("get relay traffic failed", "error", err)
 		return
 	}
 	s.tracker.ProcessRelay(relay)
@@ -1637,7 +1652,7 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 	}
 	relayUser, err := userReader.GetRelayUserTraffic(ctx)
 	if err != nil {
-		nlog.Core().Debug("get per-user relay traffic failed", "error", err)
+		s.logger().Debug("get per-user relay traffic failed", "error", err)
 		return
 	}
 	s.tracker.ProcessRelayUser(relayUser)
@@ -1651,7 +1666,7 @@ func (s *Service) trackRelayAlive(ctx context.Context) {
 	}
 	alive, err := reader.GetRelayUserAlive(ctx)
 	if err != nil {
-		nlog.Core().Debug("get per-node relay alive failed", "error", err)
+		s.logger().Debug("get per-node relay alive failed", "error", err)
 		return
 	}
 	s.tracker.ProcessRelayAlive(alive)
@@ -1665,7 +1680,7 @@ func (s *Service) trackConnectionCounts(ctx context.Context) {
 	}
 	users, relay, err := reader.GetConnectionSnapshot(ctx)
 	if err != nil {
-		nlog.Core().Debug("get connection snapshot failed", "error", err)
+		s.logger().Debug("get connection snapshot failed", "error", err)
 		return
 	}
 	s.tracker.ProcessConnectionCounts(users, relay)
@@ -1824,10 +1839,10 @@ func (s *Service) applyDeviceIPExclude(cfg *model.NodeSpec) {
 	}
 	invalid, changed := setter.SetDeviceIPExclude(cfg.DeviceIPExclude)
 	if len(invalid) > 0 {
-		nlog.Core().Warn("device ip exclude list has invalid entries, skipped", "entries", invalid)
+		s.logger().Warn("device ip exclude list has invalid entries, skipped", "entries", invalid)
 	}
 	if changed {
-		nlog.Core().Info("device ip exclude list updated", "entries", len(cfg.DeviceIPExclude)-len(invalid))
+		s.logger().Info("device ip exclude list updated", "entries", len(cfg.DeviceIPExclude)-len(invalid))
 	}
 }
 
@@ -1886,7 +1901,7 @@ func (s *Service) sendDeviceBatch() {
 
 	devices := s.tracker.FlushAliveIPs()
 	s.sink.ReportDevices(s.wsClient, devices)
-	nlog.Core().Debug("device snapshot sent", "users", len(devices))
+	s.logger().Debug("device snapshot sent", "users", len(devices))
 }
 
 // reportDevices periodically reports device snapshot to panel.

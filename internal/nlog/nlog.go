@@ -28,6 +28,8 @@ const (
 // Format: LEVEL [protocol:port] message
 type NodeLog struct {
 	prefix string // e.g., "shadowsocks:10005" or "trojan:10033"
+	scope  string
+	nodeID int
 }
 
 // Global logger state
@@ -183,18 +185,22 @@ func normalizeProto(p string) string {
 // ─── Logging Methods ────────────────────────────────────────────────────────
 
 func (nl *NodeLog) Debug(msg string, args ...any) {
+	nl.emit(slog.LevelDebug, msg, args)
 	logWithColor(slog.LevelDebug, nl.prefix, msg, args...)
 }
 
 func (nl *NodeLog) Info(msg string, args ...any) {
+	nl.emit(slog.LevelInfo, msg, args)
 	logWithColor(slog.LevelInfo, nl.prefix, msg, args...)
 }
 
 func (nl *NodeLog) Warn(msg string, args ...any) {
+	nl.emit(slog.LevelWarn, msg, args)
 	logWithColor(slog.LevelWarn, nl.prefix, msg, args...)
 }
 
 func (nl *NodeLog) Error(msg string, args ...any) {
+	nl.emit(slog.LevelError, msg, args)
 	logWithColor(slog.LevelError, nl.prefix, msg, args...)
 }
 
