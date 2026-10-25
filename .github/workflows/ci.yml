@@ -7,6 +7,10 @@ on:
         description: "可选：要发布的固定正式 Git Tag，例如 v1.13.1；留空仅验证所选 ref"
         required: false
         type: string
+      reuse_run_id:
+        description: "可选：同一固定源码已有成功检查的工作流编号；只复用明确成功的检查"
+        required: false
+        type: string
   push:
     branches: [main, master, dev]
     tags: ["v*"]
@@ -15,6 +19,10 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   test:
@@ -50,16 +58,45 @@ jobs:
           fi
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
 
+      - name: Verify reusable full test result
+        id: reuse
+        uses: actions/github-script@v7
+        env:
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        with:
+          script: |
+            core.setOutput('full_tests', 'false');
+            const id = process.env.REUSE_RUN_ID;
+            if (!id) return;
+            if (!/^[1-9][0-9]*$/.test(id)) throw new Error('Invalid reuse run ID');
+            const args = {...context.repo, run_id: Number(id)};
+            const {data: run} = await github.rest.actions.getWorkflowRun(args);
+            if (run.head_sha !== process.env.SOURCE_SHA || run.path !== '.github/workflows/ci.yml' || run.status !== 'completed') {
+              throw new Error('Previous run does not match the fixed source or workflow');
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {...args, filter: 'latest', per_page: 100});
+            const test = jobs.find(job => job.name === 'Test');
+            const passed = name => test?.steps?.some(step => step.name === name && step.conclusion === 'success');
+            if (passed('Verify fixed release source') && passed('Run tests')) {
+              core.setOutput('full_tests', 'true');
+              core.info(`Reusing successful full tests from run ${id} for ${run.head_sha}`);
+            }
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.27.1'
           cache: true
 
-      - name: Run tests
+      - name: Prepare kernel modules
         run: |
           sudo modprobe tun
           sudo modprobe tcp_bbr
+
+      - name: Run tests
+        if: steps.reuse.outputs.full_tests != 'true'
+        run: |
           make test TEST_EXEC="sudo -E"
 
       - name: Verify Mihomo WG client
@@ -70,7 +107,7 @@ jobs:
           echo "d5e74bbddbdfff49a1aef7775bf5911da59f0d7196ed509a0ac914b3653dd5f1  $RUNNER_TEMP/mihomo.gz" | sha256sum -c -
           gzip -dc "$RUNNER_TEMP/mihomo.gz" > "$RUNNER_TEMP/mihomo"
           chmod 700 "$RUNNER_TEMP/mihomo"
-          WG_MIHOMO_BIN="$RUNNER_TEMP/mihomo" go test -mod=readonly -v -race -count=1 -timeout 2m -exec "sudo -E" -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration" -run '^TestWireGuardRealityClients$' ./internal/kernel/singbox
+          go test -mod=readonly -v -race -count=1 -timeout 2m -exec "sudo env WG_MIHOMO_BIN=$RUNNER_TEMP/mihomo" -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration" -run '^TestWireGuardRealityClients$' ./internal/kernel/singbox
           WG_MIHOMO_BIN="$RUNNER_TEMP/mihomo" go test -mod=readonly -v -race -count=1 -timeout 3m -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration" -run '^TestDirectWireGuardMihomo$' ./internal/directwg
 
       - name: Validate installer syntax
@@ -91,15 +128,44 @@ jobs:
         with:
           ref: ${{ inputs.release_tag || github.ref }}
           persist-credentials: false
+      - name: Read fixed firewall source
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify reusable native firewall result
+        id: reuse
+        uses: actions/github-script@v7
+        env:
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          EXPECTED_JOB: Native firewall (${{ matrix.backend }}, ${{ matrix.redirect }})
+        with:
+          script: |
+            core.setOutput('firewall', 'false');
+            const id = process.env.REUSE_RUN_ID;
+            if (!id) return;
+            if (!/^[1-9][0-9]*$/.test(id)) throw new Error('Invalid reuse run ID');
+            const args = {...context.repo, run_id: Number(id)};
+            const {data: run} = await github.rest.actions.getWorkflowRun(args);
+            if (run.head_sha !== process.env.SOURCE_SHA || run.path !== '.github/workflows/ci.yml' || run.status !== 'completed') {
+              throw new Error('Previous run does not match the fixed source or workflow');
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {...args, filter: 'latest', per_page: 100});
+            if (jobs.some(job => job.name === process.env.EXPECTED_JOB && job.conclusion === 'success')) {
+              core.setOutput('firewall', 'true');
+              core.info(`Reusing ${process.env.EXPECTED_JOB} from run ${id} for ${run.head_sha}`);
+            }
       - uses: actions/setup-go@v5
+        if: steps.reuse.outputs.firewall != 'true'
         with:
           go-version: '1.27.1'
           cache: true
       - name: Build isolated firewall tests
+        if: steps.reuse.outputs.firewall != 'true'
         run: |
           CGO_ENABLED=0 go test -mod=readonly -c -o "$RUNNER_TEMP/firewall-linux.test" ./internal/firewall
           CGO_ENABLED=0 go test -mod=readonly -c -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api" -o "$RUNNER_TEMP/service-linux.test" ./internal/service
       - name: Prepare disposable rootfs
+        if: steps.reuse.outputs.firewall != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -130,6 +196,7 @@ jobs:
             fi
           done
       - name: Verify native rule lifecycle and source traffic
+        if: steps.reuse.outputs.firewall != 'true'
         env:
           FIREWALL_BACKEND: ${{ matrix.backend }}
           REDIRECT_BACKEND: ${{ matrix.redirect }}
