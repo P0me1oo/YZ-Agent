@@ -1,6 +1,7 @@
 package model
 
 import (
+	"github.com/P0me1oo/YZ-Agent/internal/balancer"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -127,6 +128,8 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 	}
 
 	return &NodeSpec{
+		Balancer:            balancer.CloneConfig(nc.Balancer),
+		BalancerReceiver:    balancer.CloneReceiver(nc.BalancerReceiver),
 		Protocol:            nc.Protocol,
 		ListenIP:            nc.ListenIP,
 		ServerPort:          nc.ServerPort,
@@ -318,6 +321,8 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 	}
 
 	return &panel.NodeConfig{
+		Balancer:            balancer.CloneConfig(n.Balancer),
+		BalancerReceiver:    balancer.CloneReceiver(n.BalancerReceiver),
 		Protocol:            n.Protocol,
 		ListenIP:            n.ListenIP,
 		ServerPort:          n.ServerPort,

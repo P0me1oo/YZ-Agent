@@ -216,9 +216,16 @@ func buildRelayVLESSClientStream(v *model.RelayVLESSConfig) M {
 }
 
 func relayWireGuardSettings(w *model.RelayWireGuardConfig) M {
+	peers := []M{{"publicKey": w.PeerPublicKey, "allowedIPs": w.AllowedIPs, "keepAlive": w.Keepalive}}
+	if len(w.Peers) > 0 {
+		peers = nil
+		for _, peer := range w.Peers {
+			peers = append(peers, M{"publicKey": peer.PublicKey, "allowedIPs": peer.AllowedIPs, "keepAlive": w.Keepalive})
+		}
+	}
 	return M{
 		"secretKey": w.PrivateKey, "address": w.Address, "mtu": w.MTU, "noKernelTun": true,
-		"peers": []M{{"publicKey": w.PeerPublicKey, "allowedIPs": w.AllowedIPs, "keepAlive": w.Keepalive}},
+		"peers": peers,
 	}
 }
 

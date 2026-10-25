@@ -448,6 +448,36 @@ func validateRelayWireGuard(w *RelayWireGuardConfig) error {
 	if w == nil {
 		return fmt.Errorf("wireguard settings are required")
 	}
+	if len(w.Peers) > 0 {
+		if len(w.Peers) > 64 {
+			return fmt.Errorf("too many wireguard peers")
+		}
+		keys := make(map[string]bool)
+		var networks []netip.Prefix
+		for _, peer := range w.Peers {
+			if keys[peer.PublicKey] {
+				return fmt.Errorf("duplicate wireguard peer")
+			}
+			keys[peer.PublicKey] = true
+			candidate := *w
+			candidate.Peers = nil
+			candidate.PeerPublicKey = peer.PublicKey
+			candidate.AllowedIPs = peer.AllowedIPs
+			if err := validateRelayWireGuard(&candidate); err != nil {
+				return err
+			}
+			for _, value := range peer.AllowedIPs {
+				network, _ := netip.ParsePrefix(value)
+				for _, existing := range networks {
+					if network.Overlaps(existing) {
+						return fmt.Errorf("overlapping wireguard peers")
+					}
+				}
+				networks = append(networks, network)
+			}
+		}
+		return nil
+	}
 	private, err := base64.StdEncoding.DecodeString(w.PrivateKey)
 	if err != nil || len(private) != 32 {
 		return fmt.Errorf("invalid wireguard private key")

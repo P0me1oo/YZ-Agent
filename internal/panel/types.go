@@ -3,6 +3,7 @@ package panel
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/balancer"
 	"github.com/P0me1oo/YZ-Agent/internal/limitreport"
 	"strings"
 
@@ -108,7 +109,9 @@ type MachineBaseConfig struct {
 
 // NodeConfig is the response from GET /api/v1/server/UniProxy/config
 type NodeConfig struct {
-	WireGuard *WireGuardConfig `json:"wireguard,omitempty"`
+	Balancer         *balancer.Config         `json:"balancer,omitempty"`
+	BalancerReceiver *balancer.ReceiverConfig `json:"balancer_receiver,omitempty"`
+	WireGuard        *WireGuardConfig         `json:"wireguard,omitempty"`
 	// NodeID is populated in machine-mode WS events for routing.
 	NodeID          int                    `json:"node_id,omitempty"`
 	Protocol        string                 `json:"protocol"`
@@ -233,12 +236,18 @@ type RelayChild struct {
 
 // RelayWireGuardConfig 仅包含本端私钥、对端公钥和用户态隧道参数。
 type RelayWireGuardConfig struct {
+	Peers []RelayWireGuardPeer `json:"peers,omitempty"`
 	PrivateKey    string   `json:"private_key"`
 	PeerPublicKey string   `json:"peer_public_key"`
 	Address       []string `json:"address"`
 	AllowedIPs    []string `json:"allowed_ips"`
 	MTU           int      `json:"mtu"`
 	Keepalive     int      `json:"keepalive"`
+}
+
+type RelayWireGuardPeer struct {
+	PublicKey string `json:"public_key"`
+	AllowedIPs []string `json:"allowed_ips"`
 }
 
 // RelayVLESSConfig 保存内部链路身份，以及入口连接落地所需的客户端传输参数。

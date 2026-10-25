@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -90,6 +91,7 @@ type Xray struct {
 	deviceFilter       *deviceip.Filter
 	proxyTrust         *internet.ProxyProtocolTrust
 	proxyProtocol      *bool
+	proxyPrefixes      []netip.Prefix
 	ownsDeviceFilter   bool
 	globalDevices      map[int][]string
 	globalDeviceUpdate time.Time
@@ -188,14 +190,17 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	ctx = systemWGContext(ctx, wgRuntime)
 	x.mu.Lock()
 	previousProxyProtocol := x.proxyProtocol
+	previousProxyPrefixes := x.proxyPrefixes
 	x.proxyProtocol = nodeConfig.ProxyProtocolSetting()
-	x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol))
+	x.proxyPrefixes = kernel.ProxyProtocolPrefixesForNode(nodeConfig)
+	x.proxyTrust.Set(x.proxyPrefixes)
 	x.mu.Unlock()
 	defer func() {
 		if !started {
 			x.mu.Lock()
 			x.proxyProtocol = previousProxyProtocol
-			x.proxyTrust.Set(kernel.ProxyProtocolPrefixes(x.proxyProtocol))
+			x.proxyPrefixes = previousProxyPrefixes
+			x.proxyTrust.Set(x.proxyPrefixes)
 			x.mu.Unlock()
 		}
 	}()

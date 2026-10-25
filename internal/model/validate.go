@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -11,6 +12,20 @@ import (
 func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if n == nil {
 		return nil
+	}
+	if n.Protocol == "balancer" && (n.Balancer == nil || n.Balancer.Network != "tcp") {
+		return fmt.Errorf("调度入口只支持 TCP 前置池")
+	}
+	if n.BalancerReceiver != nil {
+		network := strings.ToLower(strings.TrimSpace(n.Network))
+		if n.Protocol != "vless" || n.TLS != 2 || (network != "" && network != "tcp" && network != "raw") || len(n.BalancerReceiver.TrustedAddresses) == 0 {
+			return fmt.Errorf("池成员必须使用 Reality 并指定可信调度入口")
+		}
+		for _, value := range n.BalancerReceiver.TrustedAddresses {
+			if address, err := netip.ParseAddr(value); err != nil || address.IsUnspecified() {
+				return fmt.Errorf("可信调度入口必须是具体 IP 地址")
+			}
+		}
 	}
 	if n.AcceptProxyProtocol != nil && *n.AcceptProxyProtocol && !n.SupportsProxyProtocol() {
 		return fmt.Errorf("当前协议或传输不支持接收 TCP PROXY 协议")

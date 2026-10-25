@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	blog "github.com/sagernet/sing-box/log"
+	"net/netip"
 	"reflect"
 	"sync"
 	"time"
@@ -70,6 +71,7 @@ type SingBox struct {
 	deviceFilter     *deviceip.Filter
 	ownsDeviceFilter bool
 	proxyTrust       *listener.ProxyProtocolTrust
+	proxyPrefixes    []netip.Prefix
 	proxyProtocol    *bool
 }
 
@@ -153,12 +155,15 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 		return err
 	}
 	previousProxyProtocol := s.proxyProtocol
+	previousProxyPrefixes := s.proxyPrefixes
 	s.proxyProtocol = nodeConfig.ProxyProtocolSetting()
-	s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol))
+	s.proxyPrefixes = kernel.ProxyProtocolPrefixesForNode(nodeConfig)
+	s.proxyTrust.Set(s.proxyPrefixes)
 	defer func() {
 		if !started {
 			s.proxyProtocol = previousProxyProtocol
-			s.proxyTrust.Set(kernel.ProxyProtocolPrefixes(s.proxyProtocol))
+			s.proxyPrefixes = previousProxyPrefixes
+			s.proxyTrust.Set(s.proxyPrefixes)
 		}
 	}()
 	ctx = listener.ContextWithProxyProtocolTrust(ctx, s.proxyTrust)
@@ -268,7 +273,8 @@ func (s *SingBox) Reload(nodeConfig *model.NodeSpec, users []model.UserSpec, tls
 	}
 	// 原生绑定与旧式单地址绑定可能生成相同字段，但连接时的地址族约束不同。
 	if !onlyRouteRulesChanged(previous, cfgMap) || !reflect.DeepEqual(s.nodeConfig.CustomOutbounds, nodeConfig.CustomOutbounds) ||
-		!reflect.DeepEqual(s.proxyProtocol, nodeConfig.ProxyProtocolSetting()) {
+		!reflect.DeepEqual(s.proxyProtocol, nodeConfig.ProxyProtocolSetting()) ||
+		!reflect.DeepEqual(s.proxyPrefixes, kernel.ProxyProtocolPrefixesForNode(nodeConfig)) {
 		return s.startLocked(nodeConfig, users, tls)
 	}
 

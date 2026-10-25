@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 
@@ -155,7 +156,8 @@ func removeEndpoint(cfg M, tag string) {
 	}
 }
 
-// 现有面板固定分配这组地址。拒绝不匹配的独立配置，避免静默连接错误的隧道地址。
+// 单前置使用固定地址，前置池为不同对端分配独立的 10.252.0.0/16 主机地址。
+// 落地仍固定监听 10.253.0.2，不能接受任意独立配置改变这组隧道地址。
 func checkAddresses(w *model.RelayWireGuardConfig, entry bool) error {
 	if w == nil {
 		return errors.New("缺少系统 WG 参数")
@@ -167,6 +169,13 @@ func checkAddresses(w *model.RelayWireGuardConfig, entry bool) error {
 	for _, a := range w.Address {
 		if a == want {
 			return nil
+		}
+		if entry {
+			address, err := netip.ParsePrefix(a)
+			poolRange := netip.MustParsePrefix("10.252.0.0/16")
+			if err == nil && address.Bits() == 32 && poolRange.Contains(address.Addr()) && address.Addr() != poolRange.Addr() {
+				return nil
+			}
 		}
 	}
 	return errors.New("系统 WG 地址与面板分配规则不一致")

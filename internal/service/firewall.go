@@ -81,7 +81,7 @@ func (s *Service) updateFirewall(ctx context.Context, node *model.NodeSpec, user
 func (s *Service) retrySourceFirewall(ctx context.Context) {
 	if s.firewallFailureHash == "" || s.failedRuntimeHash != s.firewallFailureHash || s.kernel.IsRunning() ||
 		time.Since(s.lastFirewallRetry) < 30*time.Second || s.lastConfig == nil ||
-		(len(s.lastUsers) == 0 && !s.lastConfig.IsRelayLanding()) {
+		(len(s.lastUsers) == 0 && !s.lastConfig.IsRelayLanding() && s.lastConfig.Protocol != "balancer") {
 		return
 	}
 	s.lastFirewallRetry = time.Now()

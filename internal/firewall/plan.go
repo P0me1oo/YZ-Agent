@@ -157,6 +157,11 @@ func listenerAddresses(raw string) ([]Rule, error) {
 
 func listenerProtocols(node *model.NodeSpec, kernelType string) ([]string, error) {
 	switch node.Protocol {
+	case "balancer":
+		if node.Balancer != nil && node.Balancer.Network == "tcp" {
+			return []string{node.Balancer.Network}, nil
+		}
+		return nil, fmt.Errorf("调度入口缺少传输协议")
 	case "hysteria", "tuic", "wireguard":
 		return []string{"udp"}, nil
 	case "shadowsocks", "naive":

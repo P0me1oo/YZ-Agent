@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
+	"github.com/P0me1oo/YZ-Agent/internal/balancerkernel"
 	"github.com/P0me1oo/YZ-Agent/internal/cert"
 	"github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -234,6 +235,9 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 	}
 
 	k = directwg.Wrap(k)
+	if cfg.Panel.NodeType == "balancer" {
+		k = balancerkernel.New()
+	}
 	accessRecorder := &accesslog.Recorder{NodeID: cfg.Panel.NodeID}
 	if consumer, ok := k.(interface{ SetAccessLog(*accesslog.Recorder) }); ok {
 		consumer.SetAccessLog(accessRecorder)
@@ -1026,7 +1030,7 @@ func (s *Service) ensureRunning(ctx context.Context) bool {
 // applyUserUpdate replaces the full user set and hot-swaps the kernel.
 // Called from WS sync.users and REST polling.
 func (s *Service) applyUserUpdate(ctx context.Context, users []model.UserSpec, newHash string) bool {
-	if s.lastConfig.IsRelayLanding() {
+	if s.lastConfig.IsRelayLanding() || s.lastConfig.Protocol == "balancer" {
 		return s.syncLandingUserState(ctx)
 	}
 	// 先保存最新用户状态，再尝试启动内核。否则内核停止时
@@ -1214,7 +1218,7 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 
 	// A landing node serves only the internal transit inbound, so an empty user
 	// set is its normal state and must not shut the kernel down.
-	isLanding := s.lastConfig.IsRelayLanding()
+	isLanding := s.lastConfig.IsRelayLanding() || s.lastConfig.Protocol == "balancer"
 	if isLanding {
 		// 配置与用户同批到达、证书重载时也不能把普通用户带入落地。
 		s.prepareUserState(nil)
@@ -1274,7 +1278,7 @@ func (s *Service) trackAndEnforce(ctx context.Context) bool {
 		s.applyFirewall(ctx, s.lastConfig, s.lastUsers)
 	}
 	// 删除最后一个用户时，普通节点正常停止；中转落地仍应持续运行。
-	if s.appliedState.Config != nil && (len(s.lastUsers) > 0 || s.lastConfig.IsRelayLanding()) && !s.kernel.IsRunning() {
+	if s.appliedState.Config != nil && (len(s.lastUsers) > 0 || s.lastConfig.IsRelayLanding() || s.lastConfig.Protocol == "balancer") && !s.kernel.IsRunning() {
 		s.failRuntime("内核意外停止", s.lastConfig, s.lastUsers, fmt.Errorf("内核已不在运行"))
 	}
 	connCount, userCount, err := s.collectTraffic(ctx)

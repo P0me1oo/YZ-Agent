@@ -71,9 +71,14 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 	if err != nil {
 		return nil, err
 	}
-	public, err := decodeKey(w.PeerPublicKey)
-	if err != nil {
-		return nil, err
+	peers := w.Peers
+	if len(peers) == 0 {
+		peers = []model.RelayWireGuardPeer{{PublicKey: w.PeerPublicKey, AllowedIPs: w.AllowedIPs}}
+	}
+	for _, peer := range peers {
+		if _, err := decodeKey(peer.PublicKey); err != nil {
+			return nil, err
+		}
 	}
 	if w.MTU < 1280 || w.MTU > 1500 || port < 0 || port > 65535 || w.Keepalive < 0 || w.Keepalive > 65535 {
 		return nil, errors.New("系统 WG 的 MTU 或监听端口无效")
@@ -174,14 +179,18 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 	wg := device.NewDevice(r.dev, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
 	t := &tunnel{ns: r.ns, wg: wg, routes: allowed, listenPort: port}
 	var b strings.Builder
-	fmt.Fprintf(&b, "private_key=%s\nreplace_peers=true\npublic_key=%s\nreplace_allowed_ips=true\n", private, public)
-	for _, subnet := range allowed {
-		fmt.Fprintf(&b, "allowed_ip=%s\n", subnet)
+	fmt.Fprintf(&b, "private_key=%s\nreplace_peers=true\n", private)
+	for _, peer := range peers {
+		public, _ := decodeKey(peer.PublicKey)
+		fmt.Fprintf(&b, "public_key=%s\nreplace_allowed_ips=true\n", public)
+		for _, subnet := range peer.AllowedIPs {
+			fmt.Fprintf(&b, "allowed_ip=%s\n", subnet)
+		}
+		if endpoint != "" {
+			fmt.Fprintf(&b, "endpoint=%s\n", endpoint)
+		}
+		fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", w.Keepalive)
 	}
-	if endpoint != "" {
-		fmt.Fprintf(&b, "endpoint=%s\n", endpoint)
-	}
-	fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", w.Keepalive)
 	if err := wg.IpcSet(b.String()); err != nil {
 		t.close()
 		return nil, errors.New("配置系统 WG 设备失败")

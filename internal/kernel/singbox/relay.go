@@ -205,10 +205,16 @@ func (s *SingBox) GetRelayTraffic(context.Context) (map[int][2]int64, error) {
 // WireGuard 使用端点而非已移除的旧版出站；用户态收发不创建系统网卡。
 func buildRelayWireGuardEndpoints(nc *model.NodeSpec) []M {
 	endpoint := func(tag string, w *model.RelayWireGuardConfig) M {
+		peers := []M{{"public_key": w.PeerPublicKey, "allowed_ips": w.AllowedIPs, "persistent_keepalive_interval": w.Keepalive}}
+		if len(w.Peers) > 0 {
+			peers = nil
+			for _, peer := range w.Peers {
+				peers = append(peers, M{"public_key": peer.PublicKey, "allowed_ips": peer.AllowedIPs, "persistent_keepalive_interval": w.Keepalive})
+			}
+		}
 		return M{"type": "wireguard", "tag": tag, "system": false,
 			"private_key": w.PrivateKey, "address": w.Address, "mtu": w.MTU,
-			"peers": []M{{"public_key": w.PeerPublicKey, "allowed_ips": w.AllowedIPs,
-				"persistent_keepalive_interval": w.Keepalive}}}
+			"peers": peers}
 	}
 	var endpoints []M
 	if nc.IsRelayLanding() && nc.Relay.Protocol == "wireguard" && nc.Relay.WireGuard != nil {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"github.com/P0me1oo/YZ-Agent/internal/balancer"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -9,15 +10,17 @@ import (
 )
 
 type NodeSpec struct {
-	WireGuard       *panel.WireGuardConfig
-	Protocol        string
-	ListenIP        string
-	ServerPort      int
-	PortHopping     string
-	Network         string
-	NetworkSettings map[string]any
-	Routes          []RouteRule
-	SourcePolicy    *sourcepolicy.Policy
+	Balancer         *balancer.Config
+	BalancerReceiver *balancer.ReceiverConfig
+	WireGuard        *panel.WireGuardConfig
+	Protocol         string
+	ListenIP         string
+	ServerPort       int
+	PortHopping      string
+	Network          string
+	NetworkSettings  map[string]any
+	Routes           []RouteRule
+	SourcePolicy     *sourcepolicy.Policy
 	// 仅由运行层从来源名单和已校验的地区库生成，不接受面板直接填写网段。
 	SourceBlockCIDRs  []string
 	SourcePolicyReady bool
@@ -109,6 +112,7 @@ type RelayChild struct {
 }
 
 type RelayWireGuardConfig = panel.RelayWireGuardConfig
+type RelayWireGuardPeer = panel.RelayWireGuardPeer
 
 func cloneRelayWireGuard(v *RelayWireGuardConfig) *RelayWireGuardConfig {
 	if v == nil {
@@ -117,6 +121,10 @@ func cloneRelayWireGuard(v *RelayWireGuardConfig) *RelayWireGuardConfig {
 	c := *v
 	c.Address = append([]string(nil), v.Address...)
 	c.AllowedIPs = append([]string(nil), v.AllowedIPs...)
+	c.Peers = append([]panel.RelayWireGuardPeer(nil), v.Peers...)
+	for i := range c.Peers {
+		c.Peers[i].AllowedIPs = append([]string(nil), v.Peers[i].AllowedIPs...)
+	}
 	return &c
 }
 
