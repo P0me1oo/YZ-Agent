@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.25.0 正式发布核验（2026-10-25）
+
+- [Release v2.25.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.25.0) 已发布，程序固定来源 `2fa409888f8b71247b44aefd47d2bd5435936292`。配套面板 `v1.106.2`、管理端 `0.77.0`，交付 TCP 前置池调度、实例级来源信任及 WireGuard 多前置对端；两个核心固定版本不变。
+- [原标签流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/40203150423) 的完整竞态检查通过：42 条包级成功结果、1,687 条测试及子测试通过记录。5 条原生环境型跳过由同时通过的 UFW/firewalld × nftables/iptables 四组隔离检查覆盖。随后 Mihomo 步骤因运行器的 `sudo -E` 不再继承环境而失败，未发布该轮产物。
+- 工作流提交 `bc06b0661ef726162a6658fbf40de2cba821d6bd` 显式传入 Mihomo 路径，增加按固定源码和成功步骤核对的复用入口；16 项复用条件检查通过，拒绝错误来源、未完成或未通过的结果。[恢复流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/40204997998) 仍检出原 `v2.25.0`，复用上述成功结果，Mihomo/WireGuard 补测 4 条测试及子测试通过，安装器检查及全部构建发布任务通过。没有覆盖标签、修改程序源码或弱化必要测试。
+- 12 份附件均已匿名实际下载，SHA256SUMS 的 11 项全部匹配。两个架构的 ELF、实际核心模块、VCS 完整来源、`CGO_ENABLED=0`、`-trimpath=true` 和 `vcs.modified=false` 已核对；旧名称附件与 Agent 字节一致，安装器与固定源码一致。amd64 Agent 和管理工具在本机 WSL 实际执行版本查询，确认 `v2.25.0`。
+- Agent SHA-256：amd64 `c0bc605c128ecc92be0dccd4507f25d6b7bf9fd52de4dfbd35d55b03a7404a87`；arm64 `1e64160f6a3d3fb6b1033ef93e2df8defe57a31e29bbdeaa364ed03ae883ec26`。
+- 不可变镜像 `ghcr.io/p0me1oo/yz-agent:2fa409888f8b71247b44aefd47d2bd5435936292`、`v2.25.0` 和 `latest` 均为 `sha256:d11e20ad860fdfc25cfc17e04fc312cb315937d4a53ead8cf4b489bd069bceea`，包含 `linux/amd64`、`linux/arm64`；两个平台的 OCI revision 和版本已匿名核对，工作流执行版本检查后才更新别名。
+- 服务器由用户先更新面板，再执行 Agent 常规升级。回滚参考 `v2.24.2` / `ef041178889f75714bffff2d3e6fbce946992628`，镜像 digest `sha256:8aec645724ca477cd80692b69da5e94c9c5b930e2f8fd00a6828a169955f7b90`，两个架构已核对可获取。核验记录位于 `D:/codex-tmp/yz-release-20261025-11061/node/verification.json`。未连接或更新生产服务器。
+
 ## v2.25.0 发布准备（2026-10-25）
 
 - 一并发布下方前置池与 WG 多对端修改，配套面板 `1.106.1`、管理端 `0.77.0`。核心固定为 YZ-sing-box `v1.15.1` 和 YZ-Xray-core `v0.0.0-20261018151951-fb2f909b7987`，不修改核心仓库。

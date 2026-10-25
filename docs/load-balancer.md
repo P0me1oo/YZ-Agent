@@ -1,6 +1,6 @@
 # VLESS Reality 前置池
 
-Node `v2.25.0` 配套面板 `1.106.1`、管理端 `0.77.0`，正在准备正式发布。
+Node [v2.25.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.25.0) 已发布，配套面板 `1.106.2`、管理端 `0.77.0`；更新顺序和产物核验见[兼容矩阵](../YZ_COMPATIBILITY.md)。
 
 详细管理步骤见[面板使用说明](../../YZboard/docs/load-balancer.md)。统一入口是面板生成的独立 `balancer` 实例，由机器发现流程启动；无需在服务器上安装额外 DDNS 程序，Cloudflare Token 只由面板保存。
 
