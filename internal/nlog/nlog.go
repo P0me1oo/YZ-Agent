@@ -185,23 +185,27 @@ func normalizeProto(p string) string {
 // ─── Logging Methods ────────────────────────────────────────────────────────
 
 func (nl *NodeLog) Debug(msg string, args ...any) {
-	nl.emit(slog.LevelDebug, msg, args)
-	logWithColor(slog.LevelDebug, nl.prefix, msg, args...)
+	nl.log(slog.LevelDebug, msg, args)
 }
 
 func (nl *NodeLog) Info(msg string, args ...any) {
-	nl.emit(slog.LevelInfo, msg, args)
-	logWithColor(slog.LevelInfo, nl.prefix, msg, args...)
+	nl.log(slog.LevelInfo, msg, args)
 }
 
 func (nl *NodeLog) Warn(msg string, args ...any) {
-	nl.emit(slog.LevelWarn, msg, args)
-	logWithColor(slog.LevelWarn, nl.prefix, msg, args...)
+	nl.log(slog.LevelWarn, msg, args)
 }
 
 func (nl *NodeLog) Error(msg string, args ...any) {
-	nl.emit(slog.LevelError, msg, args)
-	logWithColor(slog.LevelError, nl.prefix, msg, args...)
+	nl.log(slog.LevelError, msg, args)
+}
+
+func (nl *NodeLog) log(level slog.Level, msg string, args []any) {
+	if LogsDisabled() {
+		return
+	}
+	nl.emit(level, msg, args)
+	logWithColor(level, nl.prefix, msg, args...)
 }
 
 // logWithColor writes one line to the configured writer (see Init).
@@ -213,7 +217,7 @@ func logWithColor(level slog.Level, prefix, msg string, args ...any) {
 	min := logMin
 	color := logColor
 
-	if level < min {
+	if level < min || LogsDisabled() {
 		return
 	}
 

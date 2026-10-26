@@ -16,7 +16,10 @@ func (h *runtimeLogHandler) Close() error {
 }
 
 func (h *runtimeLogHandler) Handle(message clog.Message) {
-	h.inner.Handle(message)
+	if nlog.LogsDisabled() {
+		return
+	}
+	nlog.WithRuntimeOutput(func() { h.inner.Handle(message) })
 	if general, ok := message.(*clog.GeneralMessage); ok {
 		level := "debug"
 		switch general.Severity {

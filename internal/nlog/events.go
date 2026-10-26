@@ -64,6 +64,11 @@ func Sanitize(message string) string {
 	return strings.TrimSpace(message)
 }
 func Publish(scope string, event Event) {
+	logMu.RLock()
+	defer logMu.RUnlock()
+	if LogsDisabled() {
+		return
+	}
 	eventMu.RLock()
 	defer eventMu.RUnlock()
 	if scope == "" {

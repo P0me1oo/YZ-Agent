@@ -23,4 +23,5 @@ func (w runtimeLogWriter) WriteMessage(level blog.Level, message string) {
 		severity = "fatal"
 	}
 	nlog.Publish(w.scope, nlog.Event{NodeID: w.nodeID, Source: "singbox", Level: severity, Message: message})
+	nlog.WriteRuntime(message)
 }

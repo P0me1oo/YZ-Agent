@@ -57,11 +57,13 @@ func (c *Client) exchangeMachineControl(version, bootID string, manageable bool,
 		return nil, nil, fmt.Errorf("machine control status %d", resp.StatusCode)
 	}
 	var result struct {
+		LogPolicy   *LogPolicy        `json:"log_policy,omitempty"`
 		Command     *MachineOperation `json:"command"`
 		RealityScan *realityscan.Task `json:"reality_scan"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, nil, err
 	}
+	c.applyLogPolicy(result.LogPolicy)
 	return result.Command, result.RealityScan, nil
 }

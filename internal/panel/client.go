@@ -135,6 +135,7 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	if err := json.NewDecoder(resp.Body).Decode(&hs); err != nil {
 		return nil, fmt.Errorf("decode handshake: %w", err)
 	}
+	c.applyLogPolicy(hs.LogPolicy)
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
 	c.accessLog.Store(hs.AccessLog.Version == 2)
 	c.agentLog.Store(hs.AgentLog.Version == 1)
@@ -476,6 +477,7 @@ func (c *Client) GetMachineNodes() (*MachineNodesResponse, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decode machine nodes: %w", err)
 	}
+	c.applyLogPolicy(out.LogPolicy)
 	return &out, nil
 }
 

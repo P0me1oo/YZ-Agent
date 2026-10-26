@@ -31,7 +31,8 @@ func (s *StringOrArray) UnmarshalJSON(data []byte) error {
 
 // HandshakeResponse is the response from POST /api/v2/server/handshake
 type HandshakeResponse struct {
-	AgentLog struct {
+	LogPolicy *LogPolicy `json:"log_policy,omitempty"`
+	AgentLog  struct {
 		Version int      `json:"version"`
 		Events  []string `json:"events"`
 	} `json:"agent_log"`
@@ -96,6 +97,7 @@ type MachineNode struct {
 
 // MachineNodesResponse is the response from GET /api/v2/server/machine/nodes.
 type MachineNodesResponse struct {
+	LogPolicy  *LogPolicy             `json:"log_policy,omitempty"`
 	Traffic    *machinetraffic.Policy `json:"traffic,omitempty"`
 	Nodes      []MachineNode          `json:"nodes"`
 	BaseConfig MachineBaseConfig      `json:"base_config"`
@@ -236,17 +238,17 @@ type RelayChild struct {
 
 // RelayWireGuardConfig 仅包含本端私钥、对端公钥和用户态隧道参数。
 type RelayWireGuardConfig struct {
-	Peers []RelayWireGuardPeer `json:"peers,omitempty"`
-	PrivateKey    string   `json:"private_key"`
-	PeerPublicKey string   `json:"peer_public_key"`
-	Address       []string `json:"address"`
-	AllowedIPs    []string `json:"allowed_ips"`
-	MTU           int      `json:"mtu"`
-	Keepalive     int      `json:"keepalive"`
+	Peers         []RelayWireGuardPeer `json:"peers,omitempty"`
+	PrivateKey    string               `json:"private_key"`
+	PeerPublicKey string               `json:"peer_public_key"`
+	Address       []string             `json:"address"`
+	AllowedIPs    []string             `json:"allowed_ips"`
+	MTU           int                  `json:"mtu"`
+	Keepalive     int                  `json:"keepalive"`
 }
 
 type RelayWireGuardPeer struct {
-	PublicKey string `json:"public_key"`
+	PublicKey  string   `json:"public_key"`
 	AllowedIPs []string `json:"allowed_ips"`
 }
 

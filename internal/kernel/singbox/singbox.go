@@ -183,7 +183,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 		cancel()
 		return fmt.Errorf("create sing-box instance: %w", err)
 	}
-	if factory, ok := instance.LogFactory().(blog.ObservableFactory); ok && s.cfg.LogScope != "" {
+	if factory, ok := instance.LogFactory().(blog.ObservableFactory); ok {
 		factory.AttachPlatformWriter(runtimeLogWriter{scope: s.cfg.LogScope, nodeID: s.cfg.LogNodeID, factory: factory})
 	}
 

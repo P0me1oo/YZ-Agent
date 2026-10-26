@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	version       = "v2.25.0"
+	version       = "v2.26.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -77,6 +77,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to normalize config: %v\n", err)
 		os.Exit(1)
 	}
+	configureLogPolicies(instances)
 	config.InitLogger(instances[0].Log)
 	// 输出写入普通文件时（OpenRC 日志或配置指定的日志文件）按大小轮转，避免占满磁盘。
 	rotator := logrotate.Start(context.Background(), logRotationPaths(instances[0].Log.Output)...)
@@ -93,6 +94,23 @@ func logRotationPaths(output string) []string {
 		files = append(files, output)
 	}
 	return files
+}
+
+func configureLogPolicies(instances []*config.Config) {
+	var keys []string
+	for _, instance := range instances {
+		if instance.IsStandalone() {
+			continue
+		}
+		if instance.IsMachineMode() {
+			keys = append(keys, nlog.LogPolicyKey(instance.Panel.URL, instance.Machine.MachineID, 0))
+		} else {
+			for _, node := range instance.ExpandNodes() {
+				keys = append(keys, nlog.LogPolicyKey(node.Panel.URL, node.Panel.MachineID, node.Panel.NodeID))
+			}
+		}
+	}
+	nlog.ConfigureLogPolicies(keys)
 }
 
 // runWithReload restarts all node services when the config file changes.
@@ -330,6 +348,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			nlog.Core().Error("failed to normalize reloaded config", "error", err)
 			os.Exit(1)
 		}
+		configureLogPolicies(newInstances)
 		config.InitLogger(newInstances[0].Log)
 		rotator.Update(logRotationPaths(newInstances[0].Log.Output)...)
 		applyRuntimeConfig(newInstances[0].Runtime)

@@ -155,6 +155,9 @@ func (c *collector) restore() error {
 	return nil
 }
 func (c *collector) flush(ctx context.Context, client *panel.Client) {
+	if nlog.LogsDisabled() {
+		return
+	}
 	batch := c.next()
 	if batch == nil || c.save() != nil {
 		return

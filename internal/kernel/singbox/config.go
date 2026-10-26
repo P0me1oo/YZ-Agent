@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -97,6 +98,8 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 
 	mergeCustomSingbox(cfg, kcfg)
 	applySourcePolicy(cfg, nc)
+	// 原始输出交给受面板策略控制的运行日志出口，避免核心直接写标准错误或文件。
+	cfg["log"].(M)["output"] = os.DevNull
 	return cfg, nil
 }
 

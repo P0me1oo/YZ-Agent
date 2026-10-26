@@ -1,9 +1,10 @@
 package xray
 
 import (
+	"testing"
+
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	clog "github.com/xtls/xray-core/common/log"
-	"testing"
 )
 
 type testLogHandler struct {
@@ -27,5 +28,25 @@ func TestRuntimeLogPreservesConsoleWithoutInventingNode(t *testing.T) {
 	}
 	if err := handler.Close(); err != nil || !inner.closed {
 		t.Fatal("core reload must close original console logger")
+	}
+}
+
+func TestRuntimeLogPrivacySkipsConsoleAndPanel(t *testing.T) {
+	nlog.ConfigureLogPolicies([]string{t.Name()})
+	nlog.ApplyLogPolicy(t.Name(), true)
+	defer nlog.ConfigureLogPolicies(nil)
+	var count int
+	nlog.SetGlobalScope("xray-privacy-test")
+	defer nlog.SetGlobalScope("")
+	stop := nlog.Subscribe("xray-privacy-test", func(nlog.Event) { count++ })
+	defer stop()
+	inner := &testLogHandler{}
+	handler := &runtimeLogHandler{inner: inner}
+	handler.Handle(&clog.GeneralMessage{Severity: clog.Severity_Error, Content: "937 users online"})
+	if inner.count != 0 || count != 0 {
+		t.Fatal("raw Xray logs bypassed privacy")
+	}
+	if err := handler.Close(); err != nil || !inner.closed {
+		t.Fatal("privacy must not change logger cleanup")
 	}
 }

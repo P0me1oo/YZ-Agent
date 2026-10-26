@@ -15,7 +15,7 @@ type AgentLogBatch struct {
 	Records []nlog.Event `json:"records"`
 }
 
-func (c *Client) AgentLogEnabled() bool { return c.agentLog.Load() }
+func (c *Client) AgentLogEnabled() bool { return c.agentLog.Load() && !nlog.LogsDisabled() }
 func containsXrayCrash(events []string) bool {
 	for _, event := range events {
 		if event == "xray.crash" {
@@ -25,6 +25,9 @@ func containsXrayCrash(events []string) bool {
 	return false
 }
 func (c *Client) ReportAgentLog(ctx context.Context, batch *AgentLogBatch) error {
+	if nlog.LogsDisabled() {
+		return errors.New("运行日志已停用")
+	}
 	records := batch.Records
 	// 旧面板只接受原日志字段；保留本地批次，按握手能力省略事件标记。
 	if !c.agentLogEvents.Load() {
