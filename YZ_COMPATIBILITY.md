@@ -1,5 +1,16 @@
 # YZ-Agent 兼容矩阵
 
+## v2.26.0 正式发布核验（2026-10-27）
+
+- [Release v2.26.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.26.0) 已发布，固定来源 `e1068a733bc5b03cc30e119f9db2202bc3689e93`，[发布流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/40397699708) 全部通过。配套面板 `1.107.1` / `809728d9263b759c385047e6af174483bc3bb4db` 与管理端 `0.78.0`，两个核心固定依赖不变。
+- Linux / Go `1.27.1` 完整竞态、底层兼容模块、Mihomo/WireGuard 与安装器检查通过，日志中有 45 条包级成功结果、1,721 条测试及子测试通过记录；6 条跳过单独保留，原生防火墙相关路径由同时通过的 UFW/firewalld × nftables/iptables 四组隔离检查覆盖，没有删除、弱化用例或关闭竞态。
+- 12 份正式附件均已匿名下载，SHA256SUMS 的 11 项全部匹配；旧名称附件与 Agent 对应程序字节一致。四份程序的实际 ELF、目标架构、嵌入完整来源、`CGO_ENABLED=0`、`-trimpath=true` 与 `vcs.modified=false` 已核对，amd64 Agent 和管理工具在本机 WSL 实际执行版本查询，显示正确版本与固定提交。
+- Agent SHA-256：amd64 `b8c962e3116b8194756fe7de6ee89a7c8c8ca5a372eb7609d434a631ab9cfdfd`；arm64 `d80aec305201d9fd92fc6f28c71e7ba067a91b463d02d3685b295f54201eb77f`。实际模块仍为 YZ-sing-box `v1.15.1` 和 YZ-Xray-core `v0.0.0-20261018151951-fb2f909b7987`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:e1068a733bc5b03cc30e119f9db2202bc3689e93`、`v2.26.0` 与 `latest` 均为 `sha256:7811f4e652e9aa504728d0be3fec2b7117f4eb59635cb4eb60f9e5994cb92468`。`linux/amd64`、`linux/arm64` 清单与 OCI 来源已匿名核对，发布工作流在更新别名前实际执行两个架构的版本查询。
+- 上一版 `v2.25.0` / `sha256:d11e20ad860fdfc25cfc17e04fc312cb315937d4a53ead8cf4b489bd069bceea` 已核对可获取，但旧 Agent 不支持停用策略，开启后不应回退旧 Agent 来保持静默。先更新面板，再升级 Agent；没有连接或更新生产服务器。
+
+以下保留开发与发布准备记录，正式来源和产物以上方核验为准。后补文档复用既有结果，不重复完整回归。
+
 ## v2.26.0 永久停用运行日志（2026-10-27，本地未发布）
 
 - 基于 `dev` / `6cbf897b869ff106fbf574080cbe0c4b8012045e`，配套面板 `1.107.1`、管理端 `0.78.0`，按机器接收不可恢复的运行日志停用策略。启动和重载先保持静默，已停用策略不会被本地日志级别或迟到响应覆盖。

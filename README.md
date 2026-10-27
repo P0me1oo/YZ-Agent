@@ -1,6 +1,6 @@
 # YZ-Agent
 
-本地开发版 `v2.26.0` 配套面板 `1.107.1`、管理端 `0.78.0`，新增由面板按机器永久停用运行日志，尚未发布。停用后 Agent、节点和双核心不再输出或上报运行日志，本地日志级别无法恢复。使用及独立面板入口见[运行日志与连接地址](docs/log-privacy.md)。
+[v2.26.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.26.0) 已发布，配套面板 `1.107.1`、管理端 `0.78.0`。支持由面板按机器永久停用 Agent、节点和双核心运行日志，本地日志级别无法恢复。完整竞态、四组防火墙、双架构镜像及 12 份附件已核验，见[使用说明](docs/log-privacy.md)与[发布记录](YZ_COMPATIBILITY.md)。
 
 [v2.25.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.25.0) 已发布，配套面板 `1.106.2`、管理端 `0.77.0`：增加 VLESS Reality TCP 前置池轮询调度、独立来源信任和 WireGuard 多前置对端。12 份附件、双架构镜像及 `latest` 已核验；先更新面板再升级 Agent，来源和回滚见[兼容矩阵](YZ_COMPATIBILITY.md)，配置见[前置负载均衡](docs/load-balancer.md)。
 
