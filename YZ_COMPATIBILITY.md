@@ -1,12 +1,15 @@
 # YZ-Agent 兼容矩阵
 
-## v2.28.1 加密配置启动与文件豁免修复（2026-10-29，本地未发布）
+## v2.28.1 加密配置启动与文件豁免修复（2026-10-29，已发布）
 
 - 基于 `dev` / `ed15db8bfdd1fbfef253ecbee87167830efe9d55` 及已有未发布改动，配套面板 `1.111.1`、管理端 `0.81.0`。包含此前隐私保护及跨节点许可功能，YZ-sing-box `v1.15.1`、YZ-Xray-core `v0.0.0-20261018151951-fb2f909b7987` 固定依赖不变。
 - 自定义配置的启动与重载校验统一通过解密读取；加密豁免按已登记主配置及同目录启动文件的完整路径判断，不再豁免任意目录的同名文件。
 - Go `1.27.0` / Windows amd64 的 `internal/model`、`internal/privacy`、`internal/config` 整包检查通过。新增用例覆盖双核心 JSON/YAML 校验、解密后重复标签拒绝、未关联密文拒绝与恢复、主配置自定义名称、同名文件迁移及重复写入、隐私配置重载。
 - 双核心实际运行用例 `TestEncryptedCustomConfigStartsAndReloadsBothCores` 的 Xray、sing-box × JSON、YAML 四组场景通过；每组验证加密的 `config.yml`、启动、两次重载和每次运行后的本地 TCP 数据收发。
-- 发布门禁和双架构产物核验待完成，未连接服务器；最终来源、附件、镜像及回滚信息在发布后补记。
+- 正式来源：`0525180ef59c1856f7412a9f93e7d7c251dd0ac8`，Tag 为 `v2.28.1`。[发布流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/40735627751) 的完整竞态、兼容模块、Mihomo、安装器和四组原生防火墙检查通过，Linux amd64/arm64 的程序、兼容入口、管理工具均构建成功；构建信息与下载附件一致，`CGO_ENABLED=0`、`vcs.modified=false`，核心固定来源已核对。
+- 镜像为 `ghcr.io/p0me1oo/yz-agent:v2.28.1`，完整提交标签及 `latest` 指向同一 manifest：`sha256:27b441355a7c807d626d57987554a6be3f3e5dff9e27f419d5e2f929cd34f7fd`。两个架构的 OCI revision 与上述来源一致，可匿名获取。
+- 12 份原始附件已下载并核对 SHA-256、GitHub 摘要及大小，amd64 程序实际版本和来源已核对。Agent SHA-256：amd64 `81241a7a839f677ed3ec0639d6704fc654295058fd8e9651a7efdba79eb774da`，arm64 `0fcf80b63c1cf71360da85c78224d01f090fafec3a23453eaa7264b14ab63f9c`。完整记录见 [verification.json](https://github.com/P0me1oo/YZ-Agent/releases/download/v2.28.1/verification.json) 和对应校验附件。
+- 先更新配套面板 `1.111.1`，再更新 Node。上一正式版本为 `v2.26.0` / `e1068a733bc5b03cc30e119f9db2202bc3689e93`；回退旧版须沿用受支持的维护流程，先转换加密数据。未连接或更新生产服务器。
 
 ## v2.28.0 跨节点许可与断联期限（2026-10-28，本地未发布）
 

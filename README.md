@@ -1,6 +1,6 @@
 # YZ-Agent
 
-本地 `v2.28.1` 配套面板 `1.111.1`、管理端 `0.81.0`：修复加密自定义配置的启动与重载，以及 `config.yml` 同名文件漏加密；面板清理不再需要同步的旧许可账号。保留跨节点许可、固定一小时断联期限和已有隐私保护功能，尚未发布，见[设备许可](docs/device-counting.md)及[隐私保护](docs/log-privacy.md)。
+[v2.28.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.28.1) 已发布，要求配套面板 `1.111.1`、管理端 `0.81.0`：修复加密自定义配置的启动与重载，以及 `config.yml` 同名文件漏加密；面板清理不再需要同步的旧许可账号。一并交付跨节点许可、固定一小时断联期限和此前隐私保护功能。完整竞态、四组原生防火墙、双架构附件和镜像已核验，先面板后 Agent，见[兼容矩阵](YZ_COMPATIBILITY.md)、[设备许可](docs/device-counting.md)及[隐私保护](docs/log-privacy.md)。
 
 [v2.26.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.26.0) 已发布，配套面板 `1.107.1`、管理端 `0.78.0`。支持由面板按机器永久停用 Agent、节点和双核心运行日志，本地日志级别无法恢复。完整竞态、四组防火墙、双架构镜像及 12 份附件已核验，见[使用说明](docs/log-privacy.md)与[发布记录](YZ_COMPATIBILITY.md)。
 
