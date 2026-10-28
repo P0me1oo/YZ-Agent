@@ -1,4 +1,4 @@
-VERSION ?= v2.26.0
+VERSION ?= v2.28.1
 TEST_EXEC ?=
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -34,6 +34,7 @@ test:
 	bash tests/install_service_manager_test.sh
 	bash tests/install_health_test.sh
 	bash tests/install_kernel_defaults_test.sh
+	bash tests/install_privacy_test.sh
 	bash tests/install_paths_test.sh
 	bash tests/install_name_migration_test.sh
 	go test -mod=readonly -v -race -count=1 -timeout 20m $(if $(TEST_EXEC),-exec "$(TEST_EXEC)") -tags "$(BUILD_TAGS)" ./...

@@ -23,12 +23,13 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/logrotate"
 	"github.com/P0me1oo/YZ-Agent/internal/machine"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"github.com/P0me1oo/YZ-Agent/internal/service"
 	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 )
 
 var (
-	version       = "v2.26.0"
+	version       = "v2.28.1"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -71,6 +72,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
 	}
+	privacyCtx, stopPrivacy := context.WithTimeout(context.Background(), 45*time.Second)
+	if err := config.PreparePrivacy(privacyCtx, *configPath, rootCfg); err != nil {
+		stopPrivacy()
+		os.Exit(1)
+	}
+	stopPrivacy()
 
 	instances, err := rootCfg.NormalizeInstances()
 	if err != nil {
@@ -158,9 +165,25 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 
 	for root := initialRoot; ; {
 		ctx, cancel := context.WithCancel(context.Background())
+		if !root.PrivacyReady {
+			privacy.ResetOwner(configPath)
+			prepare, stop := context.WithTimeout(ctx, 45*time.Second)
+			err := config.PreparePrivacy(prepare, configPath, root)
+			stop()
+			if err != nil {
+				cancel()
+				return
+			}
+		}
 		reloadCh := make(chan *config.RootConfig, 1)
 
 		watcher, err := config.WatchConfigRoot(ctx, configPath, func(newCfg *config.RootConfig) {
+			select {
+			case reloadCh <- newCfg:
+			default:
+			}
+		})
+		go config.WatchPrivacy(ctx, configPath, root, func(newCfg *config.RootConfig) {
 			select {
 			case reloadCh <- newCfg:
 			default:
@@ -248,6 +271,13 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				if instanceCfg.PrivacyError != nil {
+					for _, id := range healthIDs {
+						health.set(id, service.RuntimeFailed)
+					}
+					reportError(instanceCfg.PrivacyError)
+					return
+				}
 				if instanceCfg.IsMachineMode() {
 					stopLogs := agentlog.Start(ctx, instanceCfg)
 					defer stopLogs()

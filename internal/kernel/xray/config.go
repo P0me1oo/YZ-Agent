@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
-	"os"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -976,7 +976,7 @@ func extractECHServerKeys(tlsSettings map[string]interface{}) string {
 	if key, _ := echMap["key"].(string); key != "" {
 		pemData = []byte(key)
 	} else if keyPath, _ := echMap["key_path"].(string); keyPath != "" {
-		data, err := os.ReadFile(keyPath)
+		data, err := privacy.ReadFile(keyPath)
 		if err != nil {
 			nlog.Core().Warn("ECH enabled but key_path read failed", "error", err)
 			return ""

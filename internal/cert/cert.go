@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"math/big"
 	"net"
 	"os"
@@ -102,11 +103,7 @@ func (m *Manager) persistPEM(cert, key []byte) {
 
 // atomicWriteFile writes data to a temp file and renames, preventing partial reads.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return privacy.WriteFile(path, data, perm)
 }
 
 // loadPersistedPEM loads previously persisted cert material from cert_dir.
@@ -116,11 +113,11 @@ func (m *Manager) loadPersistedPEM() bool {
 	if dir == "" {
 		return false
 	}
-	certPEM, err := os.ReadFile(filepath.Join(dir, "cert.pem"))
+	certPEM, err := privacy.ReadFile(filepath.Join(dir, "cert.pem"))
 	if err != nil {
 		return false
 	}
-	keyPEM, err := os.ReadFile(filepath.Join(dir, "key.pem"))
+	keyPEM, err := privacy.ReadFile(filepath.Join(dir, "key.pem"))
 	if err != nil {
 		return false
 	}
@@ -295,11 +292,11 @@ func (m *Manager) Stop() {}
 // ─── Mode: file ────────────────────────────────────────────────────────────
 
 func (m *Manager) startFile() error {
-	certPEM, err := os.ReadFile(m.cfg.CertFile)
+	certPEM, err := privacy.ReadFile(m.cfg.CertFile)
 	if err != nil {
 		return fmt.Errorf("cert file: %w", err)
 	}
-	keyPEM, err := os.ReadFile(m.cfg.KeyFile)
+	keyPEM, err := privacy.ReadFile(m.cfg.KeyFile)
 	if err != nil {
 		return fmt.Errorf("key file: %w", err)
 	}
@@ -404,7 +401,7 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 		return fmt.Errorf("create cert dir: %w", err)
 	}
 
-	storage := &certmagic.FileStorage{Path: m.cfg.CertDir}
+	storage := &privateStorage{Storage: &certmagic.FileStorage{Path: m.cfg.CertDir}, root: m.cfg.CertDir}
 
 	var magic *certmagic.Config
 	cache := certmagic.NewCache(certmagic.CacheOptions{

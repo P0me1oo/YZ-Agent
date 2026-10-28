@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,7 +45,7 @@ func collectCustomConfigOutboundTagSources(path string) ([]outboundTagSource, er
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := privacy.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

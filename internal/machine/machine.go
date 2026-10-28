@@ -85,6 +85,7 @@ type Orchestrator struct {
 
 // New creates a machine orchestrator from the given config.
 func New(cfg *config.Config) *Orchestrator {
+	config.BindPrivacy(cfg)
 	panelCfg := config.PanelConfig{
 		URL:       cfg.Panel.URL,
 		Token:     cfg.Machine.Token,
@@ -238,6 +239,7 @@ func (o *Orchestrator) aggregateNodeStatusLocked() service.RuntimeStatus {
 
 // Run is the main loop. It blocks until ctx is cancelled.
 func (o *Orchestrator) Run(ctx context.Context) error {
+	if o.cfg.PrivacyError != nil {return o.cfg.PrivacyError}
 	o.notifyStatus(service.RuntimeStarting)
 	o.runCtx = ctx
 	if o.agentVersion != "" {

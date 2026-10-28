@@ -3,6 +3,7 @@ package kernel
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"os"
 	"strings"
 
@@ -17,7 +18,7 @@ func LoadCustomConfig(path string) (map[string]any, error) {
 		return nil, nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := privacy.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			nlog.Core().Warn("custom config file not found, skipping", "path", path)

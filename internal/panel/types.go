@@ -53,6 +53,7 @@ type RealtimeCapability struct {
 	DeviceHandoverWS        int  `json:"device_handover_ws"`
 	DeviceHandoverRenewal   int  `json:"device_handover_renewal"`
 	DeviceHandoverAdmitSync int  `json:"device_handover_admit_sync"`
+	DeviceLeaseCache        int  `json:"device_lease_cache"`
 }
 
 func (h *HandshakeResponse) UnmarshalJSON(data []byte) error {

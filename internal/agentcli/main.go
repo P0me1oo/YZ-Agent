@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"io"
 	"net/http"
 	"os"
@@ -122,7 +123,7 @@ type fileRuntimeConfig struct {
 
 type instanceSummary struct {
 	ID         string `json:"id"`
-	PanelURL   string `json:"panel_url"`
+	PanelURL   string `json:"panel_url,omitempty"`
 	Mode       string `json:"mode"`
 	NodeID     *int   `json:"node_id"`
 	MachineID  *int   `json:"machine_id"`
@@ -139,7 +140,12 @@ type installMeta struct {
 }
 
 func loadInstallMeta(path string) (*installMeta, error) {
-	data, err := os.ReadFile(path)
+	data, err := privacy.ReadFile(path)
+	if err != nil {
+		if _, loadErr := config.LoadWritableRoot(filepath.Join(filepath.Dir(path), "config.yml")); loadErr == nil {
+			data, err = privacy.ReadFile(path)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -973,22 +979,7 @@ func removeBinding(panelURL string, nodeID int, machineID int, instanceID string
 }
 
 func loadWritableRootConfig(path string) (*config.RootConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config file: %w", err)
-	}
-	rc := &config.RootConfig{}
-	if err := yaml.Unmarshal(data, rc); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	if len(rc.Instances) == 0 {
-		legacy := &config.Config{}
-		if err := yaml.Unmarshal(data, legacy); err != nil {
-			return nil, fmt.Errorf("parse legacy config: %w", err)
-		}
-		rc.Config = *legacy
-	}
-	return rc, nil
+	return config.LoadWritableRoot(path)
 }
 
 func normalizeRootInstances(root *config.RootConfig) []config.Config {
@@ -1113,7 +1104,7 @@ func writeRootConfig(path string, root *config.RootConfig) error {
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-	return os.WriteFile(path, data, 0o600)
+	return config.WriteRootData(path, data, root)
 }
 
 func hasTimeSyncConfig(cfg config.TimeSyncConfig) bool {
@@ -1164,7 +1155,7 @@ func pruneCredentialKeys(path string, removed []config.Config) error {
 	if output != "" {
 		output += "\n"
 	}
-	return os.WriteFile(path, []byte(output), 0o600)
+	return writePrivateFile(path, []byte(output))
 }
 
 func writeInstallMeta(path string, root *config.RootConfig) error {
@@ -1349,6 +1340,20 @@ func runConfig(args []string) error {
 	switch args[0] {
 	case "init":
 		return runConfigInit(args[1:])
+	case "private-export":
+		if len(args) != 3 && len(args) != 5 {
+			return errors.New("private-export requires --config PATH [--backup PATH]")
+		}
+		if args[1] != "--config" || len(args) == 5 && args[3] != "--backup" {
+			return errors.New("invalid private-export arguments")
+		}
+		backup := ""
+		if len(args) == 5 {
+			backup = args[4]
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		return config.ExportPrivateState(ctx, args[2], backup)
 	case "health-port":
 		return runConfigHealthPort(args[1:])
 	case "kernel":
@@ -1571,7 +1576,16 @@ func runConfigRefreshMeta(args []string) error {
 //	INSTANCE_ID=<generated-id>
 //	ENV_KEY=<credential-env-var-name>
 func runConfigInit(args []string) error {
+	return runConfigInitWithInput(args, os.Stdin)
+}
+
+func runConfigInitWithInput(args []string, input io.Reader) error {
+	// 安装器探测能力，回退旧版本时继续使用其已有参数。
+	if len(args) == 1 && (args[0] == "--supports-token-stdin" || args[0] == "--supports-private-storage") {
+		return nil
+	}
 	var (
+		legacyOutput   bool
 		configIn       string
 		configOut      string
 		credentialsIn  string
@@ -1589,10 +1603,20 @@ func runConfigInit(args []string) error {
 		gogc           int
 		installRoot    string
 		token          string
+		tokenExplicit  bool
+		tokenFromStdin bool
 		releaseVersion string
 	)
 
 	for i := 0; i < len(args); i++ {
+		if args[i] == "--legacy-output" {
+			legacyOutput = true
+			continue
+		}
+		if args[i] == "--token-stdin" {
+			tokenFromStdin = true
+			continue
+		}
 		if i+1 >= len(args) {
 			break
 		}
@@ -1662,12 +1686,23 @@ func runConfigInit(args []string) error {
 		case "--token":
 			i++
 			token = args[i]
+			tokenExplicit = true
 		case "--version":
 			i++
 			releaseVersion = args[i]
 		}
 	}
 
+	if tokenFromStdin {
+		if tokenExplicit {
+			return errors.New("--token and --token-stdin cannot be combined")
+		}
+		var err error
+		token, err = readInstallToken(input)
+		if err != nil {
+			return err
+		}
+	}
 	if mode == "" {
 		return errors.New("--mode is required (node or machine)")
 	}
@@ -1735,9 +1770,11 @@ func runConfigInit(args []string) error {
 	if mode == "machine" {
 		envKey += "_MACHINE_TOKEN"
 		inst.Machine.TokenEnv = envKey
+		inst.Machine.Token = token
 	} else {
 		envKey += "_API_KEY"
 		inst.Panel.TokenEnv = envKey
+		inst.Panel.Token = token
 	}
 
 	if gomemlimit != "" {
@@ -1786,6 +1823,22 @@ func runConfigInit(args []string) error {
 	replaced := false
 	for i, existing := range instances {
 		if existing.InstanceID == instanceID {
+			// 普通升级保留证书、路由及加密状态，仅替换本次明确提供的安装参数。
+			updated := existing
+			updated.Panel, updated.Machine = inst.Panel, inst.Machine
+			if kernelExplicit {
+				updated.Kernel.Type = inst.Kernel.Type
+			}
+			if healthPort != 0 {
+				updated.HealthPort = healthPort
+			}
+			if gomemlimit != "" {
+				updated.Runtime.GoMemLimit = gomemlimit
+			}
+			if gogc > 0 {
+				updated.Runtime.GoGCPercent = gogc
+			}
+			inst = updated
 			if !kernelExplicit {
 				inst.Kernel = existing.Kernel
 			}
@@ -1828,6 +1881,7 @@ func runConfigInit(args []string) error {
 		instances = append(instances, inst)
 	}
 	root.Instances = instances
+	root.ExportLegacy = legacyOutput
 
 	// Write config.
 	if configOut == "" {
@@ -1890,7 +1944,7 @@ func mergeCredentials(srcPath, dstPath, key, value string) error {
 	for _, k := range order {
 		fmt.Fprintf(&buf, "%s=%s\n", k, entries[k])
 	}
-	return os.WriteFile(dstPath, []byte(buf.String()), 0o600)
+	return writePrivateFile(dstPath, []byte(buf.String()))
 }
 
 // writeInstallMetaVersioned writes install-meta.json with an explicit
@@ -1912,7 +1966,6 @@ func writeInstallMetaVersioned(path string, root *config.RootConfig, ver, latest
 		}
 		item := instanceSummary{
 			ID:         id,
-			PanelURL:   inst.Panel.URL,
 			Mode:       instanceMode(inst),
 			NodeID:     intPtr(inst.Panel.NodeID),
 			MachineID:  machineIDPtr(&inst),
@@ -1936,7 +1989,7 @@ func writeInstallMetaVersioned(path string, root *config.RootConfig, ver, latest
 		return fmt.Errorf("marshal install meta: %w", err)
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	return writePrivateFile(path, data)
 }
 
 // runConfigHealthPort reads health_port from an existing config file and

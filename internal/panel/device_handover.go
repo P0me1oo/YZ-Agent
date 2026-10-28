@@ -71,7 +71,11 @@ func deviceError(err error) error {
 }
 
 func (c *Client) BeginDeviceSession(ctx context.Context, run string) (devicegate.BeginReply, error) {
-	return deviceRequest[devicegate.BeginReply](c, ctx, "begin", map[string]interface{}{"run": run})
+	payload := map[string]interface{}{"run": run}
+	if c.deviceLeaseCache.Load() {
+		payload["lease_cache"] = 1
+	}
+	return deviceRequest[devicegate.BeginReply](c, ctx, "begin", payload)
 }
 
 func (c *Client) AdmitDeviceSource(ctx context.Context, request devicegate.AdmissionRequest) (devicegate.AdmissionReply, error) {
@@ -80,6 +84,9 @@ func (c *Client) AdmitDeviceSource(ctx context.Context, request devicegate.Admis
 	}
 	if request.Snapshot != nil {
 		payload["snapshot"] = request.Snapshot
+	}
+	if request.LeaseCache == 1 {
+		payload["lease_cache"] = 1
 	}
 	reply, err := deviceRequest[devicegate.AdmissionReply](c, ctx, "admit", payload)
 	if err == nil && request.Snapshot != nil && reply.Sync == nil {
@@ -102,6 +109,9 @@ func (c *Client) SyncDeviceSession(ctx context.Context, snapshot devicegate.Snap
 			"run": snapshot.Run, "sequence": snapshot.Sequence,
 			"unchanged": true, "base_sequence": snapshot.BaseSequence,
 		}
+	}
+	if snapshot.LeaseCache == 1 {
+		payload["lease_cache"] = 1
 	}
 	response, err := deviceRequest[devicegate.SyncReply](c, ctx, "sync", payload)
 	var remote *RemoteError

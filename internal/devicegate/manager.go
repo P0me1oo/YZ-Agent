@@ -21,12 +21,17 @@ type sourceKey struct {
 }
 
 type sourceState struct {
-	key       sourceKey
-	lease     string
-	connected time.Time
-	sequence  uint64
-	revoked   bool
-	permits   map[*Permit]struct{}
+	key               sourceKey
+	lease             string
+	connected         time.Time
+	sequence          uint64
+	revoked           bool
+	permits           map[*Permit]struct{}
+	confirmedAt       int64
+	expiresAt         int64
+	confirmedSequence uint64
+	deadline          time.Time
+	expiry            *time.Timer
 }
 
 type flight struct {
@@ -56,6 +61,8 @@ type Manager struct {
 	syncMu       chan struct{}
 	run          string
 	ready        bool
+	leaseCache   bool
+	users        map[int]bool
 	closing      bool
 	seq          uint64
 	synced       uint64
@@ -147,11 +154,12 @@ func (m *Manager) begin(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	m.ready = !m.closing
+	m.leaseCache = reply.LeaseCache == 1
 	m.mu.Unlock()
 	return nil
 }
 
-// Acquire 仅在某来源从零连接变为有连接时请求面板，已有来源的新连接在本地登记。
+// Acquire 优先复用已核验且未到期的许可，账号与节点权限仍由本地用户名单约束。
 func (m *Manager) Acquire(ctx context.Context, userID int, rawIP string) (*Permit, error) {
 	if !m.Enabled() || userID <= 0 {
 		return nil, nil
@@ -175,8 +183,12 @@ func (m *Manager) Acquire(ctx context.Context, userID int, rawIP string) (*Permi
 			m.mu.Unlock()
 			return nil, ErrNotReady
 		}
-		if source := m.sources[key]; source != nil && len(source.permits) > 0 {
-			if !source.revoked {
+		if m.users != nil && !m.users[userID] {
+			m.mu.Unlock()
+			return nil, ErrRevoked
+		}
+		if source := m.sources[key]; source != nil && (m.leaseCache || len(source.permits) > 0) {
+			if !source.revoked && (!m.leaseCache || time.Now().Before(source.deadline)) {
 				p := m.permitLocked(source)
 				m.mu.Unlock()
 				return p, nil
@@ -242,6 +254,11 @@ func (m *Manager) admit(ctx context.Context, key sourceKey, run string, current 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err == nil {
+		if m.users != nil && !m.users[key.user] {
+			err = ErrRevoked
+		}
+	}
+	if err == nil {
 		switch {
 		case !m.ready || m.closing || m.run != run || m.ctx.Err() != nil:
 			err = ErrNotReady
@@ -255,6 +272,13 @@ func (m *Manager) admit(ctx context.Context, key sourceKey, run string, current 
 		if _, revoked := m.revoked[reply.Lease]; revoked {
 			err = ErrRevoked
 		} else if old := m.sources[key]; old != nil && old.lease != reply.Lease && len(old.permits) != 0 {
+			err = ErrRevoked
+		}
+	}
+	if err == nil && m.leaseCache {
+		// 核验返回到分配连接之间可能发生到期或撤销，不能据迟到结果重建空许可。
+		source := m.sources[key]
+		if source == nil || source.lease != reply.Lease || source.revoked || !time.Now().Before(source.deadline) {
 			err = ErrRevoked
 		}
 	}
@@ -279,6 +303,12 @@ func (m *Manager) admit(ctx context.Context, key sourceKey, run string, current 
 }
 
 func (m *Manager) request(ctx context.Context, request AdmissionRequest) (AdmissionReply, error) {
+	m.mu.Lock()
+	cached := m.leaseCache
+	m.mu.Unlock()
+	if cached {
+		return m.requestCached(ctx, request)
+	}
 	combined := false
 	if capability, ok := m.remote.(AdmissionSyncRemote); ok {
 		combined = capability.DeviceAdmissionSyncSupported()
@@ -373,6 +403,9 @@ func (m *Manager) Snapshot() Snapshot {
 	defer m.mu.Unlock()
 	m.seq++
 	snapshot := Snapshot{Run: m.run, Sequence: m.seq, Pending: []uint64{}, Sources: []Source{}, Retired: []Revocation{}}
+	if m.leaseCache {
+		snapshot.LeaseCache = 1
+	}
 	for _, retired := range m.retired {
 		snapshot.Retired = append(snapshot.Retired, retired.item)
 	}
@@ -414,6 +447,8 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	if capability, ok := m.remote.(RenewalRemote); ok && capability.DeviceRenewalSupported() && m.baseSequence > 0 && sameSnapshot(m.confirmed, snapshot) {
 		wire = Snapshot{Run: snapshot.Run, Sequence: snapshot.Sequence, Unchanged: true, BaseSequence: m.baseSequence}
 	}
+	wire.LeaseCache = snapshot.LeaseCache
+	started := time.Now()
 	reply, err := m.remote.SyncDeviceSession(ctx, wire)
 	if wire.Unchanged && errors.Is(err, ErrSnapshotRequired) {
 		wire = snapshot
@@ -427,8 +462,20 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		m.ApplyRevocations(reply.Revoked)
+		return err
+	}
 	if reply.Run != snapshot.Run || reply.Sequence != snapshot.Sequence {
 		return fmt.Errorf("设备来源快照未被确认")
+	}
+	if snapshot.LeaseCache == 1 {
+		if reply.LeaseCache != 1 {
+			return fmt.Errorf("面板未核验设备缓存许可")
+		}
+		if err := m.acceptLeases(reply, snapshot.Sequence, started); err != nil {
+			return err
+		}
 	}
 	m.confirmed = &snapshot
 	if !wire.Unchanged {
@@ -504,34 +551,55 @@ func (m *Manager) ApplyRevocations(items []Revocation) {
 		if item.UserID <= 0 || !validLease(item.Lease) {
 			continue
 		}
-		m.revoked[item.Lease] = now.Add(2 * time.Minute)
+		m.revoked[item.Lease] = now.Add(leaseGrace + time.Minute)
 		source := m.sources[sourceKey{user: item.UserID, ip: item.IP}]
 		if source == nil || source.lease != item.Lease {
+			if m.leaseCache {
+				m.retireLocked(item)
+			}
 			continue
 		}
 		source.revoked = true
+		if source.expiry != nil {
+			source.expiry.Stop()
+		}
+		if len(source.permits) == 0 {
+			m.removeSourceLocked(source)
+		}
 		for permit := range source.permits {
 			permits = append(permits, permit)
 		}
 	}
 	m.mu.Unlock()
-	for _, permit := range permits {
-		permit.revoke()
-	}
+	revokePermits(permits)
 }
 
 func (m *Manager) closeAll() {
 	var permits []*Permit
 	m.mu.Lock()
 	for _, source := range m.sources {
+		source.revoked = true
+		if source.expiry != nil {
+			source.expiry.Stop()
+		}
+		if len(source.permits) == 0 {
+			m.removeSourceLocked(source)
+		}
 		for permit := range source.permits {
 			permits = append(permits, permit)
 		}
 	}
 	m.mu.Unlock()
+	revokePermits(permits)
+}
+
+// 同时发起全部关闭，并保持调用返回前已执行回调的原有约定。
+func revokePermits(permits []*Permit) {
+	var closing sync.WaitGroup
 	for _, permit := range permits {
-		permit.revoke()
+		closing.Go(permit.revoke)
 	}
+	closing.Wait()
 }
 
 // Stop 在核心停止后调用，最后的空快照确认真实关闭；不会用清空计数代替关闭连接。
@@ -591,8 +659,15 @@ func (p *Permit) Valid() bool {
 		return true
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return !p.closing && !p.released.Load()
+	valid := !p.closing && !p.released.Load()
+	p.mu.Unlock()
+	if !valid {
+		return false
+	}
+	m := p.manager
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !p.source.revoked && (!m.leaseCache || time.Now().Before(p.source.deadline))
 }
 
 func (p *Permit) Release() {
@@ -603,11 +678,9 @@ func (p *Permit) Release() {
 	m.mu.Lock()
 	delete(p.source.permits, p)
 	if len(p.source.permits) == 0 && m.sources[p.source.key] == p.source {
-		delete(m.sources, p.source.key)
-		m.seq++
-		m.retired[p.source.lease] = retiredSource{sequence: m.seq, item: Revocation{
-			UserID: p.source.key.user, IP: p.source.key.ip, Lease: p.source.lease,
-		}}
+		if !m.leaseCache || p.source.revoked || m.closing || !time.Now().Before(p.source.deadline) {
+			m.removeSourceLocked(p.source)
+		}
 	}
 	m.mu.Unlock()
 }
@@ -623,7 +696,7 @@ func (p *Permit) NewConnection() bool {
 	m := p.manager
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if p.released.Load() || m.sources[p.source.key] != p.source {
+	if p.released.Load() || p.source.revoked || m.sources[p.source.key] != p.source || (m.leaseCache && !time.Now().Before(p.source.deadline)) {
 		return false
 	}
 	m.seq++

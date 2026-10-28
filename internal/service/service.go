@@ -219,6 +219,7 @@ func (s *Service) notifyStatus(status RuntimeStatus) {
 }
 
 func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
+	config.BindPrivacy(cfg)
 	cfg.Kernel.LogScope = cfg.LogScope()
 	cfg.Kernel.LogNodeID = cfg.Panel.NodeID
 	certMgr := cert.NewManager(cfg.Cert)
@@ -275,6 +276,9 @@ func newReportBootID() string {
 }
 
 func (s *Service) Run(ctx context.Context) (runErr error) {
+	if s.cfg.PrivacyError != nil {
+		return s.cfg.PrivacyError
+	}
 	s.notifyStatus(RuntimeStarting)
 	defer timesync.Default().SetUsage(s.timeConsumer, false)
 	defer func() {
@@ -917,6 +921,11 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 		users = []model.UserSpec{}
 	}
 
+	if s.deviceGate != nil {
+		ids := make([]int, 0, len(users))
+		for _, user := range users { ids = append(ids, user.ID) }
+		s.deviceGate.SetUsers(ids)
+	}
 	s.limiter.UpdateUsers(users)
 	s.speedTracker.UpdateBuckets()
 	// 已建立的连接立即按新的套餐限速执行。
