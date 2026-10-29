@@ -1,5 +1,14 @@
 # YZ-Agent 兼容矩阵
 
+## v2.28.2 正式发布核验（2026-10-29）
+
+- [Release v2.28.2](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.28.2) 已发布，固定来源 `698e7df5712e848e2a45eb835ad367c55f948c4d`，配套面板 `1.111.3`。下节开发阶段记录保留；本节为正式交付依据。
+- [发布流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/40890125681) 的 Linux / Go `1.27.1` 完整竞态、底层兼容模块、Mihomo、安装器及 UFW/firewalld × nftables/iptables 四组原生防火墙检查全部通过。没有重复运行同一源码的完整回归；两个架构程序与镜像从同一固定提交构建。
+- 12 份原始附件已匿名下载，大小与 GitHub 摘要一致，`SHA256SUMS` 的 11 项全部匹配；同架构的 `yz-agent` 与旧名称兼容附件字节一致。实际 ELF 架构、四份构建信息中的完整提交、`CGO_ENABLED=0`、`vcs.modified=false` 和固定核心来源均核对通过。程序版本由发布工作流实际运行核对：amd64 程序和两个架构镜像均为 `v2.28.2`，不是以 Go 自动生成的模块版本代替程序版本。
+- Agent SHA-256：amd64 `1e089676dcf5af3fbc5e15294e13be20f9d3ac8314307cca705e307c17ba5159`；arm64 `6001350d64e0c953528a2a91f54072b0383ed46812305883c11dae23133e0158`。固定依赖仍为 YZ-sing-box `v1.15.1`、YZ-Xray-core `v0.0.0-20261018151951-fb2f909b7987`。
+- 镜像 `ghcr.io/p0me1oo/yz-agent:v2.28.2`、完整提交标签和 `latest` 指向同一 manifest：`sha256:2277fe9500c675990e7c7008cb4d7c950b368fcdf56d0f8126051f2307f95f07`。`linux/amd64`、`linux/arm64` 的 OCI revision 均与固定来源一致，可匿名获取；详情见 [verification.json](https://github.com/P0me1oo/YZ-Agent/releases/download/v2.28.2/verification.json) 与对应校验文件。
+- 先更新面板，再更新 Node。上一版 `v2.28.1` / `0525180ef59c1856f7412a9f93e7d7c251dd0ac8` 及镜像摘要 `sha256:27b441355a7c807d626d57987554a6be3f3e5dff9e27f419d5e2f929cd34f7fd` 已核对可获取；回退会失去本次撤销恢复修复。本次未连接或更新生产服务器，生产故障是否完全由此造成仍未最终确认。
+
 ## v2.28.2 设备许可撤销恢复修复（2026-10-29，本地未发布）
 
 - 基于干净的 `dev` / `016e604661c42c4445f6b74c7000d220b604e64a`，配套面板 `1.111.3`。两个核心、Go 依赖、管理端不变；保持原共享许可编号、设备名额、真实关闭及一小时断联期限。
