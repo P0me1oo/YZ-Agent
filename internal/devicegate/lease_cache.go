@@ -46,8 +46,14 @@ func (m *Manager) installLeaseLocked(item Lease, deadline time.Time, sequence ui
 	if m.closing || !m.ready || (m.users != nil && !m.users[item.UserID]) {
 		return false
 	}
-	if _, revoked := m.revoked[item.Lease]; revoked {
+	if sequence <= m.permissionBarriers[item.UserID] {
 		return false
+	}
+	if revoked, exists := m.revoked[item.Lease]; exists {
+		// 既要在撤销后发起，也要由面板确认本次请求；旧主控或旧许可回包不能解除撤销。
+		if sequence <= revoked.barrier || item.ConfirmedSequence < sequence {
+			return false
+		}
 	}
 	key := sourceKey{user: item.UserID, ip: item.IP}
 	source := m.sources[key]
@@ -63,6 +69,8 @@ func (m *Manager) installLeaseLocked(item Lease, deadline time.Time, sequence ui
 			source = nil
 		} else if item.ConfirmedAt <= source.confirmedAt {
 			// 重传/乱序结果不重建定时器，也不能移动同一次确认的期限。
+			source.confirmedSequence = sequence
+			source.omissionSequence = max(source.omissionSequence, sequence)
 			return time.Now().Before(source.deadline)
 		}
 	}
@@ -71,6 +79,7 @@ func (m *Manager) installLeaseLocked(item Lease, deadline time.Time, sequence ui
 		m.sources[key] = source
 	}
 	source.confirmedAt, source.expiresAt, source.confirmedSequence = item.ConfirmedAt, item.ExpiresAt, sequence
+	source.omissionSequence = sequence
 	source.deadline = deadline
 	delete(m.retired, item.Lease)
 	if source.expiry != nil {
@@ -110,19 +119,41 @@ func (m *Manager) SetUsers(ids []int) {
 	}
 	var revoked []Revocation
 	m.mu.Lock()
+	removed := make(map[int]bool)
+	for id := range m.users {
+		if !users[id] {
+			removed[id] = true
+		}
+	}
+	for key := range m.flights {
+		if !users[key.user] {
+			removed[key.user] = true
+		}
+	}
 	m.users = users
 	for _, source := range m.sources {
 		if !users[source.key.user] {
+			removed[source.key.user] = true
 			revoked = append(revoked, Revocation{UserID: source.key.user, IP: source.key.ip, Lease: source.lease})
 		}
 	}
+	if len(removed) > 0 {
+		m.seq++
+		if m.permissionBarriers == nil {
+			m.permissionBarriers = make(map[int]uint64)
+		}
+		for id := range removed {
+			m.permissionBarriers[id] = m.seq
+		}
+	}
+	permits := m.revokeLocked(revoked, 0)
 	m.mu.Unlock()
-	m.ApplyRevocations(revoked)
+	revokePermits(permits)
 }
 
 func (m *Manager) acceptLeases(reply SyncReply, sequence uint64, started time.Time) error {
 	// 撤销优先，即使同一响应含有矛盾的续期内容也不能复活。
-	m.ApplyRevocations(reply.Revoked)
+	m.applyRevocations(reply.Revoked, sequence, reply.Run)
 	deadlines := make([]time.Time, len(reply.Leases))
 	present := make(map[string]bool, len(reply.Leases))
 	for i, item := range reply.Leases {
@@ -134,16 +165,22 @@ func (m *Manager) acceptLeases(reply SyncReply, sequence uint64, started time.Ti
 	}
 	var omitted []Revocation
 	m.mu.Lock()
+	if m.run != reply.Run {
+		m.mu.Unlock()
+		return ErrNotReady
+	}
 	for _, source := range m.sources {
-		if source.confirmedSequence <= sequence && !present[source.lease] {
+		if source.omissionSequence <= sequence && !present[source.lease] {
 			omitted = append(omitted, Revocation{UserID: source.key.user, IP: source.key.ip, Lease: source.lease})
 		}
 	}
 	for i, item := range reply.Leases {
 		m.installLeaseLocked(item, deadlines[i], sequence)
 	}
+	// 缺失许可与安装同属一次状态更新，不能在解锁后撤销刚完成的新核验。
+	permits := m.revokeLocked(omitted, sequence)
 	m.mu.Unlock()
-	m.ApplyRevocations(omitted)
+	revokePermits(permits)
 	return nil
 }
 
@@ -186,20 +223,23 @@ func (m *Manager) cachedAttempt(ctx context.Context, request AdmissionRequest) (
 	if reply.Sync == nil || reply.Sync.Run != snapshot.Run || reply.Sync.Sequence != snapshot.Sequence {
 		return AdmissionReply{}, fmt.Errorf("设备许可申请未被核验")
 	}
-	m.ApplyRevocations(reply.Sync.Revoked)
-	m.ApplyRevocations(reply.Revoked)
+	m.applyRevocations(append(reply.Sync.Revoked, reply.Revoked...), snapshot.Sequence, snapshot.Run)
 	m.confirmSnapshot(snapshot, request.UserID)
 	switch reply.Status {
 	case "allowed":
-		item := Lease{UserID: request.UserID, IP: request.IP, Lease: reply.Lease, ConfirmedAt: reply.ConfirmedAt, ExpiresAt: reply.ExpiresAt}
+		item := Lease{UserID: request.UserID, IP: request.IP, Lease: reply.Lease, ConfirmedAt: reply.ConfirmedAt,
+			ExpiresAt: reply.ExpiresAt, ConfirmedSequence: reply.ConfirmedSequence}
 		deadline, err := leaseDeadline(item, reply.ServerTime, started)
 		if err != nil {
 			return AdmissionReply{}, err
 		}
 		m.mu.Lock()
 		// 安装发生在当前所有已采样快照之后；在途的旧空列表不能删除刚授予的许可。
-		m.seq++
-		installed := m.run == request.Run && m.installLeaseLocked(item, deadline, m.seq)
+		installed := m.run == request.Run && m.installLeaseLocked(item, deadline, snapshot.Sequence)
+		if installed {
+			m.seq++
+			m.sources[sourceKey{user: item.UserID, ip: item.IP}].omissionSequence = m.seq
+		}
 		m.mu.Unlock()
 		if !installed {
 			return AdmissionReply{}, ErrRevoked

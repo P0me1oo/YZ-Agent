@@ -34,14 +34,14 @@ func TestDeviceLeaseCacheHTTPNegotiatesAndPreservesExpiryAndRetirement(t *testin
 				t.Error("许可申请缺少真实状态")
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": devicegate.AdmissionReply{Status: "allowed", Lease: lease,
-				ConfirmedAt: 1000, ExpiresAt: 3601000, ServerTime: 1100, Sync: &devicegate.SyncReply{Run: run, Sequence: 2}}})
+				ConfirmedAt: 1000, ExpiresAt: 3601000, ServerTime: 1100, ConfirmedSequence: 2, Sync: &devicegate.SyncReply{Run: run, Sequence: 2}}})
 		case "/api/v2/server/device-handover/sync":
 			var retired []devicegate.Revocation
 			if err := json.Unmarshal(payload["retired"], &retired); err != nil || len(retired) != 1 || retired[0].Lease != lease {
 				t.Error("真实关闭标记编码错误")
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": devicegate.SyncReply{Run: run, Sequence: 3, LeaseCache: 1,
-				ServerTime: 1100, Leases: []devicegate.Lease{{UserID: 1, IP: "8.8.8.8", Lease: lease, ConfirmedAt: 1000, ExpiresAt: 3601000}}}})
+				ServerTime: 1100, Leases: []devicegate.Lease{{UserID: 1, IP: "8.8.8.8", Lease: lease, ConfirmedAt: 1000, ExpiresAt: 3601000, ConfirmedSequence: 3}}}})
 		default:
 			t.Error("错误的接口路径")
 		}
@@ -56,12 +56,12 @@ func TestDeviceLeaseCacheHTTPNegotiatesAndPreservesExpiryAndRetirement(t *testin
 	}
 	reply, err := client.AdmitDeviceSource(t.Context(), devicegate.AdmissionRequest{Run: run, Sequence: 1, UserID: 1,
 		IP: "8.8.8.8", LeaseCache: 1, Snapshot: &devicegate.Snapshot{Run: run, Sequence: 2, Pending: []uint64{1}, Sources: []devicegate.Source{}}})
-	if err != nil || reply.ConfirmedAt != 1000 || reply.ExpiresAt != 3601000 || reply.ServerTime != 1100 {
+	if err != nil || reply.ConfirmedAt != 1000 || reply.ExpiresAt != 3601000 || reply.ServerTime != 1100 || reply.ConfirmedSequence != 2 {
 		t.Fatalf("期限传输错误：%v", err)
 	}
 	synced, err := client.SyncDeviceSession(t.Context(), devicegate.Snapshot{Run: run, Sequence: 3, LeaseCache: 1,
 		Pending: []uint64{}, Sources: []devicegate.Source{}, Retired: []devicegate.Revocation{{UserID: 1, IP: "8.8.8.8", Lease: lease}}})
-	if err != nil || synced.LeaseCache != 1 || len(synced.Leases) != 1 || synced.Leases[0].ExpiresAt != 3601000 {
+	if err != nil || synced.LeaseCache != 1 || len(synced.Leases) != 1 || synced.Leases[0].ExpiresAt != 3601000 || synced.Leases[0].ConfirmedSequence != 3 {
 		t.Fatalf("同步许可编码错误：%v", err)
 	}
 }

@@ -30,17 +30,18 @@ type AdmissionRequest struct {
 }
 
 type AdmissionReply struct {
-	ConfirmedAt   int64                 `json:"confirmed_at"`
-	ExpiresAt     int64                 `json:"expires_at"`
-	ServerTime    int64                 `json:"server_time"`
-	Status        string                `json:"status"`
-	Lease         string                `json:"lease"`
-	Limit         int                   `json:"limit"`
-	Observed      int                   `json:"observed"`
-	Reason        string                `json:"reason"`
-	Revoked       []Revocation          `json:"revoked"`
-	LimitSnapshot *limitreport.Snapshot `json:"limit_snapshot,omitempty"`
-	Sync          *SyncReply            `json:"sync,omitempty"`
+	ConfirmedSequence uint64                `json:"confirmed_sequence,omitempty"`
+	ConfirmedAt       int64                 `json:"confirmed_at"`
+	ExpiresAt         int64                 `json:"expires_at"`
+	ServerTime        int64                 `json:"server_time"`
+	Status            string                `json:"status"`
+	Lease             string                `json:"lease"`
+	Limit             int                   `json:"limit"`
+	Observed          int                   `json:"observed"`
+	Reason            string                `json:"reason"`
+	Revoked           []Revocation          `json:"revoked"`
+	LimitSnapshot     *limitreport.Snapshot `json:"limit_snapshot,omitempty"`
+	Sync              *SyncReply            `json:"sync,omitempty"`
 }
 
 type Source struct {
@@ -72,11 +73,12 @@ type SyncReply struct {
 }
 
 type Lease struct {
-	UserID      int    `json:"user_id"`
-	IP          string `json:"ip"`
-	Lease       string `json:"lease"`
-	ConfirmedAt int64  `json:"confirmed_at"`
-	ExpiresAt   int64  `json:"expires_at"`
+	ConfirmedSequence uint64 `json:"confirmed_sequence,omitempty"`
+	UserID            int    `json:"user_id"`
+	IP                string `json:"ip"`
+	Lease             string `json:"lease"`
+	ConfirmedAt       int64  `json:"confirmed_at"`
+	ExpiresAt         int64  `json:"expires_at"`
 }
 
 type Revocation struct {

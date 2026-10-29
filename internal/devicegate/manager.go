@@ -30,6 +30,7 @@ type sourceState struct {
 	confirmedAt       int64
 	expiresAt         int64
 	confirmedSequence uint64
+	omissionSequence  uint64
 	deadline          time.Time
 	expiry            *time.Timer
 }
@@ -53,35 +54,42 @@ type retiredSource struct {
 	sequence uint64
 }
 
+type revokedLease struct {
+	until    time.Time
+	barrier  uint64 // 撤销时已采样的请求不能恢复许可。
+	sequence uint64 // 已处理的远端撤销序号；零表示本地撤销。
+}
+
 // Manager 持有实际连接的来源引用，只有关闭回调释放后才向面板确认来源离线。
 type Manager struct {
-	remote       Remote
-	enabled      atomic.Bool
-	mu           sync.Mutex
-	syncMu       chan struct{}
-	run          string
-	ready        bool
-	leaseCache   bool
-	users        map[int]bool
-	closing      bool
-	seq          uint64
-	synced       uint64
-	confirmed    *Snapshot // 由 syncMu 保护，只保存已经确认的来源内容。
-	baseSequence uint64
-	ctx          context.Context
-	cancel       context.CancelFunc
-	sources      map[sourceKey]*sourceState
-	flights      map[sourceKey]*flight
-	revoked      map[string]time.Time
-	retired      map[string]retiredSource
-	loopWG       sync.WaitGroup
-	callWG       sync.WaitGroup
-	onError      func(error)
+	remote             Remote
+	enabled            atomic.Bool
+	mu                 sync.Mutex
+	syncMu             chan struct{}
+	run                string
+	ready              bool
+	leaseCache         bool
+	users              map[int]bool
+	permissionBarriers map[int]uint64
+	closing            bool
+	seq                uint64
+	synced             uint64
+	confirmed          *Snapshot // 由 syncMu 保护，只保存已经确认的来源内容。
+	baseSequence       uint64
+	ctx                context.Context
+	cancel             context.CancelFunc
+	sources            map[sourceKey]*sourceState
+	flights            map[sourceKey]*flight
+	revoked            map[string]revokedLease
+	retired            map[string]retiredSource
+	loopWG             sync.WaitGroup
+	callWG             sync.WaitGroup
+	onError            func(error)
 }
 
 func New(remote Remote, onError func(error)) *Manager {
 	return &Manager{remote: remote, syncMu: make(chan struct{}, 1), sources: make(map[sourceKey]*sourceState),
-		flights: make(map[sourceKey]*flight), revoked: make(map[string]time.Time), retired: make(map[string]retiredSource), onError: onError}
+		flights: make(map[sourceKey]*flight), revoked: make(map[string]revokedLease), retired: make(map[string]retiredSource), onError: onError}
 }
 
 func (m *Manager) Enabled() bool { return m != nil && m.enabled.Load() }
@@ -140,6 +148,7 @@ func (m *Manager) begin(ctx context.Context) error {
 			return err
 		}
 		m.run = hex.EncodeToString(run[:])
+		m.permissionBarriers = nil
 	}
 	run := m.run
 	m.mu.Unlock()
@@ -269,7 +278,7 @@ func (m *Manager) admit(ctx context.Context, key sourceKey, run string, current 
 		}
 	}
 	if err == nil {
-		if _, revoked := m.revoked[reply.Lease]; revoked {
+		if _, revoked := m.revoked[reply.Lease]; revoked && !m.leaseCache {
 			err = ErrRevoked
 		} else if old := m.sources[key]; old != nil && old.lease != reply.Lease && len(old.permits) != 0 {
 			err = ErrRevoked
@@ -463,7 +472,7 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
-		m.ApplyRevocations(reply.Revoked)
+		m.applyRevocations(reply.Revoked, snapshot.Sequence, snapshot.Run)
 		return err
 	}
 	if reply.Run != snapshot.Run || reply.Sequence != snapshot.Sequence {
@@ -482,7 +491,9 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 		m.baseSequence = snapshot.Sequence
 	}
 	m.confirmSnapshot(snapshot, 0)
-	m.ApplyRevocations(reply.Revoked)
+	if snapshot.LeaseCache != 1 {
+		m.ApplyRevocations(reply.Revoked)
+	}
 	return nil
 }
 
@@ -539,11 +550,26 @@ func sameSnapshot(previous *Snapshot, current Snapshot) bool {
 }
 
 func (m *Manager) ApplyRevocations(items []Revocation) {
-	var permits []*Permit
+	m.applyRevocations(items, 0, "")
+}
+
+func (m *Manager) applyRevocations(items []Revocation, sequence uint64, run string) {
 	m.mu.Lock()
+	if run != "" && m.run != run {
+		m.mu.Unlock()
+		return
+	}
+	permits := m.revokeLocked(items, sequence)
+	m.mu.Unlock()
+	revokePermits(permits)
+}
+
+// 调用方持有状态锁，先标记失效，再在锁外执行真实关闭。
+func (m *Manager) revokeLocked(items []Revocation, sequence uint64) []*Permit {
+	var permits []*Permit
 	now := time.Now()
-	for lease, until := range m.revoked {
-		if now.After(until) {
+	for lease, record := range m.revoked {
+		if now.After(record.until) {
 			delete(m.revoked, lease)
 		}
 	}
@@ -551,8 +577,15 @@ func (m *Manager) ApplyRevocations(items []Revocation) {
 		if item.UserID <= 0 || !validLease(item.Lease) {
 			continue
 		}
-		m.revoked[item.Lease] = now.Add(leaseGrace + time.Minute)
 		source := m.sources[sourceKey{user: item.UserID, ip: item.IP}]
+		previous, seen := m.revoked[item.Lease]
+		if sequence != 0 && ((seen && sequence <= previous.sequence) ||
+			(source != nil && source.lease == item.Lease && sequence < source.confirmedSequence)) {
+			continue
+		}
+		m.seq++
+		m.revoked[item.Lease] = revokedLease{until: now.Add(leaseGrace + time.Minute), barrier: m.seq,
+			sequence: max(sequence, previous.sequence)}
 		if source == nil || source.lease != item.Lease {
 			if m.leaseCache {
 				m.retireLocked(item)
@@ -570,8 +603,7 @@ func (m *Manager) ApplyRevocations(items []Revocation) {
 			permits = append(permits, permit)
 		}
 	}
-	m.mu.Unlock()
-	revokePermits(permits)
+	return permits
 }
 
 func (m *Manager) closeAll() {

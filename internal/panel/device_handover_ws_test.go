@@ -97,7 +97,7 @@ func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *tes
 								return
 							}
 							snapshot := payload["snapshot"].(map[string]interface{})
-							result = devicegate.AdmissionReply{Status: "allowed", Lease: lease,
+							result = devicegate.AdmissionReply{Status: "allowed", Lease: lease, ConfirmedSequence: uint64(snapshot["sequence"].(float64)),
 								Sync: &devicegate.SyncReply{Run: run, Sequence: uint64(snapshot["sequence"].(float64))}}
 						default:
 							t.Errorf("意外事件：%s", msg.Event)
@@ -126,7 +126,7 @@ func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *tes
 					t.Error("通道切换改变了原申请，可能重复授予来源")
 				}
 				mu.Unlock()
-				_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": devicegate.AdmissionReply{Status: "allowed", Lease: lease,
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": devicegate.AdmissionReply{Status: "allowed", Lease: lease, ConfirmedSequence: 4,
 					Sync: &devicegate.SyncReply{Run: run, Sequence: 4}}})
 			}))
 			t.Cleanup(server.Close)
@@ -144,7 +144,7 @@ func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *tes
 				t.Fatalf("续期失败：%v", err)
 			}
 			if reply, err := client.AdmitDeviceSource(t.Context(), devicegate.AdmissionRequest{Run: run, Sequence: 3, UserID: 10, IP: "8.8.8.8",
-				Snapshot: &devicegate.Snapshot{Run: run, Sequence: 4, Pending: []uint64{3}, Sources: []devicegate.Source{}, Retired: []devicegate.Revocation{}}}); err != nil || reply.Lease != lease || reply.Sync == nil || reply.Sync.Sequence != 4 {
+				Snapshot: &devicegate.Snapshot{Run: run, Sequence: 4, Pending: []uint64{3}, Sources: []devicegate.Source{}, Retired: []devicegate.Revocation{}}}); err != nil || reply.Lease != lease || reply.Sync == nil || reply.Sync.Sequence != 4 || reply.ConfirmedSequence != 4 {
 				t.Fatalf("准入失败：%v", err)
 			}
 			wantHTTP := int32(0)
