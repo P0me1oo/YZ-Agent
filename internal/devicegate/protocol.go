@@ -64,6 +64,7 @@ type Snapshot struct {
 }
 
 type SyncReply struct {
+	Idle       []Revocation `json:"idle,omitempty"`
 	LeaseCache int          `json:"lease_cache"`
 	ServerTime int64        `json:"server_time"`
 	Leases     []Lease      `json:"leases"`
@@ -82,9 +83,11 @@ type Lease struct {
 }
 
 type Revocation struct {
-	UserID int    `json:"user_id"`
-	IP     string `json:"ip"`
-	Lease  string `json:"lease"`
+	Run               string `json:"run,omitempty"`
+	ConfirmedSequence uint64 `json:"confirmed_sequence,omitempty"`
+	UserID            int    `json:"user_id"`
+	IP                string `json:"ip"`
+	Lease             string `json:"lease"`
 }
 
 type Remote interface {

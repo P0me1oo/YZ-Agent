@@ -21,6 +21,8 @@ type sourceKey struct {
 }
 
 type sourceState struct {
+	run               string
+	leaseSequence     uint64 // 面板核验身份；与本地用于乱序保护的序号分开。
 	key               sourceKey
 	lease             string
 	connected         time.Time
@@ -298,7 +300,7 @@ func (m *Manager) admit(ctx context.Context, key sourceKey, run string, current 
 			}
 			source := m.sources[key]
 			if source == nil {
-				source = &sourceState{key: key, lease: reply.Lease, permits: make(map[*Permit]struct{})}
+				source = &sourceState{key: key, run: m.run, lease: reply.Lease, permits: make(map[*Permit]struct{})}
 				m.sources[key] = source
 			}
 			// 在唤醒前为每个有效连接保留引用，先醒来的短连接释放时

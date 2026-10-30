@@ -30,6 +30,14 @@ func leaseDeadline(item Lease, serverTime int64, started time.Time) (time.Time, 
 }
 
 func (m *Manager) retireLocked(item Revocation) {
+	if item.Run == "" {
+		if previous, exists := m.retired[item.Lease]; exists {
+			// 无本地来源的重复撤销不能覆盖尚待确认的原会话身份。
+			item = previous.item
+		} else {
+			item.Run = m.run
+		}
+	}
 	m.seq++
 	m.retired[item.Lease] = retiredSource{item: item, sequence: m.seq}
 }
@@ -39,7 +47,8 @@ func (m *Manager) removeSourceLocked(source *sourceState) {
 		source.expiry.Stop()
 	}
 	delete(m.sources, source.key)
-	m.retireLocked(Revocation{UserID: source.key.user, IP: source.key.ip, Lease: source.lease})
+	m.retireLocked(Revocation{UserID: source.key.user, IP: source.key.ip, Lease: source.lease,
+		Run: source.run, ConfirmedSequence: source.leaseSequence})
 }
 
 func (m *Manager) installLeaseLocked(item Lease, deadline time.Time, sequence uint64) bool {
@@ -70,15 +79,17 @@ func (m *Manager) installLeaseLocked(item Lease, deadline time.Time, sequence ui
 		} else if item.ConfirmedAt <= source.confirmedAt {
 			// 重传/乱序结果不重建定时器，也不能移动同一次确认的期限。
 			source.confirmedSequence = sequence
+			source.leaseSequence = max(source.leaseSequence, item.ConfirmedSequence)
 			source.omissionSequence = max(source.omissionSequence, sequence)
 			return time.Now().Before(source.deadline)
 		}
 	}
 	if source == nil {
-		source = &sourceState{key: key, lease: item.Lease, permits: make(map[*Permit]struct{})}
+		source = &sourceState{key: key, run: m.run, lease: item.Lease, permits: make(map[*Permit]struct{})}
 		m.sources[key] = source
 	}
 	source.confirmedAt, source.expiresAt, source.confirmedSequence = item.ConfirmedAt, item.ExpiresAt, sequence
+	source.leaseSequence = item.ConfirmedSequence
 	source.omissionSequence = sequence
 	source.deadline = deadline
 	delete(m.retired, item.Lease)
@@ -155,13 +166,13 @@ func (m *Manager) acceptLeases(reply SyncReply, sequence uint64, started time.Ti
 	// 撤销优先，即使同一响应含有矛盾的续期内容也不能复活。
 	m.applyRevocations(reply.Revoked, sequence, reply.Run)
 	deadlines := make([]time.Time, len(reply.Leases))
-	present := make(map[string]bool, len(reply.Leases))
+	present := make(map[string]Lease, len(reply.Leases))
 	for i, item := range reply.Leases {
 		deadline, err := leaseDeadline(item, reply.ServerTime, started)
 		if err != nil {
 			return err
 		}
-		deadlines[i], present[item.Lease] = deadline, true
+		deadlines[i], present[item.Lease] = deadline, item
 	}
 	var omitted []Revocation
 	m.mu.Lock()
@@ -170,7 +181,8 @@ func (m *Manager) acceptLeases(reply SyncReply, sequence uint64, started time.Ti
 		return ErrNotReady
 	}
 	for _, source := range m.sources {
-		if source.omissionSequence <= sequence && !present[source.lease] {
+		_, found := present[source.lease]
+		if source.omissionSequence <= sequence && !found {
 			omitted = append(omitted, Revocation{UserID: source.key.user, IP: source.key.ip, Lease: source.lease})
 		}
 	}
@@ -179,6 +191,28 @@ func (m *Manager) acceptLeases(reply SyncReply, sequence uint64, started time.Ti
 	}
 	// 缺失许可与安装同属一次状态更新，不能在解锁后撤销刚完成的新核验。
 	permits := m.revokeLocked(omitted, sequence)
+	// 空闲归还是自愿停用，与强制撤销分开。快照发出后若已建立连接
+	// 或正在申请，保留原许可并由下一次活动快照续期。
+	var idle []Revocation
+	for _, item := range reply.Idle {
+		key := sourceKey{user: item.UserID, ip: item.IP}
+		source := m.sources[key]
+		lease, found := present[item.Lease]
+		if !found || lease.UserID != item.UserID || lease.IP != item.IP || m.flights[key] != nil {
+			continue
+		}
+		if source == nil {
+			// 在途核验的回包可能丢失。确认当前节点没有这份许可且没有申请，
+			// 用本次收到的身份归还，不重建许可，也不沿用旧会话的编号。
+			item.Run, item.ConfirmedSequence = m.run, lease.ConfirmedSequence
+			idle = append(idle, item)
+		} else if source.lease == item.Lease && len(source.permits) == 0 &&
+			source.confirmedSequence <= sequence && source.omissionSequence <= sequence {
+			idle = append(idle, item)
+		}
+	}
+	// 先建立撤销屏障，再移除缓存；迟到的旧许可不能复活已归还状态。
+	permits = append(permits, m.revokeLocked(idle, sequence)...)
 	m.mu.Unlock()
 	revokePermits(permits)
 	return nil
