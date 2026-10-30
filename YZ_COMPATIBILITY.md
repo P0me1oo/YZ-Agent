@@ -1,5 +1,14 @@
 # YZ-Agent 兼容矩阵
 
+## v2.28.3 设备空闲许可归还与正式发布（2026-10-30）
+
+- [Release v2.28.3](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.28.3) 已发布，固定来源 `361a57ce8625e9d7bdb2d8fec79af7f2291c3b4e`，最终配套面板 `1.111.8`。面板 `1.111.7` 为保留的中间标签，未完成发布；协议初稿中的该版本号由本节更新。
+- [发布流水线](https://github.com/P0me1oo/YZ-Agent/actions/runs/41009580982) 全部成功：Go `1.27.1` 完整竞态、两个核心和兼容模块、Mihomo WireGuard 客户端、安装器，以及 UFW/firewalld × nftables/iptables 四组原生防火墙均通过；两架构安装包及镜像从同一固定提交构建。
+- 12 份原始附件已匿名下载；GitHub 大小和 SHA-256 均匹配，`SHA256SUMS` 的 11 项全部通过。两个架构的旧名称兼容附件与 `yz-agent` 字节一致；ELF 架构、实际构建元数据、完整提交、`CGO_ENABLED=0`、`vcs.modified=false` 及四份构建信息核对通过。amd64 的 `yz-agent`、`xbctl` 已独立执行版本入口；两架构镜像版本由流水线实际运行核对。
+- Agent SHA-256：amd64 `74caa7b8c69643b032fbb9b43bcd39e7e9e38dcb23f82fb620fba0ae3eaab6f2`；arm64 `ca64c43be3f0a1955f82827127ca931c5b5ecbfc66755a8c2df2487f96311428`。固定依赖仍为 YZ-sing-box `v1.15.1` 和 YZ-Xray-core `v0.0.0-20261018151951-fb2f909b7987`。
+- 镜像版本标签、完整提交标签和 `latest` 均指向 `sha256:98e6e0f6782119a487e4086cb6dda6496be84ccfa97cc42f243b911430abf1c8`；两架构 OCI revision 与来源提交一致。已上传 [verification.json](https://github.com/P0me1oo/YZ-Agent/releases/download/v2.28.3/verification.json) 和校验文件，共 14 份附件。
+- 在线空闲许可在确认无连接和在途申请后停用并归还，归还后重连需重新申请；断联未归还、未撤销的许可仍保持原固定一小时期限。迟到许可、新旧会话、权限恢复、真实关闭及多节点共享继续受保护。未部署生产或修改生产数据；无到期保证的旧协议残留仍需真实关闭证据。
+
 ## v2.28.2 正式发布核验（2026-10-29）
 
 - [Release v2.28.2](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.28.2) 已发布，固定来源 `698e7df5712e848e2a45eb835ad367c55f948c4d`，配套面板 `1.111.3`。下节开发阶段记录保留；本节为正式交付依据。
