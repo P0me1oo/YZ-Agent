@@ -8,6 +8,8 @@
 - sing-box 保持 YZ-sing-box `v1.15.1`，面板通信、配置下发和状态回传格式不变。Linux/amd64、Go `1.27.3`、完整功能标签下，核心入口、Xray、sing-box、服务、面板通信、模型和机器管理共 7 个包的竞态测试通过，覆盖真实双核心中转、流量与在线来源回收、闲置连接、热更新、重载及错误恢复。
 - Linux amd64、arm64 开发构建通过，实际 ELF 架构、Go 版本、关闭 CGO、`-trimpath=true`、VCS 起点及 `vcs.modified=true` 已核对；开发产物不作为正式发布附件。
 - 固定依赖后，版本标识、Xray 适配和 Agent 主程序测试通过，管理工具编译通过；从 Agent 模块运行的 MPTCP 默认监听回归通过。下载模块中的 1,241 个文件与核心固定提交逐文件一致，未包含协作规则，全部 Go 模块校验通过。
+- Agent 功能源提交为 `ab0baa27fc9cbb32e9de49b282aa95dbabd58609`。从干净提交构建的 Linux amd64、arm64 Agent 和管理工具共四份程序通过 ELF、完整 VCS revision、`vcs.modified=false`、`CGO_ENABLED=0` 与 `-trimpath=true` 核验；Agent 实际模块为上述固定新核心，sing-box 仍为 `v1.15.1`。amd64 两份程序实际执行版本入口，显示 `v2.29.0`、Xray 上游 `v26.10.31`、YZ fork `v26.11.0` 和正确完整来源。
+- 本地固定来源 Agent SHA-256：amd64 `17e9b37000d83cde35b28065bde5642de289dc9dae4c6bbd925b543aeaaea4fb`，arm64 `69acecde9ba34fe18133a6ed6b614731b28fdb284d9ba989a50351894a2809f2`。这些是本地构建核验值，未作为正式附件发布；后补文档复用已有验证，不重复协议回归。
 - 上游核心完整测试、兼容补丁竞态、REALITY 互通、MPTCP 默认监听回归和双架构构建通过，详情见核心 `YZ_FORK.md`。尚未运行 Agent 全仓、外置 Mihomo 或四组原生防火墙发布检查；未发布或部署。
 
 ## v2.28.3 设备空闲许可归还与正式发布（2026-10-30）
