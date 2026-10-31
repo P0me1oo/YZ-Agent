@@ -1,5 +1,11 @@
 # 变更记录
 
+## v2.29.0 - 未发布
+
+- 升级至 Xray 上游 `v26.10.31` / YZ-Xray-core `v26.11.0`，包含默认关闭 MPTCP 的安全修复及上游传输、配置和资源下载更新。
+- 同步 PROXY 协议、CPU 特性检测和 TLS 根证书依赖；保留 YZ 的 SS2022 释放、REALITY 双模式及双核心运行兼容。
+- 模块依赖和构建标识固定到核心提交 `b56aa7997c7ee6afe79664e13d64984da6a60f1c`。验证与交付状态见[兼容矩阵](YZ_COMPATIBILITY.md)。
+
 ## v2.28.3 - 2026-10-30
 
 [已正式发布](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.28.3)。完整验证和产物核验见[兼容矩阵](YZ_COMPATIBILITY.md)。

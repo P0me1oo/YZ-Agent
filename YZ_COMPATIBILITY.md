@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.29.0 Xray v26.10.31 固定依赖（2026-10-31，未发布）
+
+- Agent 起点为 `000dc0d4498ce23c61c04abe44869e02f3d430aa`，包含已发布 `v2.28.3` 的全部功能；独立分支 `upgrade/xray-v26.10.31` 保留原工作区已有修改。
+- 核心起点为 `610390d105c8f08bf4f3e756d3abb03d7c7cea32`，目标为 YZ-Xray-core `v26.11.0`，固定官方上游 `v26.10.31` / `a4a3dff5b20c2faae567b742c172c7b95e75c083`。保留 YZ 统计、限速、PROXY 信任名单、SS2022 时间与连接释放和 REALITY 双模式兼容。
+- 核心固定为 `b56aa7997c7ee6afe79664e13d64984da6a60f1c`，已推送至 `P0me1oo/YZ-Xray-core`；Go 模块为 `v0.0.0-20261031144429-b56aa7997c7e`，模块校验值为 `h1:ws1plFBIRyNkRjkIRmeVflD+XSBYeH2UXCLv1QOwmt8=`。`go.mod`、`go.sum` 和构建标识统一指向该固定来源，不保留开发期本地核心替换。
+- sing-box 保持 YZ-sing-box `v1.15.1`，面板通信、配置下发和状态回传格式不变。Linux/amd64、Go `1.27.3`、完整功能标签下，核心入口、Xray、sing-box、服务、面板通信、模型和机器管理共 7 个包的竞态测试通过，覆盖真实双核心中转、流量与在线来源回收、闲置连接、热更新、重载及错误恢复。
+- Linux amd64、arm64 开发构建通过，实际 ELF 架构、Go 版本、关闭 CGO、`-trimpath=true`、VCS 起点及 `vcs.modified=true` 已核对；开发产物不作为正式发布附件。
+- 固定依赖后，版本标识、Xray 适配和 Agent 主程序测试通过，管理工具编译通过；从 Agent 模块运行的 MPTCP 默认监听回归通过。下载模块中的 1,241 个文件与核心固定提交逐文件一致，未包含协作规则，全部 Go 模块校验通过。
+- 上游核心完整测试、兼容补丁竞态、REALITY 互通、MPTCP 默认监听回归和双架构构建通过，详情见核心 `YZ_FORK.md`。尚未运行 Agent 全仓、外置 Mihomo 或四组原生防火墙发布检查；未发布或部署。
+
 ## v2.28.3 设备空闲许可归还与正式发布（2026-10-30）
 
 - [Release v2.28.3](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.28.3) 已发布，固定来源 `361a57ce8625e9d7bdb2d8fec79af7f2291c3b4e`，最终配套面板 `1.111.8`。面板 `1.111.7` 为保留的中间标签，未完成发布；协议初稿中的该版本号由本节更新。

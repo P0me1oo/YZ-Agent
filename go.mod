@@ -35,7 +35,7 @@ require (
 	github.com/libdns/tencentcloud v1.4.3
 	github.com/libdns/vultr/v2 v2.0.4
 	github.com/miekg/dns v1.1.73
-	github.com/pires/go-proxyproto v0.15.0
+	github.com/pires/go-proxyproto v0.16.0
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7
 	github.com/sagernet/sing v0.9.0-beta.4
 	github.com/sagernet/sing-box v1.14.0
@@ -160,7 +160,7 @@ require (
 	github.com/juju/ratelimit v1.0.2 // indirect
 	github.com/keybase/go-keychain v0.0.1 // indirect
 	github.com/klauspost/compress v1.20.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.4.1 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -277,7 +277,7 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20261005185213-c3db4df58582 // indirect
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261020153306-9f2b28d4331a // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
@@ -307,6 +307,6 @@ replace github.com/sagernet/sing-shadowsocks => ./compat/sing-shadowsocks
 // Vision 保留 TLS 对象指针，避免 uintptr 往返触发 Go 指针校验；来源见兼容目录。
 replace github.com/sagernet/sing-vmess => ./compat/sing-vmess
 
-// 上游 v26.10.17 没有对应的 Go module Tag；保留兼容的 require 版本，
+// 上游 v26.10.31 没有对应的 Go module Tag；保留兼容的 require 版本，
 // 并将实际依赖固定到 YZ fork 的发布提交，避免解析到移动分支。
-replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261018151951-fb2f909b7987
+replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261031144429-b56aa7997c7e
