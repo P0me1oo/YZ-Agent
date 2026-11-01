@@ -15,6 +15,8 @@ import (
 
 const MaxBytes uint64 = 9007199254740991
 
+const proxyConfirmationTimeout = 180 * time.Second
+
 type Policy struct {
 	Limit       uint64   `json:"limit"`
 	Mode        string   `json:"mode"`
@@ -263,7 +265,7 @@ func (m *Meter) blockedLocked(now time.Time) bool {
 	}
 	if p.Mode == "proxy" {
 		// 面板负责累计，断线后不能继续用过期额度放行；管理连接保持运行。
-		return m.writeFailed || !s.Initialized || s.Error != "" || m.confirmedAt.IsZero() || now.Sub(m.confirmedAt) >= 30*time.Second || add(p.ProxyRX, p.ProxyTX) >= p.Limit
+		return m.writeFailed || !s.Initialized || s.Error != "" || m.confirmedAt.IsZero() || now.Sub(m.confirmedAt) >= proxyConfirmationTimeout || add(p.ProxyRX, p.ProxyTX) >= p.Limit
 	}
 	used := add(p.Baseline, s.TX)
 	if p.Mode == "both" {

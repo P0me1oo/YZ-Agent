@@ -420,7 +420,13 @@ func TestProxyLeaseRolloverAndStorageFailure(t *testing.T) {
 	if _, blocked := m.Tick(now); blocked {
 		t.Fatal("新周期确认后未恢复")
 	}
-	if _, blocked := m.Tick(time.Now().Add(31 * time.Second)); !blocked {
+	confirmed := m.confirmedAt
+	for _, seconds := range []int{31, 179} {
+		if _, blocked := m.Tick(confirmed.Add(time.Duration(seconds) * time.Second)); blocked {
+			t.Fatalf("确认后 %d 秒提前保护", seconds)
+		}
+	}
+	if _, blocked := m.Tick(confirmed.Add(180 * time.Second)); !blocked {
 		t.Fatal("过期额度继续放行")
 	}
 	if err := m.Apply(p); err != nil {
@@ -428,6 +434,9 @@ func TestProxyLeaseRolloverAndStorageFailure(t *testing.T) {
 	}
 	if _, blocked := m.Tick(time.Now()); blocked {
 		t.Fatal("控制通道恢复失败")
+	}
+	if _, blocked := m.Tick(m.confirmedAt.Add(179 * time.Second)); blocked {
+		t.Fatal("用量未增长的有效确认没有续期")
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)

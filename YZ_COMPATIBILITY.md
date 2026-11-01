@@ -1,5 +1,11 @@
 # YZ-Agent 兼容矩阵
 
+## v2.26.0 工作区计量确认超时调整（2026-11-01，本地未发布）
+
+- 当前 `dev` 基于 `ed15db8` / `v2.26.0`，保留已有 README 和 CHANGELOG 修改，只将代理模式的有效面板确认超时从 30 秒改为 180 秒；配套面板 `1.112.0`。没有合入其他分支、改变核心依赖或发布版本标签。
+- Go `1.27.3` 下执行 `CGO_ENABLED=0 GOTOOLCHAIN=local go test -mod=readonly -v ./internal/machinetraffic` 通过。补充 31 秒及 179 秒保持可用、180 秒停止、累计未增长的有效确认续期检查，原有跨月、超限、存储失败和恢复路径继续通过。
+- 面板相关 156 项、3602 条断言及 60 秒调度、5 秒 TCP 检查验证见[面板兼容记录](../YZboard/YZ_COMPATIBILITY.md)。本次未运行完整竞态或发布回归，未生成安装包、提交、推送或部署；旧 Agent 的 30 秒行为仍需配套更新后改变。
+
 ## v2.26.0 正式发布核验（2026-10-27）
 
 - [Release v2.26.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.26.0) 已发布，固定来源 `e1068a733bc5b03cc30e119f9db2202bc3689e93`，[发布流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/40397699708) 全部通过。配套面板 `1.107.1` / `809728d9263b759c385047e6af174483bc3bb4db` 与管理端 `0.78.0`，两个核心固定依赖不变。
