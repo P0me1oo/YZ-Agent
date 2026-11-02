@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/balancer"
 	"github.com/P0me1oo/YZ-Agent/internal/limitreport"
+	"github.com/P0me1oo/YZ-Agent/internal/scheduling"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/machinetraffic"
@@ -112,9 +113,10 @@ type MachineBaseConfig struct {
 
 // NodeConfig is the response from GET /api/v1/server/UniProxy/config
 type NodeConfig struct {
-	Balancer         *balancer.Config         `json:"balancer,omitempty"`
-	BalancerReceiver *balancer.ReceiverConfig `json:"balancer_receiver,omitempty"`
-	WireGuard        *WireGuardConfig         `json:"wireguard,omitempty"`
+	SchedulingTargets []scheduling.Target      `json:"scheduling_targets,omitempty"`
+	Balancer          *balancer.Config         `json:"balancer,omitempty"`
+	BalancerReceiver  *balancer.ReceiverConfig `json:"balancer_receiver,omitempty"`
+	WireGuard         *WireGuardConfig         `json:"wireguard,omitempty"`
 	// NodeID is populated in machine-mode WS events for routing.
 	NodeID          int                    `json:"node_id,omitempty"`
 	Protocol        string                 `json:"protocol"`

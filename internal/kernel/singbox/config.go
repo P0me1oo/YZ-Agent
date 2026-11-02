@@ -23,6 +23,10 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	if err := kernel.ValidateSourcePolicy(nc); err != nil {
 		return nil, err
 	}
+	level, err := config.ResolveKernelLogLevel(kcfg.LogLevel, nc.KernelLogLevel)
+	if err != nil {
+		return nil, err
+	}
 	var outbounds []M
 	tags := make(map[string]bool)
 
@@ -54,11 +58,12 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	}
 	outbounds = append(outbounds, buildRelayOutbounds(nc)...)
 
+	logConfig := M{"level": level, "timestamp": true}
+	if level == "disabled" {
+		logConfig = M{"disabled": true}
+	}
 	cfg := M{
-		"log": M{
-			"level":     kcfg.LogLevel,
-			"timestamp": true,
-		},
+		"log":       logConfig,
 		"outbounds": outbounds,
 	}
 

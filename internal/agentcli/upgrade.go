@@ -105,6 +105,9 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 		if err != nil {
 			return "", fmt.Errorf("%s version check failed: %w", name, err)
 		}
+		if err := verifyUpgradeVersion(release, out); err != nil {
+			return "", fmt.Errorf("%s: %w", name, err)
+		}
 		if i == 0 {
 			report = out
 			// 统一程序同时提供节点和管理功能，只下载一份并复用安装事务。
@@ -115,7 +118,7 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 				if err := ops.migrate(files[0].staged, files[0].staged); err != nil {
 					return "", err
 				}
-				return installedVersion(release, report), nil
+				return readInstalledUpgradeVersion(paths, release, ops)
 			}
 		}
 	}
@@ -134,7 +137,7 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 		if err := ops.migrate(files[0].staged, files[1].staged); err != nil {
 			return "", err
 		}
-		return installedVersion(release, report), nil
+		return readInstalledUpgradeVersion(paths, release, ops)
 	}
 
 	for i := range files {
@@ -191,7 +194,7 @@ func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) 
 	if err := ops.restart(); err != nil {
 		return "", rollback(fmt.Errorf("upgrade restart failed: %w", err), true)
 	}
-	return installedVersion(release, report), nil
+	return readInstalledUpgradeVersion(paths, release, ops)
 }
 
 // 优先使用正式名称；历史 Release 继续按原附件名下载并校验。
@@ -206,4 +209,33 @@ func releaseNodeArtifact(checksums []byte, arch string) (string, error) {
 		}
 	}
 	return "", errors.New("release checksums contain no supported node artifact")
+}
+
+func verifyUpgradeVersion(target string, report []byte) error {
+	actual := installedVersion("", report)
+	if actual == "unknown" {
+		return fmt.Errorf("invalid binary version output")
+	}
+	if target == "" || target == "latest" {
+		return nil
+	}
+	cmp, err := compareReleaseVersions(actual, target)
+	if err != nil {
+		return err
+	}
+	if cmp != 0 {
+		return fmt.Errorf("binary version %s does not match requested %s", actual, target)
+	}
+	return nil
+}
+
+func readInstalledUpgradeVersion(paths installPaths, target string, ops upgradeOperations) (string, error) {
+	report, err := ops.run(paths.installedBinary(), "-v")
+	if err != nil {
+		return "", fmt.Errorf("read installed version: %w", err)
+	}
+	if err := verifyUpgradeVersion(target, report); err != nil {
+		return "", err
+	}
+	return installedVersion("", report), nil
 }

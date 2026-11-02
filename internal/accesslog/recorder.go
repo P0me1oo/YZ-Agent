@@ -203,7 +203,7 @@ func (r *Recorder) Checkpoint(path string) (int, error) {
 }
 
 func writeState(path string, state savedState) error {
-	release := privacy.LockWrite()
+	release := privacy.LockFileWrite(path)
 	defer release()
 	if path == "" {
 		return nil

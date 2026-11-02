@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	version       = "v2.29.0"
+	version       = "v2.30.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -163,6 +163,35 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+	reloadCh := make(chan *config.RootConfig, 1)
+	var reloadMu sync.Mutex
+	enqueueReload := func(cfg *config.RootConfig) {
+		instances, err := cfg.NormalizeInstances()
+		if err == nil {
+			err = config.ValidateStartupLayout(instances)
+		}
+		if err != nil {
+			nlog.Core().Warn("invalid reload layout, keeping current config", "error", err)
+			return
+		}
+		reloadMu.Lock()
+		defer reloadMu.Unlock()
+		select {
+		case <-reloadCh:
+		default:
+		}
+		reloadCh <- cfg
+	}
+	watcher, err := config.WatchConfigRoot(watchCtx, configPath, enqueueReload)
+	if err != nil {
+		nlog.Core().Warn("config watcher unavailable", "error", err)
+	}
+	if watcher != nil {
+		defer watcher.Stop()
+	}
+
 	for root := initialRoot; ; {
 		ctx, cancel := context.WithCancel(context.Background())
 		if !root.PrivacyReady {
@@ -175,23 +204,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 				return
 			}
 		}
-		reloadCh := make(chan *config.RootConfig, 1)
-
-		watcher, err := config.WatchConfigRoot(ctx, configPath, func(newCfg *config.RootConfig) {
-			select {
-			case reloadCh <- newCfg:
-			default:
-			}
-		})
-		go config.WatchPrivacy(ctx, configPath, root, func(newCfg *config.RootConfig) {
-			select {
-			case reloadCh <- newCfg:
-			default:
-			}
-		})
-		if err != nil {
-			nlog.Core().Warn("config watcher unavailable, hot-reload disabled", "error", err)
-		}
+		go config.WatchPrivacy(ctx, configPath, root, enqueueReload)
 
 		instances, err := root.NormalizeInstances()
 		if err != nil {
@@ -340,9 +353,6 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			if sig, shuttingDown := waitForReloadStop(doneCh, sigCh); shuttingDown {
 				nlog.Core().Info(fmt.Sprintf("received %v during reload, shutting down...", sig))
 				forceExitIfNeeded(waitForShutdown(doneCh, sigCh, shutdownGracePeriod))
-				if watcher != nil {
-					watcher.Stop()
-				}
 				stopShared()
 				return
 			}
@@ -350,18 +360,12 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			nlog.Core().Info(fmt.Sprintf("received %v, shutting down...", sig))
 			cancel()
 			forceExitIfNeeded(waitForShutdown(doneCh, sigCh, shutdownGracePeriod))
-			if watcher != nil {
-				watcher.Stop()
-			}
 			stopShared()
 			return
 		case <-doneCh:
 		}
 
 		cancel()
-		if watcher != nil {
-			watcher.Stop()
-		}
 		stopShared()
 
 		if newRoot == nil {
@@ -373,6 +377,16 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			return
 		}
 
+		// 退出期间文件可能连续变化。先排空旧通知，再读取最终文件；
+		// 读取后到达的通知留给下一轮，避免启动窗口遗漏更新。
+		reloadMu.Lock()
+		select {
+		case latest := <-reloadCh:
+			newRoot = latest
+		default:
+		}
+		reloadMu.Unlock()
+		newRoot = readFinalReloadConfig(configPath, newRoot)
 		newInstances, err := newRoot.NormalizeInstances()
 		if err != nil {
 			nlog.Core().Error("failed to normalize reloaded config", "error", err)
@@ -385,6 +399,22 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 		root = newRoot
 		nlog.Core().Info("reload complete, services restarting with new config")
 	}
+}
+
+func readFinalReloadConfig(path string, notified *config.RootConfig) *config.RootConfig {
+	latest, err := config.LoadRoot(path)
+	if err == nil {
+		var instances []*config.Config
+		instances, err = latest.NormalizeInstances()
+		if err == nil {
+			err = config.ValidateStartupLayout(instances)
+		}
+	}
+	if err != nil {
+		nlog.Core().Warn("final reload read failed, using last valid config", "error", err)
+		return notified
+	}
+	return latest
 }
 
 type shutdownResult int

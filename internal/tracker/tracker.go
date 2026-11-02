@@ -12,7 +12,6 @@ import (
 // snapshot is an immutable point-in-time view of tracker state.
 // It is swapped atomically so readers never block writers.
 type snapshot struct {
-	traffic   map[int][2]int64        // userID → [upload, download] delta
 	aliveIPs  map[int]map[string]bool // userID → set of source IPs（含不计入设备数的来源）
 	online    map[int]int             // userID → distinct IP count（含不计入设备数的来源）
 	connCount int
@@ -39,7 +38,8 @@ type connectionSnapshot struct {
 // This eliminates contention between the 10s Process tick and the 60s
 // flush/push tick.
 type Tracker struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	revision uint64
 
 	// lastSeen stores the cumulative traffic from the previous Process() call.
 	// Protected by mu — only written by Process.
@@ -84,7 +84,6 @@ func New() *Tracker {
 	}
 	// Publish initial empty snapshot.
 	t.live.Store(&snapshot{
-		traffic:  make(map[int][2]int64),
 		aliveIPs: make(map[int]map[string]bool),
 		online:   make(map[int]int),
 	})
@@ -122,6 +121,7 @@ func (t *Tracker) Process(
 		t.lastSeen[uid] = cum
 
 		if deltaUp > 0 || deltaDown > 0 {
+			t.revision++
 			cur := t.pendingTraffic[uid]
 			cur[0] += deltaUp
 			cur[1] += deltaDown
@@ -145,7 +145,6 @@ func (t *Tracker) Process(
 
 	// Publish new snapshot (readers will see this atomically).
 	t.live.Store(&snapshot{
-		traffic:   copyTrafficMap(t.pendingTraffic),
 		aliveIPs:  kernelAliveIPs, // kernel provides fresh copy each tick
 		online:    online,
 		connCount: connCount,
@@ -158,6 +157,7 @@ func (t *Tracker) Process(
 // Lock-free: reads from live snapshot, then acquires mu only to drain.
 func (t *Tracker) FlushTraffic() map[int][2]int64 {
 	t.mu.Lock()
+	t.revision++
 	data := t.pendingTraffic
 	t.pendingTraffic = make(map[int][2]int64, len(data))
 	t.mu.Unlock()
@@ -167,6 +167,7 @@ func (t *Tracker) FlushTraffic() map[int][2]int64 {
 // RestoreTraffic adds traffic back (used when push to panel fails).
 func (t *Tracker) RestoreTraffic(data map[int][2]int64) {
 	t.mu.Lock()
+	t.revision++
 	for uid, d := range data {
 		cur := t.pendingTraffic[uid]
 		cur[0] += d[0]
@@ -301,3 +302,6 @@ func copyTrafficMap(src map[int][2]int64) map[int][2]int64 {
 	}
 	return dst
 }
+
+// PendingRevision 只在待上报内容变化时推进，避免静止流量重复复制和编码。
+func (t *Tracker) PendingRevision() uint64 { t.mu.Lock(); defer t.mu.Unlock(); return t.revision }

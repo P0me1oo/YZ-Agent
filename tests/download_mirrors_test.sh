@@ -133,7 +133,7 @@ verify_release_checksum "$TEST_ROOT/unverified-agent" yz-agent-linux-amd64
     select_target_name() { :; }
     download_release_file() {
         [[ "$1" = */xboard-node-linux-amd64 ]] || return 22
-        printf '#!/usr/bin/env bash\nprintf "xboard-node v1.13-yz.24\\n"\n' > "$2"
+        printf '#!/usr/bin/env bash\nprintf "xboard-node v2.18.0\\n"\n' > "$2"
     }
     stage_binary
 )

@@ -350,8 +350,12 @@ func (c *Client) userPath() string {
 
 // GetConfig fetches node configuration. Returns nil if not modified (304).
 func (c *Client) GetConfig() (*NodeConfig, error) {
+	return c.GetConfigContext(context.Background())
+}
+
+func (c *Client) GetConfigContext(ctx context.Context) (*NodeConfig, error) {
 	configETag, _ := c.ETags()
-	resp, err := c.doRequest("GET", c.configPath(), nil, configETag)
+	resp, err := c.doRequestContext(ctx, "GET", c.configPath(), nil, configETag)
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)
 	}
@@ -391,8 +395,12 @@ func (c *Client) GetConfig() (*NodeConfig, error) {
 
 // GetUsers fetches available users. Returns nil if not modified (304).
 func (c *Client) GetUsers() ([]User, error) {
+	return c.GetUsersContext(context.Background())
+}
+
+func (c *Client) GetUsersContext(ctx context.Context) ([]User, error) {
 	_, userETag := c.ETags()
-	resp, err := c.doRequest("GET", c.userPath(), nil, userETag)
+	resp, err := c.doRequestContext(ctx, "GET", c.userPath(), nil, userETag)
 	if err != nil {
 		return nil, fmt.Errorf("get users: %w", err)
 	}
@@ -464,7 +472,11 @@ func (c *Client) ResetETags() {
 
 // GetMachineNodes fetches the list of active nodes bound to this machine.
 func (c *Client) GetMachineNodes() (*MachineNodesResponse, error) {
-	resp, err := c.doRequest("POST", "/api/v2/server/machine/nodes", nil, "")
+	return c.GetMachineNodesContext(context.Background())
+}
+
+func (c *Client) GetMachineNodesContext(ctx context.Context) (*MachineNodesResponse, error) {
+	resp, err := c.doRequestContext(ctx, "POST", "/api/v2/server/machine/nodes", nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("get machine nodes: %w", err)
 	}

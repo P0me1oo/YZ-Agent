@@ -1,5 +1,12 @@
 # YZ-Agent 兼容矩阵
 
+## v2.30.0 调度探测与可靠性修复（2026-11-03，发布验证中）
+
+- 基于 `f371baf5feb5f79a7ec75286cb0ecb32d09930b2`，包含既有独立落地 TCP 探测、模型转换和状态上报，以及本次 15 项可靠性修复。调度功能配套面板 `1.114.0`、管理端 `0.84.0`；旧面板仍可使用其他修复。核心目录和固定依赖不变。
+- 本地修复验证使用 Go `1.27.3`：完整 sing-box 包按项目 20 分钟期限在 658.407 秒内通过；后续统计改动完成其余有测试包的并发检测及双核心中转（367.921 秒），最后 ETag 失败路径再次通过相关包。八组安装器、八个兼容测试包和双架构验证构建通过。初始探测阶段的 10 分钟超时记录已由完整检查覆盖，没有删除、跳过或降低失败用例。
+- 发布来源以本次固定源码提交和 `v2.30.0` Tag 为准；GitHub 流水线补齐原生防火墙组合、Mihomo、干净来源构建和安装附件检查。仅复用相同完整 SHA 及必需环境的成功结果。
+- 15 项修复及本地基准、证书与增量流量恢复边界见 [可靠性修复记录](docs/reliability-review-2026-11.md)。机器日常更新使用面板“服务器管理”的“升级”，运行版本回报必须与安装结果一致。此次未授权更新服务器或发布 Docker 镜像。
+
 ## v2.29.0 Xray 升级与计量确认超时正式发布（2026-11-02）
 
 - [Release v2.29.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.29.0) 已正式发布，时间 `2026-11-02T01:47:46Z`，固定来源 `069d0303930ad9ed2e4ad1c3492f880024f48ccd`。包含已发布 `v2.28.3`、Xray 升级分支与本地 `32688999c951cabc071f1d941f6e658b9cac749d` 的 180 秒代理计量确认修复，配套面板 `1.112.0`。
@@ -1708,16 +1715,19 @@ VERSION=v1.13-yz.11 make build-linux
 | `xbctl-linux-amd64` | `13b477631bae112134588a184422cb91345bda168fee97987c44a542ece2298f` |
 | `xbctl-linux-arm64` | `e0c5eb94288a3d2c4d813fa1bc227d76000e20dae74aac6c6324c0b9ce44f19a` |
 
-发布前至少执行：
+当前构建与发布检查沿用 [Makefile](Makefile) 和 [CI 工作流](.github/workflows/ci.yml)：
 
 ```bash
-go list -m -json github.com/xtls/xray-core
-go test -v -race -count=1 ./...
-go build -ldflags "-X main.version=v1.13-yz.11" ./cmd/xboard-node
-go build -ldflags "-X main.version=v1.13-yz.11" ./cmd/xbctl
+go list -m -json github.com/xtls/xray-core github.com/sagernet/sing-box
+make test
+# VERSION 使用本次已授权发布的正式 Tag；以下示例仅构建本地未发布源码。
+make build VERSION=v2.30.0
+make build-all VERSION=v2.30.0
 ```
 
-安装器和升级器从同一 Node Release 下载 `xboard-node` 和 `xbctl`，并使用该 Release 的 `SHA256SUMS` 校验。面板通过 `releases/latest/download/install.sh` 获取最新正式安装器，安装器再通过 `latest` 解析同一正式 Release；需要回滚时必须传入明确的旧 Node Tag。`.github/workflows/ci.yml` 对固定 `v*` Tag 执行测试、双架构构建、Release 资产上传和多架构镜像发布。只有 Release 记录与六个资产完整、校验值一致且 Docker manifest 包含 `linux/amd64` 和 `linux/arm64` 后，才能把 Tag 视为已发布。Xray fork 的回滚边界由 Node `go.mod` 中记录的 pseudo-version 和对应 fork commit 确定。
+节点主入口为 `./cmd/yz-agent`，历史管理兼容入口为 `./cmd/xbctl`。正式安装附件优先使用 `yz-agent-linux-<架构>`，安装器和升级器同时兼容 `agent`、`xboard-node` 和历史独立 `xbctl` 附件；附件、安装器和 `SHA256SUMS` 必须来自同一固定 Release，替换前核对程序实际版本与目标版本。回滚须传入明确历史 Tag。
+
+工作流按固定 Tag 执行验证、双架构构建和 Release 附件上传，同一完整 SHA 的已成功检查可按工作流条件复用。镜像发布为独立操作：`workflow_dispatch` 的 `publish_docker` 默认为 `false`，只有单独获得镜像发布授权后才开启；提交、推送、Tag、Release 和服务器更新均不包含镜像发布授权。安装包发布完成以授权范围内附件可获取、来源与校验一致为准；只有另行发布镜像时才检查多架构 manifest。Xray fork 的回滚边界由 Node `go.mod` 的固定 pseudo-version 和对应 fork commit 确定。
 
 ## 后续上游同步
 
@@ -1725,5 +1735,5 @@ go build -ldflags "-X main.version=v1.13-yz.11" ./cmd/xbctl
 
 1. 先记录官方 Tag 和对应 commit，再合并到 YZ fork；
 2. 解决冲突时保留 Hysteria2 用户识别、统计、Dispatcher 和限速补丁及其测试；
-3. 新上游版本的 fork patch 序列从 `yz.1` 重新开始；
+3. 产品继续使用独立的 `v主.次.修订` 正式版本，记录固定上游基线，不再新增 `-yz.N` 后缀；
 4. 同步更新本文档、`go.mod/go.sum`、Node Release Tag、构建信息和变更说明。

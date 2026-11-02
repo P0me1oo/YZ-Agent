@@ -53,20 +53,21 @@ HEALTH_ENABLED=0
 ARCH=amd64
 YES=1
 ACTION=upgrade
-RELEASE_VERSION=v1.13-yz.23
+RELEASE_VERSION=v1.14.0
 RESTARTS=0
 mkdir -p "$INSTALL_ROOT" "$DEFAULT_BIN_DIR" "$CASE_ROOT/entry" "$CASE_ROOT/package" "$BIN_DIR"
 printf 'keep\n' >"$BIN_DIR/unrelated"
 printf 'keep\n' >"$DEFAULT_BIN_DIR/unrelated"
 cat >"$CASE_ROOT/package/xboard-node" <<'NODE'
 #!/usr/bin/env bash
+if [ "${1-}" = -v ]; then printf 'xboard-node v1.14.0\n'; exit 0; fi
 printf 'new-xboard-node\n'
 NODE
 cat >"$CASE_ROOT/package/xbctl" <<'CLI'
 #!/usr/bin/env bash
 set -euo pipefail
 case "${1-} ${2-}" in
-    'version ') printf 'new-xbctl\n' ;;
+    'version ') printf 'xbctl v1.14.0\n' ;;
     'config bin-dir') printf '/custom-directory-supported\n' ;;
     'config health-port') printf '0\n' ;;
     'config refresh-meta')

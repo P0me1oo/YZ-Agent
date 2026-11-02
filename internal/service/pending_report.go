@@ -26,9 +26,14 @@ import (
 // 文件名包含面板地址和节点编号的摘要：配置目录被改绑到其他节点时，旧文件不会
 // 被误报给新节点。设备和在线人数是即时状态，不保存；已组成批次的限制事件保存并继续重试。
 type pendingReportStore struct {
-	path     string
-	identity string
-	mu       sync.Mutex
+	path       string
+	identity   string
+	mu         sync.Mutex
+	lastHash   [32]byte
+	saved      bool
+	lastState  pendingReportFile
+	journalSeq uint64
+	loadErr    error
 }
 
 const pendingReportVersion = 1
@@ -52,11 +57,12 @@ type pendingBatch struct {
 func (p pendingBatch) empty() bool { return p.pendingTraffic.empty() && len(p.LimitEvents) == 0 }
 
 type pendingReportFile struct {
-	Version  int            `json:"version"`
-	Identity string         `json:"identity"`
-	SavedAt  time.Time      `json:"saved_at"`
-	Batch    *pendingBatch  `json:"batch,omitempty"`
-	Pending  pendingTraffic `json:"pending"`
+	Version         int            `json:"version"`
+	JournalSequence uint64         `json:"journal_sequence,omitempty"`
+	Identity        string         `json:"identity"`
+	SavedAt         time.Time      `json:"saved_at"`
+	Batch           *pendingBatch  `json:"batch,omitempty"`
+	Pending         pendingTraffic `json:"pending"`
 }
 
 // newPendingReportStore 为向面板上报的节点创建存储；独立运行或没有配置目录时返回 nil。
@@ -74,71 +80,115 @@ func newPendingReportStore(cfg *config.Config) *pendingReportStore {
 // save 用临时文件替换的方式写入，写到一半断电也不会留下损坏的文件。
 // 没有任何待确认数据时删除文件。
 func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) error {
-	release := privacy.LockWrite()
-	defer release()
 	if s == nil {
 		return nil
 	}
+	release := privacy.LockFileWrite(s.path)
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if (batch == nil || batch.empty()) && pending.empty() {
-		if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		syncDir(filepath.Dir(s.path))
-		return nil
+	if s.loadErr != nil {
+		return fmt.Errorf("pending storage recovery failed, preserving files: %w", s.loadErr)
 	}
 	if batch != nil && batch.empty() {
 		batch = nil
 	}
-	data, err := json.Marshal(pendingReportFile{
-		Version:  pendingReportVersion,
-		Identity: s.identity,
-		SavedAt:  time.Now().UTC(),
-		Batch:    batch,
-		Pending:  pending,
-	})
-	if err != nil {
-		return err
+	state := pendingReportFile{Version: pendingReportVersion, Identity: s.identity, Batch: batch, Pending: pending}
+	hash, err := pendingStateHash(state)
+ if err != nil { return err }
+	if s.saved && hash == s.lastHash {
+		return nil
 	}
-	data, err = privacy.Protect(s.path, data)
-	if err != nil {
-		return err
-	}
+	empty := batch == nil && pending.empty()
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, filepath.Base(s.path)+".tmp-*")
+	// 首次、每 128 次变化和清空时发布检查点；中间只追加变化记录。
+	if !s.saved || s.journalSeq%128 == 127 || empty {
+		state.JournalSequence = s.journalSeq + 1
+		checkpoint, err := json.Marshal(state)
+		if err != nil {
+			return err
+		}
+		if err := s.writeProtected(s.path, checkpoint); err != nil {
+			return err
+		}
+		s.journalSeq = state.JournalSequence
+		if err := os.RemoveAll(s.path + ".journal"); err != nil {
+			return err
+		}
+		if empty {
+			if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			syncDir(dir)
+		}
+	} else {
+		record := pendingJournalRecord{Sequence: s.journalSeq + 1, Pending: diffPending(s.lastState.Pending, pending)}
+		before, _ := json.Marshal(s.lastState.Batch)
+		after, _ := json.Marshal(batch)
+		if string(before) != string(after) {
+			record.BatchChanged = true
+			record.Batch = batch
+		}
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return err
+		}
+		journal := s.path + ".journal"
+		if err := os.MkdirAll(journal, 0o700); err != nil {
+			return err
+		}
+		syncDir(dir)
+		if err := s.writeProtected(filepath.Join(journal, fmt.Sprintf("%020d.json", record.Sequence)), encoded); err != nil {
+			return err
+		}
+		s.journalSeq = record.Sequence
+	}
+	// 输入由采样复制，检查点状态另留独立副本，避免批次移动后改写比较基线。
+	s.lastState = clonePendingState(state)
+ s.lastState.JournalSequence = 0
+	s.lastHash, s.saved = hash, true
+	return nil
+}
+
+func (s *pendingReportStore) writeProtected(path string, data []byte) error {
+	protected, err := privacy.Protect(path, data)
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-	if err := tmp.Chmod(0o600); err != nil && !isChmodUnsupported(err) {
-		_ = tmp.Close()
-		cleanup()
+	return privacy.WriteRaw(path, protected, 0o600)
+}
+
+// compact 在正常退出前合并增量；历史版本仍能按旧单快照恢复未确认流量。
+func (s *pendingReportStore) compact() error {
+	if s == nil {
+		return nil
+	}
+	release := privacy.LockFileWrite(s.path)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return s.loadErr
+	}
+	if !s.saved || (s.lastState.Batch == nil && s.lastState.Pending.empty()) {
+		return nil
+	}
+	state := s.lastState
+	state.JournalSequence = s.journalSeq
+	data, err := json.Marshal(state)
+	if err != nil {
 		return err
 	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		cleanup()
+	if err := s.writeProtected(s.path, data); err != nil {
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		cleanup()
+	if err := os.RemoveAll(s.path + ".journal"); err != nil {
 		return err
 	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(tmpName, s.path); err != nil {
-		cleanup()
-		return err
-	}
-	syncDir(dir)
+	syncDir(filepath.Dir(s.path))
 	return nil
 }
 
@@ -163,11 +213,24 @@ func (s *pendingReportStore) load() (*pendingBatch, pendingTraffic, error) {
 		if renameErr := os.Rename(s.path, aside); renameErr != nil {
 			return nil, pendingTraffic{}, fmt.Errorf("pending report file unreadable and could not be moved aside: %w", renameErr)
 		}
+		if renameErr := os.Rename(s.path+".journal", aside+".journal"); renameErr != nil && !os.IsNotExist(renameErr) {
+			return nil, pendingTraffic{}, renameErr
+		}
 		if err == nil {
 			err = fmt.Errorf("version or node identity mismatch")
 		}
 		return nil, pendingTraffic{}, fmt.Errorf("pending report file moved to %s: %w", aside, err)
 	}
+	if err := s.replayJournal(&file); err != nil {
+		s.loadErr = err
+		return nil, pendingTraffic{}, err
+	}
+	s.journalSeq = file.JournalSequence
+	file.JournalSequence = 0
+	hash, err := pendingStateHash(file)
+ if err != nil { return nil, pendingTraffic{}, err }
+ s.lastState = clonePendingState(file)
+ s.lastHash, s.saved = hash, true
 	if file.Batch != nil && (file.Batch.ID == "" || file.Batch.empty()) {
 		file.Batch = nil
 	}

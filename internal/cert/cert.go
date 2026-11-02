@@ -10,15 +10,18 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"maps"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -50,7 +53,12 @@ import (
 //  3. "file" (if both CertFile and KeyFile paths are provided)
 //  4. "none" (default)
 type Manager struct {
-	cfg config.CertConfig
+	fileSources map[string]bool
+	opMu        sync.Mutex
+	materialMu  sync.Mutex
+	generation  atomic.Uint64
+	cache       *certmagic.Cache
+	cfg         config.CertConfig
 
 	// Atomic so the ACME renewal goroutine can swap without racing readers.
 	mat atomic.Pointer[certMaterial]
@@ -70,35 +78,50 @@ type certMaterial struct {
 
 // NewManager creates a certificate manager.
 func NewManager(cfg config.CertConfig) *Manager {
+	cfg.DNSEnv = maps.Clone(cfg.DNSEnv)
 	return &Manager{cfg: cfg}
 }
 
 // storePEM atomically swaps the in-memory cert material and persists to disk
 // so that restarts can reload without re-generating or re-requesting.
 func (m *Manager) storePEM(cert, key []byte) {
-	m.mat.Store(&certMaterial{certPEM: cert, keyPEM: key})
-	m.persistPEM(cert, key)
+	m.materialMu.Lock()
+	defer m.materialMu.Unlock()
+	m.publishPEM(m.cfg, cert, key)
 }
 
-// persistPEM writes cert/key to cert_dir for restart recovery.
-// Errors are logged but not returned — persistence is best-effort.
-func (m *Manager) persistPEM(cert, key []byte) {
-	dir := m.cfg.CertDir
-	if dir == "" {
+// publishPEM 在发布锁内写入完整证书组，内存读者也只看到完整组。
+func (m *Manager) publishPEM(cfg config.CertConfig, cert, key []byte) {
+	m.mat.Store(&certMaterial{certPEM: append([]byte(nil), cert...), keyPEM: append([]byte(nil), key...)})
+	if cfg.CertDir == "" {
 		return
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		nlog.Core().Warn("cert: failed to create cert_dir", "dir", dir, "error", err)
+	if err := os.MkdirAll(cfg.CertDir, 0o700); err != nil {
+		nlog.Core().Warn("cert: create storage failed", "error", err)
 		return
 	}
-	certPath := filepath.Join(dir, "cert.pem")
-	keyPath := filepath.Join(dir, "key.pem")
-	if err := atomicWriteFile(certPath, cert, 0o644); err != nil {
-		nlog.Core().Warn("cert: failed to persist cert", "path", certPath, "error", err)
+	data, err := json.Marshal(persistedPair{Cert: cert, Key: key, Mode: resolveModeFor(cfg)})
+	if err == nil {
+		err = atomicWriteFile(filepath.Join(cfg.CertDir, "cert-pair.json"), data, 0o600)
 	}
-	if err := atomicWriteFile(keyPath, key, 0o600); err != nil {
-		nlog.Core().Warn("cert: failed to persist key", "path", keyPath, "error", err)
+	if err != nil {
+		nlog.Core().Warn("cert: persist pair failed", "error", err)
+		return
 	}
+	// 旧双文件只作为迁移来源，成功发布后移除，避免旧版本材料被再次选中。
+	for _, name := range []string{"cert.pem", "key.pem"} {
+		path := filepath.Join(cfg.CertDir, name)
+		if path == cfg.CertFile || path == cfg.KeyFile || m.fileSources[path] {
+			continue
+		}
+		_ = os.Remove(path)
+	}
+}
+
+type persistedPair struct {
+	Cert []byte `json:"cert"`
+	Key  []byte `json:"key"`
+	Mode string `json:"mode,omitempty"`
 }
 
 // atomicWriteFile writes data to a temp file and renames, preventing partial reads.
@@ -113,27 +136,47 @@ func (m *Manager) loadPersistedPEM() bool {
 	if dir == "" {
 		return false
 	}
-	certPEM, err := privacy.ReadFile(filepath.Join(dir, "cert.pem"))
-	if err != nil {
+	data, err := privacy.ReadFile(filepath.Join(dir, "cert-pair.json"))
+	var pair persistedPair
+	if err == nil {
+		if json.Unmarshal(data, &pair) != nil {
+			return false
+		}
+		if pair.Mode != "" && pair.Mode != m.resolveMode() {
+			return false
+		}
+	} else {
+		// 已存在但无法读取的新格式不能退回旧文件。
+		if !os.IsNotExist(err) {
+			return false
+		}
+		pair.Cert, err = privacy.ReadFile(filepath.Join(dir, "cert.pem"))
+		if err != nil {
+			return false
+		}
+		pair.Key, err = privacy.ReadFile(filepath.Join(dir, "key.pem"))
+		if err != nil {
+			return false
+		}
+	}
+	domain := m.cfg.Domain
+	if domain == "" && m.resolveMode() == "self" {
+		domain = "localhost"
+	}
+	if err := validateCertificate(pair.Cert, pair.Key, domain); err != nil {
+		nlog.Core().Warn("cert: persisted certificate rejected", "error", err)
 		return false
 	}
-	keyPEM, err := privacy.ReadFile(filepath.Join(dir, "key.pem"))
-	if err != nil {
-		return false
-	}
-	if err := validateKeyPair(certPEM, keyPEM); err != nil {
-		nlog.Core().Warn("cert: persisted cert invalid, will regenerate", "error", err)
-		return false
-	}
-	// Store in memory only (don't re-persist what we just read).
-	m.mat.Store(&certMaterial{certPEM: certPEM, keyPEM: keyPEM})
-	nlog.Core().Info("cert: loaded persisted certificate from disk", "dir", dir)
+	m.storePEM(pair.Cert, pair.Key)
 	return true
 }
 
 // Reconfigure applies a new cert configuration at runtime (e.g. from panel push).
 // Returns true when the PEM material changed (caller should restart kernel).
 func (m *Manager) Reconfigure(ctx context.Context, newCfg config.CertConfig) (bool, error) {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	oldTLS := m.TLSCert()
 	if newCfg.CertDir == "" {
 		newCfg.CertDir = m.cfg.CertDir
 	}
@@ -148,10 +191,10 @@ func (m *Manager) Reconfigure(ctx context.Context, newCfg config.CertConfig) (bo
 		}
 	}
 
-	oldTLS := m.TLSCert()
+	newCfg.DNSEnv = maps.Clone(newCfg.DNSEnv)
 	m.cfg = newCfg
 
-	if err := m.Start(ctx); err != nil {
+	if err := m.start(ctx); err != nil {
 		return false, fmt.Errorf("cert reconfigure: %w", err)
 	}
 
@@ -162,14 +205,22 @@ func (m *Manager) Reconfigure(ctx context.Context, newCfg config.CertConfig) (bo
 // tearDownACME cancels the running certmagic background goroutines and clears
 // related state so a fresh ACME init can run.
 func (m *Manager) tearDownACME() {
+	m.generation.Add(1)
 	if m.acmeCancel != nil {
 		m.acmeCancel()
 		m.acmeCancel = nil
 	}
+	if m.cache != nil {
+		m.cache.Stop()
+		m.cache = nil
+	}
 	m.magic = nil
 	m.acmeStarted = false
 	m.acmeFingerprint = ""
+	m.materialMu.Lock()
 	m.mat.Store(nil)
+	m.renewed.Store(false)
+	m.materialMu.Unlock()
 }
 
 // acmeFingerprint produces a stable string capturing every config field that
@@ -184,6 +235,7 @@ func acmeFingerprint(cfg config.CertConfig) string {
 	b.WriteString(strings.ToLower(strings.TrimSpace(cfg.CertMode)))
 	b.WriteByte('|')
 	b.WriteString(strings.TrimSpace(cfg.Domain))
+	fmt.Fprintf(&b, "|%s|%d|%t|", cfg.CertDir, cfg.HTTPPort, cfg.AutoTLS)
 	b.WriteByte('|')
 	b.WriteString(strings.TrimSpace(cfg.Email))
 	b.WriteByte('|')
@@ -261,10 +313,38 @@ func pemEqual(a, b kernel.TLSCert) bool {
 
 // Start initializes the cert manager based on the resolved mode.
 func (m *Manager) Start(ctx context.Context) error {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	return m.start(ctx)
+}
+
+func (m *Manager) start(ctx context.Context) error {
 	mode := m.resolveMode()
 
 	switch mode {
 	case "none", "":
+		m.materialMu.Lock()
+		defer m.materialMu.Unlock()
+		m.mat.Store(nil)
+		m.renewed.Store(false)
+		if m.cfg.CertDir != "" {
+			preserveFiles := false
+			if data, err := privacy.ReadFile(filepath.Join(m.cfg.CertDir, "cert-pair.json")); err == nil {
+				var pair persistedPair
+				if json.Unmarshal(data, &pair) == nil && pair.Mode == "file" {
+					preserveFiles = true
+				}
+			}
+			for _, name := range []string{"cert-pair.json", "cert.pem", "key.pem"} {
+				path := filepath.Join(m.cfg.CertDir, name)
+				if name != "cert-pair.json" && (preserveFiles || path == m.cfg.CertFile || path == m.cfg.KeyFile || m.fileSources[path]) {
+					continue
+				}
+				if err := os.Remove(filepath.Join(m.cfg.CertDir, name)); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("clear active certificate: %w", err)
+				}
+			}
+		}
 		return nil
 	case "file":
 		return m.startFile()
@@ -285,9 +365,12 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 }
 
-// Stop is a no-op: certmagic's background goroutine is cancelled via the
-// context passed to ManageAsync.
-func (m *Manager) Stop() {}
+// Stop 停止缓存维护任务；代次屏障阻止旧续期发布到新配置。
+func (m *Manager) Stop() {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	m.tearDownACME()
+}
 
 // ─── Mode: file ────────────────────────────────────────────────────────────
 
@@ -300,9 +383,13 @@ func (m *Manager) startFile() error {
 	if err != nil {
 		return fmt.Errorf("key file: %w", err)
 	}
-	if err := validateKeyPair(certPEM, keyPEM); err != nil {
+	if err := validateCertificate(certPEM, keyPEM, m.cfg.Domain); err != nil {
 		return fmt.Errorf("invalid certificate pair: %w", err)
 	}
+	if m.fileSources == nil {
+		m.fileSources = make(map[string]bool)
+	}
+	m.fileSources[m.cfg.CertFile], m.fileSources[m.cfg.KeyFile] = true, true
 	m.storePEM(certPEM, keyPEM)
 	nlog.Core().Debug("TLS certificate loaded from files", "cert", m.cfg.CertFile, "key", m.cfg.KeyFile)
 	return nil
@@ -377,7 +464,7 @@ func (m *Manager) startContent() error {
 	}
 	certPEM := []byte(m.cfg.CertContent)
 	keyPEM := []byte(m.cfg.KeyContent)
-	if err := validateKeyPair(certPEM, keyPEM); err != nil {
+	if err := validateCertificate(certPEM, keyPEM, m.cfg.Domain); err != nil {
 		return fmt.Errorf("invalid certificate content: %w", err)
 	}
 	m.storePEM(certPEM, keyPEM)
@@ -401,6 +488,8 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 		return fmt.Errorf("create cert dir: %w", err)
 	}
 
+	cfg := m.cfg
+	generation := m.generation.Add(1)
 	storage := &privateStorage{Storage: &certmagic.FileStorage{Path: m.cfg.CertDir}, root: m.cfg.CertDir}
 
 	var magic *certmagic.Config
@@ -410,6 +499,13 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 		},
 	})
 
+	m.cache = cache
+	initialized := false
+	defer func() {
+		if !initialized {
+			m.tearDownACME()
+		}
+	}()
 	magic = certmagic.New(cache, certmagic.Config{
 		Storage: storage,
 		OnEvent: func(evtCtx context.Context, event string, data map[string]any) error {
@@ -424,12 +520,13 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 			if issuerKey == "" {
 				return nil
 			}
-			if err := m.loadPEMFromStorage(evtCtx, storage, issuerKey, m.cfg.Domain); err != nil {
+			certPEM, keyPEM, err := readPEMFromStorage(evtCtx, storage, issuerKey, cfg.Domain)
+			if err != nil {
 				nlog.Core().Error("failed to reload cert after renewal", "error", err)
 				return nil
 			}
-			m.renewed.Store(true)
-			nlog.Core().Info("TLS certificate reloaded after renewal", "domain", m.cfg.Domain)
+			m.publishRenewal(cfg, generation, certPEM, keyPEM)
+			nlog.Core().Info("TLS certificate reloaded after renewal", "domain", cfg.Domain)
 			return nil
 		},
 	})
@@ -461,6 +558,7 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 
 	// Derived ctx so Reconfigure can cancel ACME background goroutines.
 	acmeCtx, acmeCancel := context.WithCancel(ctx)
+	m.acmeCancel = acmeCancel
 
 	if err := magic.ObtainCertSync(acmeCtx, m.cfg.Domain); err != nil {
 		acmeCancel()
@@ -481,6 +579,7 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 	m.acmeCancel = acmeCancel
 	m.acmeFingerprint = acmeFingerprint(m.cfg)
 	m.acmeStarted = true
+	initialized = true
 	return nil
 }
 
@@ -524,23 +623,58 @@ func (m *Manager) newDNSProvider() (certmagic.DNSProvider, error) {
 // loadPEMFromStorage reads cert + key for domain from certmagic storage into
 // the in-memory cache. Single entry point for both initial load and renewal refresh.
 func (m *Manager) loadPEMFromStorage(ctx context.Context, storage certmagic.Storage, issuerKey, domain string) error {
-	if issuerKey == "" || domain == "" {
-		return fmt.Errorf("loadPEMFromStorage: issuerKey and domain are required")
-	}
-	certKey := certmagic.StorageKeys.SiteCert(issuerKey, domain)
-	keyKey := certmagic.StorageKeys.SitePrivateKey(issuerKey, domain)
-
-	certPEM, err := storage.Load(ctx, certKey)
+	cert, key, err := readPEMFromStorage(ctx, storage, issuerKey, domain)
 	if err != nil {
-		return fmt.Errorf("load cert %q: %w", certKey, err)
+		return err
 	}
-	keyPEM, err := storage.Load(ctx, keyKey)
-	if err != nil {
-		return fmt.Errorf("load key %q: %w", keyKey, err)
-	}
-	if err := validateKeyPair(certPEM, keyPEM); err != nil {
-		return fmt.Errorf("invalid cert/key pair on disk: %w", err)
-	}
-	m.storePEM(certPEM, keyPEM)
+	m.storePEM(cert, key)
 	return nil
+}
+
+func readPEMFromStorage(ctx context.Context, storage certmagic.Storage, issuerKey, domain string) ([]byte, []byte, error) {
+	if issuerKey == "" || domain == "" {
+		return nil, nil, fmt.Errorf("issuerKey and domain are required")
+	}
+	certPEM, err := storage.Load(ctx, certmagic.StorageKeys.SiteCert(issuerKey, domain))
+	if err != nil {
+		return nil, nil, fmt.Errorf("load certificate: %w", err)
+	}
+	keyPEM, err := storage.Load(ctx, certmagic.StorageKeys.SitePrivateKey(issuerKey, domain))
+	if err != nil {
+		return nil, nil, fmt.Errorf("load private key: %w", err)
+	}
+	if err := validateCertificate(certPEM, keyPEM, domain); err != nil {
+		return nil, nil, err
+	}
+	return certPEM, keyPEM, nil
+}
+
+func validateCertificate(certPEM, keyPEM []byte, domain string) error {
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return err
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+		return fmt.Errorf("certificate is outside its validity period")
+	}
+	if domain != "" {
+		return leaf.VerifyHostname(domain)
+	}
+	return nil
+}
+
+func (m *Manager) publishRenewal(cfg config.CertConfig, generation uint64, cert, key []byte) bool {
+	m.materialMu.Lock()
+	defer m.materialMu.Unlock()
+	if generation != m.generation.Load() {
+		return false
+	}
+	m.publishPEM(cfg, cert, key)
+	m.renewed.Store(true)
+	return true
 }

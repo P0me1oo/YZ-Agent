@@ -2,6 +2,7 @@ package model
 
 import (
 	"github.com/P0me1oo/YZ-Agent/internal/balancer"
+	"github.com/P0me1oo/YZ-Agent/internal/scheduling"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -128,6 +129,7 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 	}
 
 	return &NodeSpec{
+		SchedulingTargets:   append([]scheduling.Target(nil), nc.SchedulingTargets...),
 		Balancer:            balancer.CloneConfig(nc.Balancer),
 		BalancerReceiver:    balancer.CloneReceiver(nc.BalancerReceiver),
 		Protocol:            nc.Protocol,
@@ -321,6 +323,7 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 	}
 
 	return &panel.NodeConfig{
+		SchedulingTargets:   append([]scheduling.Target(nil), n.SchedulingTargets...),
 		Balancer:            balancer.CloneConfig(n.Balancer),
 		BalancerReceiver:    balancer.CloneReceiver(n.BalancerReceiver),
 		Protocol:            n.Protocol,

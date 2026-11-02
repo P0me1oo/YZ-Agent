@@ -1213,6 +1213,20 @@ verify_release_checksum() {
     log_info "Checksum verified: ${artifact}"
 }
 
+validate_staged_version() {
+    local report="$1" program actual rest actual_key target_key
+    read -r program actual rest <<< "$report"
+    case "$program" in yz-agent|agent|xboard-node|xbctl) ;; *) log_error "Invalid binary version output"; return 1 ;; esac
+    actual_key=$(upgrade_version_key "$actual") || { log_error "Invalid binary version output"; return 1; }
+    if [ "$RELEASE_VERSION" != latest ] && [ -n "$RELEASE_VERSION" ]; then
+        target_key=$(upgrade_version_key "$RELEASE_VERSION") || return 1
+        if [ "$actual_key" != "$target_key" ]; then
+            log_error "Binary version $actual does not match requested $RELEASE_VERSION"
+            return 1
+        fi
+    fi
+}
+
 stage_binary() {
     local staged="$BIN_STAGE_DIR/xboard-node"
     local local_src
@@ -1261,6 +1275,7 @@ stage_binary() {
         log_error "Downloaded binary failed version check"
         exit 1
     fi
+    validate_staged_version "$report" || return 1
     select_target_name "$report"
 }
 
@@ -1304,10 +1319,12 @@ stage_xbctl() {
         verify_release_checksum "$staged" "$artifact"
     fi
     chmod 755 "$staged"
-    if ! "$staged" version > /dev/null 2>&1; then
+    local report
+    if ! report=$("$staged" version); then
         log_error "Downloaded xbctl failed version check"
         exit 1
     fi
+    validate_staged_version "$report" || return 1
     if [ "$BIN_DIR" != "$DEFAULT_BIN_DIR" ] && ! "$staged" config bin-dir >/dev/null 2>&1; then
         log_error "This release does not support --bin-dir; migrate to $DEFAULT_BIN_DIR before downgrading"
         exit 1

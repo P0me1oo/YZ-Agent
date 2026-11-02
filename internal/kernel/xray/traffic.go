@@ -37,6 +37,10 @@ func (x *Xray) collectInstanceStatsLocked(instance *xrayCore.Instance, config *m
 	}
 	// 已删除用户的存量连接仍可能写入计数，不能仅遍历当前用户列表。
 	manager.VisitCounters(func(name string, counter stats.Counter) bool {
+		// 原生计数器可能仍被旧连接持有；零值历史项不再解析身份或分配中间数据。
+		if counter.Value() == 0 {
+			return true
+		}
 		parts := strings.Split(name, ">>>")
 		if len(parts) != 4 && len(parts) != 6 {
 			return true

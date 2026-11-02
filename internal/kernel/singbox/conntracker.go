@@ -928,7 +928,7 @@ func (c *trackedConn) Close() error {
 
 // makeCountFunc builds a CountFunc for zero-copy byte counting via sing's
 // ReadCounter/WriteCounter unwrap interfaces. 每次计数时读取当前限速设置。
-func (c *trackedConn) makeCountFunc(counter *atomic.Int64) N.CountFunc {
+func (c *trackedConn) makeCountFunc(counter *trafficCounter) N.CountFunc {
 	return func(n int64) {
 		counter.Add(n)
 		_ = waitRate(c.ctx, c.currentLimiter(), int(n))
@@ -1029,7 +1029,7 @@ func (c *trackedPacketConn) Close() error {
 	return err
 }
 
-func (c *trackedPacketConn) makeCountFunc(counter *atomic.Int64) N.CountFunc {
+func (c *trackedPacketConn) makeCountFunc(counter *trafficCounter) N.CountFunc {
 	return func(n int64) {
 		counter.Add(n)
 		_ = waitRate(c.ctx, c.currentLimiter(), int(n))

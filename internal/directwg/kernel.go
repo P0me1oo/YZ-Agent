@@ -23,6 +23,27 @@ type Managed struct {
 }
 
 func Wrap(base kernel.Kernel) kernel.Kernel { return &Managed{Kernel: base, state: newState()} }
+
+func (m *Managed) RetireTraffic(candidates model.TrafficCounters) model.TrafficCounters {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.direct {
+		if retire, ok := m.Kernel.(kernel.TrafficRetirer); ok {
+			return retire.RetireTraffic(candidates)
+		}
+		return model.TrafficCounters{}
+	}
+	m.state.mu.Lock()
+	defer m.state.mu.Unlock()
+	out := model.TrafficCounters{Users: make(map[int][2]int64)}
+	for id, value := range candidates.Users {
+		if current, ok := m.state.totals[id]; ok && current == value && m.state.users[id] == nil {
+			delete(m.state.totals, id)
+			out.Users[id] = value
+		}
+	}
+	return out
+}
 func (m *Managed) Start(n *model.NodeSpec, users []model.UserSpec, tls kernel.TLSCert) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

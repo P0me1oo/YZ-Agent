@@ -35,6 +35,7 @@ func (t *Tracker) ProcessRelay(cumRelay map[int][2]int64) {
 		t.lastSeenRelay[nodeID] = cum
 
 		if deltaUp > 0 || deltaDown > 0 {
+			t.revision++
 			cur := t.pendingRelay[nodeID]
 			cur[0] += deltaUp
 			cur[1] += deltaDown
@@ -46,6 +47,7 @@ func (t *Tracker) ProcessRelay(cumRelay map[int][2]int64) {
 // FlushRelayTraffic 取出并清空已累计的逻辑节点流量。
 func (t *Tracker) FlushRelayTraffic() map[int][2]int64 {
 	t.mu.Lock()
+	t.revision++
 	data := t.pendingRelay
 	t.pendingRelay = make(map[int][2]int64, len(data))
 	t.mu.Unlock()
@@ -61,6 +63,7 @@ func (t *Tracker) RestoreRelayTraffic(data map[int][2]int64) {
 		return
 	}
 	t.mu.Lock()
+	t.revision++
 	if t.pendingRelay == nil {
 		t.pendingRelay = make(map[int][2]int64, len(data))
 	}
@@ -103,6 +106,7 @@ func (t *Tracker) ProcessRelayUser(cum map[int]map[int][2]int64) {
 
 			t.lastSeenRelayUser[uid][nodeID] = current
 			if deltaUp > 0 || deltaDown > 0 {
+				t.revision++
 				pending := t.pendingRelayUser[uid][nodeID]
 				pending[0] += deltaUp
 				pending[1] += deltaDown
@@ -115,6 +119,7 @@ func (t *Tracker) ProcessRelayUser(cum map[int]map[int][2]int64) {
 // FlushRelayUserTraffic 取出并清空用户-逻辑节点流量增量。
 func (t *Tracker) FlushRelayUserTraffic() map[int]map[int][2]int64 {
 	t.mu.Lock()
+	t.revision++
 	data := t.pendingRelayUser
 	t.pendingRelayUser = make(map[int]map[int][2]int64, len(data))
 	t.mu.Unlock()
@@ -131,6 +136,7 @@ func (t *Tracker) RestoreRelayUserTraffic(data map[int]map[int][2]int64) {
 	}
 
 	t.mu.Lock()
+	t.revision++
 	defer t.mu.Unlock()
 	for uid, nodes := range data {
 		if t.pendingRelayUser[uid] == nil {

@@ -67,7 +67,7 @@ func assertInvalidOutboundSnapshot(t *testing.T, spec *model.NodeSpec, kernelTyp
 	}
 }
 
-func TestPanelControlPlanePollRestoresETagsWhenUsersFail(t *testing.T) {
+func TestPanelControlPlanePollClearsETagsWhenUsersFail(t *testing.T) {
 	configCalls := 0
 	userCalls := 0
 	mux := http.NewServeMux()

@@ -61,4 +61,13 @@ detect_current_state() { CURRENT_STATE=fresh; }
 if perform_upgrade; then exit 1; fi
 fake_node() { return 1; }
 if check_latest_upgrade; then exit 1; fi
+# 替换前必须核对目标与实际版本，历史两段名称仍兼容。
+RELEASE_VERSION=v2.29.0
+if validate_staged_version 'yz-agent v0.0.1'; then exit 1; fi
+if validate_staged_version 'invalid output'; then exit 1; fi
+if validate_staged_version 'yz-agent dev'; then exit 1; fi
+validate_staged_version 'yz-agent v2.29.0'
+RELEASE_VERSION=v1.13.0
+validate_staged_version 'xboard-node v1.13'
+validate_staged_version 'agent 1.13.0'
 echo '升级版本检查测试通过'

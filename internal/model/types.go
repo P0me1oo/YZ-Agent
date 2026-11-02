@@ -2,6 +2,7 @@ package model
 
 import (
 	"github.com/P0me1oo/YZ-Agent/internal/balancer"
+	"github.com/P0me1oo/YZ-Agent/internal/scheduling"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -10,17 +11,19 @@ import (
 )
 
 type NodeSpec struct {
-	Balancer         *balancer.Config
-	BalancerReceiver *balancer.ReceiverConfig
-	WireGuard        *panel.WireGuardConfig
-	Protocol         string
-	ListenIP         string
-	ServerPort       int
-	PortHopping      string
-	Network          string
-	NetworkSettings  map[string]any
-	Routes           []RouteRule
-	SourcePolicy     *sourcepolicy.Policy
+	// 探测清单独立于核心配置，更新测量目标不重建监听。
+	SchedulingTargets []scheduling.Target `json:"-"`
+	Balancer          *balancer.Config
+	BalancerReceiver  *balancer.ReceiverConfig
+	WireGuard         *panel.WireGuardConfig
+	Protocol          string
+	ListenIP          string
+	ServerPort        int
+	PortHopping       string
+	Network           string
+	NetworkSettings   map[string]any
+	Routes            []RouteRule
+	SourcePolicy      *sourcepolicy.Policy
 	// 仅由运行层从来源名单和已校验的地区库生成，不接受面板直接填写网段。
 	SourceBlockCIDRs  []string
 	SourcePolicyReady bool

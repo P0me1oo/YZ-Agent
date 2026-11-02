@@ -218,16 +218,16 @@ func ValidateTimeSync(cfg TimeSyncConfig) error {
 			return fmt.Errorf("time_sync.servers[%d] must not be empty", i)
 		}
 	}
-	if cfg.Interval <= 0 {
-		return fmt.Errorf("time_sync.interval must be positive")
+	if cfg.Interval <= 0 || cfg.Interval > 86400 {
+		return fmt.Errorf("time_sync.interval must be between 1 and 86400 seconds")
 	}
-	if cfg.Timeout <= 0 {
-		return fmt.Errorf("time_sync.timeout must be positive")
+	if cfg.Timeout <= 0 || cfg.Timeout > 300 {
+		return fmt.Errorf("time_sync.timeout must be between 1 and 300 seconds")
 	}
 	if cfg.WarnOffset <= 0 ||
 		cfg.ErrorOffset <= cfg.WarnOffset ||
-		cfg.CriticalOffset <= cfg.ErrorOffset {
-		return fmt.Errorf("time_sync offsets must satisfy 0 < warn_offset < error_offset < critical_offset")
+		cfg.CriticalOffset <= cfg.ErrorOffset || cfg.CriticalOffset > 86400 {
+		return fmt.Errorf("time_sync offsets must satisfy 0 < warn_offset < error_offset < critical_offset <= 86400")
 	}
 	return nil
 }
@@ -861,6 +861,17 @@ func (c *Config) AutoInstanceID() (string, error) {
 		return "", err
 	}
 	key := normalized + "|" + mode + "|" + target
+	if c.IsStandalone() {
+		if dir := strings.TrimSpace(c.Kernel.ConfigDir); dir != "" {
+			resolved, err := filepath.Abs(dir)
+			if err != nil {
+				return "", err
+			}
+			key += "|dir=" + filepath.Clean(resolved)
+		} else {
+			key += fmt.Sprintf("|%s|%s|%d", c.Standalone.Node.Protocol, c.Standalone.Node.ListenIP, c.Standalone.Node.ServerPort)
+		}
+	}
 	sum := sha1.Sum([]byte(key))
 	short := hex.EncodeToString(sum[:])[:6]
 	return fmt.Sprintf("%s-%s-%s-%s", slug, mode, target, short), nil
@@ -947,12 +958,20 @@ func (c *Config) validate() error {
 			if n.NodeID <= 0 {
 				return fmt.Errorf("nodes[%d].node_id must be positive", i)
 			}
+			if n.Kernel != nil {
+				if _, err := ResolveKernelLogLevel(c.Kernel.LogLevel, n.Kernel.LogLevel); err != nil {
+					return fmt.Errorf("nodes[%d]: %w", i, err)
+				}
+			}
 		}
 	}
 	switch c.Kernel.Type {
 	case "singbox", "xray":
 	default:
 		return fmt.Errorf("kernel.type must be 'singbox' or 'xray', got '%s'", c.Kernel.Type)
+	}
+	if _, err := ResolveKernelLogLevel(c.Kernel.LogLevel, ""); err != nil {
+		return err
 	}
 	if v := strings.TrimSpace(c.Kernel.RealityMinClientVer); v != "" {
 		if err := ValidateRealityMinClientVer(v); err != nil {
@@ -962,11 +981,8 @@ func (c *Config) validate() error {
 	if c.Cert.AutoTLS && c.Cert.Domain == "" {
 		return fmt.Errorf("cert.domain is required when cert.auto_tls is enabled")
 	}
-	if c.Node.PushInterval < 0 {
-		return fmt.Errorf("node.push_interval must not be negative")
-	}
-	if c.Node.PullInterval < 0 {
-		return fmt.Errorf("node.pull_interval must not be negative")
+	if err := ValidateIntervals(c.Node, c.WS); err != nil {
+		return err
 	}
 	if err := ValidateTimeSync(c.TimeSync); err != nil {
 		return err
@@ -990,6 +1006,7 @@ func (c *Config) ExpandNodes() []*Config {
 		nodeCfg.Panel.NodeID = entry.NodeID
 		nodeCfg.Panel.NodeType = entry.NodeType
 
+		nodeCfg.Kernel.ConfigDir = filepath.Join(c.Kernel.ConfigDir, fmt.Sprintf("node-%d", entry.NodeID))
 		// Per-node kernel overrides
 		if entry.Kernel != nil {
 			if entry.Kernel.ConfigDir != "" {
@@ -1022,8 +1039,11 @@ func (c *Config) ExpandNodes() []*Config {
 		if entry.Cert != nil {
 			nodeCfg.Cert = *entry.Cert
 		}
-		if nodeCfg.Cert.CertDir == "" {
+		if entry.Cert == nil || nodeCfg.Cert.CertDir == "" {
 			nodeCfg.Cert.CertDir = filepath.Join(nodeCfg.Kernel.ConfigDir, "certs")
+			if entry.Cert == nil && c.Cert.CertDir != "" && c.Cert.CertDir != filepath.Join(c.Kernel.ConfigDir, "certs") {
+				nodeCfg.Cert.CertDir = filepath.Join(c.Cert.CertDir, fmt.Sprintf("node-%d", entry.NodeID))
+			}
 		}
 
 		result = append(result, &nodeCfg)
@@ -1100,6 +1120,8 @@ func ValidateStartupLayout(instances []*Config) error {
 	healthPorts := make(map[int]string)
 	configDirs := make(map[string]string)
 	nodeBindings := make(map[string]string)
+	instanceIDs := make(map[string]bool)
+	certDirs := make(map[string]string)
 	var processTimeSync *TimeSyncConfig
 	var processTimeSyncOwner string
 	var processFirewall *FirewallConfig
@@ -1108,6 +1130,10 @@ func ValidateStartupLayout(instances []*Config) error {
 			continue
 		}
 		owner := instance.InstanceID
+		if owner != "" && instanceIDs[owner] {
+			return fmt.Errorf("duplicate instance identity %q", owner)
+		}
+		instanceIDs[owner] = true
 		if processFirewall == nil {
 			cfg := instance.Firewall
 			processFirewall = &cfg
@@ -1145,6 +1171,16 @@ func ValidateStartupLayout(instances []*Config) error {
 		}
 		for _, node := range instance.ExpandNodes() {
 			binding := fmt.Sprintf("%s/%d", strings.TrimSpace(node.Panel.URL), node.Panel.NodeID)
+			if node.IsStandalone() {
+				binding = "standalone/" + owner
+			}
+			if dir := strings.TrimSpace(node.Cert.CertDir); dir != "" {
+				dir = filepath.Clean(dir)
+				if other, ok := certDirs[dir]; ok {
+					return fmt.Errorf("cert_dir %q is shared by %s and %s", dir, other, owner)
+				}
+				certDirs[dir] = owner
+			}
 			if other, ok := nodeBindings[binding]; ok {
 				return fmt.Errorf("node binding %s is declared by both %s and %s", binding, other, owner)
 			}

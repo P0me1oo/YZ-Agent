@@ -114,6 +114,12 @@ type SpeedLimitRefresher interface {
 	RefreshSpeedLimits()
 }
 
+// TrafficRetirer 只删除与已确认基线相等且已排空的账本；返回实际删除项。
+// 迟到的计数必须保留为新一轮增量，不能重新计入旧累计值。
+type TrafficRetirer interface {
+	RetireTraffic(model.TrafficCounters) model.TrafficCounters
+}
+
 // ImmediateStopper 用于额度保护，关闭监听和存量连接，不等待自然排空。
 type ImmediateStopper interface{ StopNow() }
 

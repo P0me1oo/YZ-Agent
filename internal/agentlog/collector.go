@@ -67,7 +67,7 @@ type saved struct {
 }
 
 func (c *collector) save() error {
-	release := privacy.LockWrite()
+	release := privacy.LockFileWrite(c.path)
 	defer release()
 	if c.path == "" {
 		return nil

@@ -155,6 +155,9 @@ func (x *Xray) Start(nodeConfig *model.NodeSpec, users []model.UserSpec, tls ker
 }
 
 func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, tls kernel.TLSCert) error {
+	if _, err := config.ResolveKernelLogLevel(x.cfg.LogLevel, nodeConfig.KernelLogLevel); err != nil {
+		return err
+	}
 	if err := kernel.ValidateSourcePolicy(nodeConfig); err != nil {
 		return err
 	}
@@ -211,6 +214,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	ctx = singService.ContextWithDefaultRegistry(ctx)
 	singService.MustRegister[ntp.TimeService](ctx, timesync.Default())
 	xrayCreationMu.Lock()
+	useTrafficStats(pbConfig)
 	inst, err := xrayCore.NewWithContext(ctx, pbConfig)
 	ld := globalLimitDispatcher.Load()
 	xrayCreationMu.Unlock()
@@ -889,6 +893,9 @@ func (x *Xray) ensureGeoData(nc *model.NodeSpec) {
 
 // marshalConfig builds the xray JSON config and returns the raw bytes.
 func marshalConfig(cfg config.KernelConfig, nc *model.NodeSpec, users []model.UserSpec, tls kernel.TLSCert) ([]byte, error) {
+	if _, err := config.ResolveKernelLogLevel(cfg.LogLevel, nc.KernelLogLevel); err != nil {
+		return nil, err
+	}
 	cfgMap := buildConfig(cfg, nc, users, tls)
 	if err := validateHysteriaECHKeys(nc, cfgMap); err != nil {
 		return nil, err

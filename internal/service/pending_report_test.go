@@ -164,8 +164,8 @@ func TestShutdownSavesTrafficWhenPanelUnavailable(t *testing.T) {
 	if got := len(down.snapshot()); got != 1+len(finalReportRetryDelays)+1 {
 		t.Fatalf("退出时应在时限内重试，实际发送 %d 次", got)
 	}
-	if files := pendingFiles(t, dir); len(files) != 1 {
-		t.Fatalf("面板不可用时应保留保存文件，实际 %v", files)
+	if _, err := os.Stat(first.pendingStore.path); err != nil {
+		t.Fatal("面板不可用时应保留检查点", err)
 	}
 
 	second, up := newPersistentReportService(t, dir)

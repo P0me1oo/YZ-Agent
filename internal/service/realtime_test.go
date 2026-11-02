@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 type delayedRealtimeSource struct {
 	controlplane.ControlPlane
+	once     sync.Once
 	started  chan struct{}
 	release  chan struct{}
 	snapshot controlplane.Snapshot
@@ -20,7 +22,7 @@ type delayedRealtimeSource struct {
 
 func (s *delayedRealtimeSource) SupportsPolling() bool { return true }
 func (s *delayedRealtimeSource) Poll(ctx context.Context) (controlplane.Snapshot, error) {
-	close(s.started)
+	s.once.Do(func() { close(s.started) })
 	select {
 	case <-s.release:
 		return s.snapshot, nil

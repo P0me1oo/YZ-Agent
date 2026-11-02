@@ -27,7 +27,7 @@
 
 ## 安装
 
-以下说明适用于 `v1.15.1`。安装包与固定来源以 GitHub Release 和 [兼容矩阵](YZ_COMPATIBILITY.md) 中的正式发布记录为准；Docker 镜像按独立授权发布，版本可能不同于最新安装包。
+以下说明适用于当前正式 Release 的安装器。安装包与固定来源以 GitHub Release 和 [兼容矩阵](YZ_COMPATIBILITY.md) 中的正式发布记录为准；Docker 镜像按独立授权发布，版本可能不同于最新安装包。
 
 ### Docker
 
@@ -68,10 +68,9 @@ curl -fsSL https://github.com/P0me1oo/YZ-Agent/releases/latest/download/install.
   sudo bash -s -- upgrade --version latest
 ```
 
-日常升级与检查统一使用：
+机器模式的日常更新优先使用面板“服务器管理”的单台或批量“升级”，按操作结果和节点回报版本确认完成；仅提交任务不算成功。入口条件见面板的[机器管理说明](https://github.com/P0me1oo/YZboard/blob/dev/docs/machine-agent-management.md)。本机维护也可使用 `yz-agent upgrade`，版本与服务检查为：
 
 ```bash
-yz-agent upgrade
 yz-agent version
 yz-agent service status
 ```

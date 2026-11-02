@@ -57,7 +57,6 @@ func WatchConfig(ctx context.Context, path string, onChange func(*Config)) (*Wat
 	return w, nil
 }
 
-
 // WatchConfigRoot watches path and reloads the root config model.
 func WatchConfigRoot(ctx context.Context, path string, onChange func(*RootConfig)) (*Watcher, error) {
 	absPath, err := filepath.Abs(path)
@@ -91,6 +90,7 @@ func WatchConfigRoot(ctx context.Context, path string, onChange func(*RootConfig
 
 func (w *Watcher) loop(ctx context.Context) {
 	var timer *time.Timer
+	var timerCh <-chan time.Time
 	defer func() {
 		if timer != nil {
 			timer.Stop()
@@ -117,10 +117,22 @@ func (w *Watcher) loop(ctx context.Context) {
 			}
 
 			if timer == nil {
-				timer = time.AfterFunc(w.debounce, w.reload)
+				timer = time.NewTimer(w.debounce)
+				timerCh = timer.C
 			} else {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 				timer.Reset(w.debounce)
+				timerCh = timer.C
 			}
+
+		case <-timerCh:
+			timerCh = nil
+			w.reload()
 
 		case err, ok := <-w.watcher.Errors:
 			if !ok {

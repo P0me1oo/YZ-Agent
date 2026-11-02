@@ -276,7 +276,7 @@ func (m *Meter) blockedLocked(now time.Time) bool {
 }
 
 func (m *Meter) saveLocked() (err error) {
-	release := privacy.LockWrite()
+	release := privacy.LockFileWrite(m.path)
 	defer release()
 	defer func() { m.writeFailed = err != nil }()
 	data, err := json.Marshal(m.state)

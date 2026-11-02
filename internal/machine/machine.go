@@ -239,14 +239,16 @@ func (o *Orchestrator) aggregateNodeStatusLocked() service.RuntimeStatus {
 
 // Run is the main loop. It blocks until ctx is cancelled.
 func (o *Orchestrator) Run(ctx context.Context) error {
-	if o.cfg.PrivacyError != nil {return o.cfg.PrivacyError}
+	if o.cfg.PrivacyError != nil {
+		return o.cfg.PrivacyError
+	}
 	o.notifyStatus(service.RuntimeStarting)
 	o.runCtx = ctx
 	if o.agentVersion != "" {
 		go o.controlLoop(ctx)
 		go o.addressLoop(ctx)
 	}
-	nodesResp, err := o.client.GetMachineNodes()
+	nodesResp, err := o.client.GetMachineNodesContext(ctx)
 	if err != nil {
 		o.notifyStatus(service.RuntimeFailed)
 		return fmt.Errorf("initial node discovery: %w", err)
@@ -257,7 +259,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	}
 	if o.trafficMeter != nil {
 		// 首次有效采样可能已经解除面板的等待计量状态，重新取得管理员启用的节点。
-		if refreshed, err := o.client.GetMachineNodes(); err == nil {
+		if refreshed, err := o.client.GetMachineNodesContext(ctx); err == nil {
 			nodesResp = refreshed
 		}
 		go o.trafficLoop(ctx)
@@ -277,9 +279,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	o.tryStartWS(ctx)
 
 	// Start initial nodes.
-	for _, n := range nodesResp.Nodes {
-		o.startNode(ctx, n)
-	}
+	o.startNodes(ctx, nodesResp.Nodes)
 	discoveryTicker := time.NewTicker(min(o.pullInterval, 10*time.Second))
 	statusTicker := time.NewTicker(o.pushInterval)
 	stateTicker := time.NewTicker(time.Second)
@@ -316,6 +316,32 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 }
 
 // ─── Node lifecycle ──────────────────────────────────────────────────────
+
+// startNodes 有限并发准备节点，慢请求只占用一个准备槽。
+func (o *Orchestrator) startNodes(ctx context.Context, nodes []panel.MachineNode) {
+	jobs := make(chan panel.MachineNode)
+	var wg sync.WaitGroup
+	for range min(4, len(nodes)) {
+		wg.Go(func() {
+			for node := range jobs {
+				if ctx.Err() == nil {
+					o.startNode(ctx, node)
+				}
+			}
+		})
+	}
+	for _, node := range nodes {
+		select {
+		case jobs <- node:
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return
+		}
+	}
+	close(jobs)
+	wg.Wait()
+}
 
 func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 	wantedKernel := o.machineNodeKernel(mn)
@@ -364,7 +390,8 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 	// Pre-fetch node config to detect transport-based kernel requirements.
 	// If the transport (e.g. xhttp) is incompatible with the configured kernel
 	// (e.g. singbox), auto-switch to the required kernel for this node.
-	if cfgSnapshot, err := perNodeClient.GetConfig(); err == nil && cfgSnapshot != nil {
+	cfgSnapshot, prefetchErr := perNodeClient.GetConfigContext(nodeCtx)
+	if prefetchErr == nil && cfgSnapshot != nil {
 		if snapshotKernel := strings.TrimSpace(cfgSnapshot.KernelType); snapshotKernel != "" {
 			if normalized, normalizeErr := model.NormalizeKernelType(snapshotKernel); normalizeErr == nil {
 				nodeCfg.Kernel.Type = normalized
@@ -381,8 +408,6 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 		handle.kernel = nodeCfg.Kernel.Type
 	}
 	o.mu.Unlock()
-	// Reset cached ETag so the subsequent GetConfig in Initial() gets a full response.
-	perNodeClient.ResetConfigETag()
 
 	push := &machineNodePush{nodeID: mn.ID, provider: o.currentWebSocket}
 
@@ -395,6 +420,7 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 	}
 
 	cp := controlplane.NewMachinePanelControlPlane(perNodeClient, push, registerFn)
+	cp.SetPrefetchedConfig(cfgSnapshot)
 	svc := service.NewWithControlPlane(nodeCfg, cp)
 	svc.SetFirewallController(o.firewall)
 	svc.SetStatusHandler(func(status service.RuntimeStatus) {
@@ -508,7 +534,7 @@ func (o *Orchestrator) rediscoverOnce(ctx context.Context) {
 	if ws != nil {
 		generation = ws.Generation()
 	}
-	nodesResp, err := o.client.GetMachineNodes()
+	nodesResp, err := o.client.GetMachineNodesContext(ctx)
 	if err != nil {
 		o.logger().Warn("machine node discovery failed", "error", err)
 		return
@@ -536,9 +562,7 @@ func (o *Orchestrator) rediscoverOnce(ctx context.Context) {
 	}
 	o.reconcileNodeStatuses(wanted)
 
-	for _, n := range nodesResp.Nodes {
-		o.startNode(ctx, n) // no-op if already running
-	}
+	o.startNodes(ctx, nodesResp.Nodes)
 	if ws != nil && ws == o.currentWebSocket() && ws.IsConnected() && generation == ws.Generation() {
 		o.discoveryVersion.Store(generation)
 		o.discoverySocket.Store(ws)

@@ -33,6 +33,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/monitor"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/scheduling"
 	"github.com/P0me1oo/YZ-Agent/internal/timesync"
 	"github.com/P0me1oo/YZ-Agent/internal/tracker"
 )
@@ -82,8 +83,9 @@ type Service struct {
 	pushBackoff    apiBackoff // backoff for panel push failures
 
 	// pushActive prevents overlapping push/pull goroutines.
-	pushActive atomic.Bool
-	pullActive atomic.Bool
+	pushActive  atomic.Bool
+	pullActive  atomic.Bool
+	pullPending atomic.Bool
 	// 关闭时先禁止新报告，再等待已登记的后台报告，避免批次相互覆盖。
 	pushMu      sync.Mutex
 	pushClosing bool
@@ -113,13 +115,17 @@ type Service struct {
 
 	// metricsMu: lastUsers, lastConfig, wsClient, wsDisconnectAt (buildMetrics vs main loop).
 	metricsMu sync.RWMutex
+	scheduler *scheduling.Monitor
 
 	// reportMu 保护失败的报告批次。HTTP 请求可能已到达面板后才断开连接；
 	// 保留完整批次和 report ID，可让面板丢弃重试而不丢失请求期间产生的新流量。
-	reportMu    sync.Mutex
-	retryReport *reportBatch
-	reportBoot  string
-	reportSeq   atomic.Uint64
+	reportMu          sync.Mutex
+	retryReport       *reportBatch
+	persistedBatch    *reportBatch
+	persistedRevision uint64
+	pendingPersisted  bool
+	reportBoot        string
+	reportSeq         atomic.Uint64
 	// pendingStore 把待确认的报告写入磁盘，进程重启后继续上报；独立运行时为 nil。
 	pendingStore *pendingReportStore
 	status       func(RuntimeStatus)
@@ -139,6 +145,7 @@ const (
 
 // pullResult carries the outcome of an async pullViaAPI back to the main goroutine.
 type pullResult struct {
+	fromPoll       bool
 	config         *model.NodeSpec
 	users          []model.UserSpec
 	configHash     string
@@ -161,6 +168,7 @@ type reportBatch struct {
 type apiBackoff struct {
 	mu            sync.Mutex
 	skipRemaining int
+	level         int
 }
 
 func (b *apiBackoff) shouldSkip() bool {
@@ -176,16 +184,21 @@ func (b *apiBackoff) shouldSkip() bool {
 func (b *apiBackoff) onSuccess() {
 	b.mu.Lock()
 	b.skipRemaining = 0
+	b.level = 0
 	b.mu.Unlock()
 }
 
 func (b *apiBackoff) onFailure() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.skipRemaining <= 0 {
-		b.skipRemaining = 1
-	} else if b.skipRemaining < 8 {
-		b.skipRemaining *= 2
+	b.level = min(b.level+1, 4)
+	b.skipRemaining = 1 << (b.level - 1)
+	// 后两级增加不超过四分之一周期的偏移，避免多个节点同时重试。
+	if b.skipRemaining >= 4 {
+		var jitter [1]byte
+		if _, err := cryptorand.Read(jitter[:]); err == nil {
+			b.skipRemaining += int(jitter[0]) % (b.skipRemaining/4 + 1)
+		}
 	}
 }
 
@@ -247,6 +260,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 	st := limiter.NewSpeedTracker(l)
 
 	return &Service{
+		scheduler:    scheduling.New(),
 		nodeLog:      nlog.Scoped(cfg.LogScope(), cfg.Panel.NodeID, fmt.Sprintf("node:%d", cfg.Panel.NodeID)),
 		accessLog:    accessRecorder,
 		cfg:          cfg,
@@ -276,6 +290,16 @@ func newReportBootID() string {
 }
 
 func (s *Service) Run(ctx context.Context) (runErr error) {
+	// 后台任务启动前固定日志对象，等待首个配置时也保留节点归属。
+	if s.nodeLog == nil {
+		s.nodeLog = nlog.Scoped(s.cfg.LogScope(), s.cfg.Panel.NodeID, "agent")
+	}
+	if s.scheduler != nil {
+		probeCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); s.scheduler.Run(probeCtx) }()
+		defer func() { cancel(); <-done }()
+	}
 	if s.cfg.PrivacyError != nil {
 		return s.cfg.PrivacyError
 	}
@@ -343,7 +367,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	defer wsDiscoveryTicker.Stop()
 
 	s.startWSClient(ctx)
-	if s.runtimeError == nil {
+	if s.lastConfig != nil && s.runtimeError == nil {
 		s.notifyStatus(RuntimeRunning)
 	}
 
@@ -374,7 +398,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			}
 
 		case <-pullTicker.C:
-			if s.wsClient != nil && s.wsClient.IsConnected() && (!s.realtimeEnabled() || s.wsSynchronized) {
+			if s.wsClient != nil && s.wsClient.IsConnected() && !s.wsResyncPending.Load() && (!s.realtimeEnabled() || s.wsSynchronized) {
 				if time.Since(lastWSReconcile) < wsReconcileInterval {
 					continue
 				}
@@ -386,6 +410,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			s.pullViaAPIAsync(ctx)
 
 		case result := <-s.pullResults:
+			s.pullActive.Store(false)
 			s.applyPullResult(ctx, result)
 
 		case result := <-s.sourcePolicyResults:
@@ -462,6 +487,11 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	if s.pullInterval == 0 {
 		s.pullInterval = 60
 	}
+	intervals := s.cfg.Node
+	intervals.PushInterval, intervals.PullInterval = s.pushInterval, s.pullInterval
+	if err := config.ValidateIntervals(intervals, s.cfg.WS); err != nil {
+		return fmt.Errorf("negotiated intervals: %w", err)
+	}
 
 	if bootstrap.Push != nil {
 		s.wsClient = bootstrap.Push
@@ -475,6 +505,8 @@ func (s *Service) initialSetup(ctx context.Context) error {
 			// In machine mode a shared WS client may be available before the first
 			// per-node snapshot arrives. In that case we wait for subsequent WS/REST
 			// updates instead of failing startup.
+			s.prepareUserState(bootstrap.Users)
+			s.markMailboxReadyAndDrain(ctx)
 			return nil
 		}
 		return fmt.Errorf("initial config is nil")
@@ -483,6 +515,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	s.lastConfig = bootstrap.Config
 	s.metricsMu.Unlock()
 	s.applyDeviceIPExclude(bootstrap.Config)
+	s.applySchedulingTargets(bootstrap.Config)
 	s.lastConfigHash = computeConfigHash(bootstrap.Config)
 	s.updateUserState(bootstrap.Users)
 
@@ -508,12 +541,6 @@ func (s *Service) applyRemoteOverrides(ctx context.Context, nc *model.NodeSpec) 
 		return false, nil
 	}
 
-	// Dynamic Log Level (Kernel)
-	if nc.KernelLogLevel != "" && nc.KernelLogLevel != s.cfg.Kernel.LogLevel {
-		s.logger().Info("cert: kernel log level override", "old", s.cfg.Kernel.LogLevel, "new", nc.KernelLogLevel)
-		s.cfg.Kernel.LogLevel = nc.KernelLogLevel
-	}
-
 	// Certificate configuration from panel (panel-first: takes precedence over local config)
 	if nc.CertConfig != nil {
 		return s.applyNodeCert(ctx, nc.CertConfig)
@@ -528,7 +555,7 @@ func (s *Service) applyRemoteOverrides(ctx context.Context, nc *model.NodeSpec) 
 		s.cfg.Cert.Domain = nc.Domain
 	}
 
-	return false, nil
+	return s.cert.Reconfigure(ctx, s.cfg.Cert)
 }
 
 // applyPanelCert converts a panel CertConfig into the local config format and
@@ -606,9 +633,9 @@ func (s *Service) drainMachineMailbox(ctx context.Context) {
 }
 
 func (s *Service) requestWSResync(ctx context.Context, reason string) {
-	if !s.wsResyncPending.CompareAndSwap(false, true) {
-		return
-	}
+	s.wsResyncPending.Store(true)
+	s.wsSynchronized = false
+	s.resetPollingState()
 	if s.nodeLog != nil {
 		s.nodeLog.Warn("ws state may be stale, scheduling REST reconciliation", "reason", reason)
 	} else {
@@ -748,12 +775,13 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		if event.Config == nil || !s.controlVersion.accept(event.Version) {
 			return
 		}
-		s.controlGeneration++
 		s.applyDeviceIPExclude(event.Config)
+		s.applySchedulingTargets(event.Config)
 		newConfigHash := computeConfigHash(event.Config)
 		if newConfigHash == s.lastConfigHash {
 			return
 		}
+		s.controlGeneration++
 		if !s.applyConfigUpdate(ctx, event.Config, newConfigHash) {
 			s.resetPollingState()
 		}
@@ -762,11 +790,11 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		if event.Users == nil || !s.controlVersion.accept(event.Version) {
 			return
 		}
-		s.controlGeneration++
 		newHash := computeUserHash(event.Users)
 		if newHash == s.lastUserHash {
 			return
 		}
+		s.controlGeneration++
 		if s.nodeLog != nil {
 			s.nodeLog.Info(fmt.Sprintf("users updated, %d users", len(event.Users)))
 		}
@@ -776,6 +804,18 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 
 	case controlplane.EventSyncUserDelta:
 		if len(event.DeltaUsers) == 0 || !s.controlVersion.accept(event.Version) {
+			return
+		}
+		var next []model.UserSpec
+		switch event.DeltaAction {
+		case "add":
+			next = mergeUsers(s.lastUsers, event.DeltaUsers)
+		case "remove":
+			next = subtractUsers(s.lastUsers, event.DeltaUsers)
+		default:
+			return
+		}
+		if computeUserHash(next) == s.lastUserHash {
 			return
 		}
 		s.controlGeneration++
@@ -797,10 +837,10 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 // pullViaAPIAsync fetches config/users from the panel API in a background
 // goroutine and sends the result to pullResults for the main goroutine to apply.
 func (s *Service) pullViaAPIAsync(ctx context.Context) {
-	if !s.source.SupportsPolling() {
+	if s.source == nil || !s.source.SupportsPolling() {
 		return
 	}
-	if !s.pullActive.CompareAndSwap(false, true) {
+	if s.pullPending.Load() || !s.pullActive.CompareAndSwap(false, true) {
 		s.logger().Debug("pull already in progress, skipping")
 		return
 	}
@@ -813,9 +853,9 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 	startedGeneration := s.controlGeneration
 
 	go func() {
-		defer s.pullActive.Store(false)
 		snapshot, err := s.source.Poll(ctx)
 		if err != nil {
+			s.pullActive.Store(false)
 			s.logger().Error("poll control plane failed", "error", err)
 			s.pullBackoff.onFailure()
 			return
@@ -829,6 +869,7 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 			takeCertRenewal = s.cert.CertRenewed
 		}
 		result := pullResult{
+			fromPoll:    true,
 			certChanged: takeCertRenewal(), generation: startedGeneration,
 			controlVersion: snapshot.ControlVersion, deviceVersion: snapshot.DeviceVersion,
 			deviceUsers: snapshot.DeviceUsers,
@@ -842,19 +883,32 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 			result.userHash = computeUserHash(snapshot.Users)
 		}
 
+		s.pullPending.Store(true)
+		s.pullActive.Store(false)
 		select {
 		case s.pullResults <- result:
 		case <-ctx.Done():
+			s.pullPending.Store(false)
+			s.pullActive.Store(false)
 		}
 	}()
 }
 
 // applyPullResult processes the result of an async pullViaAPI on the main goroutine.
 func (s *Service) applyPullResult(ctx context.Context, result pullResult) {
+	if result.fromPoll {
+		s.pullPending.Store(false)
+	}
 	s.pendingCertReload = s.pendingCertReload || result.certChanged
-	if result.generation != s.controlGeneration || !s.controlVersion.accept(result.controlVersion) {
+	if result.generation != s.controlGeneration {
+		s.requestWSResync(ctx, "discarded_snapshot")
+		return
+	}
+	if !s.controlVersion.accept(result.controlVersion) {
+		// 面板副本可能暂时落后于推送；保留完整对账需求，按轮询周期重试，避免紧密请求循环。
 		s.wsSynchronized = false
 		s.wsResyncPending.Store(true)
+		s.resetPollingState()
 		return
 	}
 	s.wsResyncPending.Store(false)
@@ -864,6 +918,7 @@ func (s *Service) applyPullResult(ctx context.Context, result pullResult) {
 	if result.config != nil {
 		// 名单和其他配置一样，只在顺序校验通过后由主循环应用。
 		s.applyDeviceIPExclude(result.config)
+		s.applySchedulingTargets(result.config)
 		if result.configHash != "" && result.configHash == s.lastConfigHash && !result.certChanged {
 			result.config = nil
 		}
@@ -923,7 +978,9 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 
 	if s.deviceGate != nil {
 		ids := make([]int, 0, len(users))
-		for _, user := range users { ids = append(ids, user.ID) }
+		for _, user := range users {
+			ids = append(ids, user.ID)
+		}
 		s.deviceGate.SetUsers(ids)
 	}
 	s.limiter.UpdateUsers(users)
@@ -943,6 +1000,7 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 // 无论成功还是失败，lastConfig 都保留面板最新要求；失败时节点保持停止，
 // 这样后续用户同步不会误把旧配置重新启动起来。
 func (s *Service) applyConfigUpdate(ctx context.Context, config *model.NodeSpec, hash string) bool {
+	s.applySchedulingTargets(config)
 	// 仅来源策略变化不重建中转监听，避免切换前置出口时中断已有连接。
 	policyOnly := s.kernel.IsRunning() && computeKernelConfigHash(s.lastConfig) == computeKernelConfigHash(config) && s.appliedState.TLSHash == s.currentTLSHash()
 	s.metricsMu.Lock()
@@ -1039,6 +1097,11 @@ func (s *Service) ensureRunning(ctx context.Context) bool {
 // applyUserUpdate replaces the full user set and hot-swaps the kernel.
 // Called from WS sync.users and REST polling.
 func (s *Service) applyUserUpdate(ctx context.Context, users []model.UserSpec, newHash string) bool {
+	if s.lastConfig == nil {
+		s.prepareUserState(users)
+		s.requestWSResync(ctx, "users_before_config")
+		return true
+	}
 	if s.lastConfig.IsRelayLanding() || s.lastConfig.Protocol == "balancer" {
 		return s.syncLandingUserState(ctx)
 	}
@@ -1076,6 +1139,18 @@ func (s *Service) applyUserUpdate(ctx context.Context, users []model.UserSpec, n
 // via the kernel's atomic user API. The latest state is prepared first so a
 // stopped kernel can start as soon as the first user arrives.
 func (s *Service) applyUserDelta(ctx context.Context, action string, deltaUsers []model.UserSpec) bool {
+	if s.lastConfig == nil {
+		switch action {
+		case "add":
+			s.prepareUserState(mergeUsers(s.lastUsers, deltaUsers))
+		case "remove":
+			s.prepareUserState(subtractUsers(s.lastUsers, deltaUsers))
+		default:
+			return false
+		}
+		s.requestWSResync(ctx, "delta_before_config")
+		return true
+	}
 	if s.lastConfig.IsRelayLanding() && (action == "add" || action == "remove") {
 		return s.syncLandingUserState(ctx)
 	}
@@ -1320,7 +1395,15 @@ func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int,
 	s.trackRelayAlive(ctx)
 	s.trackConnectionCounts(ctx)
 	// 每次采样都保存；面板不可用、退避或请求仍在途时也不能只留在内存里。
-	_ = s.persistPending()
+	if err := s.persistPending(); err == nil {
+		s.reportMu.Lock()
+		if s.retryReport == nil {
+			if retire, ok := s.kernel.(kernel.TrafficRetirer); ok {
+				s.tracker.RetireConfirmed(retire.RetireTraffic)
+			}
+		}
+		s.reportMu.Unlock()
+	}
 	return connCount, len(traffic), nil
 }
 
@@ -1377,7 +1460,12 @@ func (s *Service) pushReportSync() {
 	ctx, cancel := context.WithTimeout(context.Background(), finalReportBudget)
 	defer cancel()
 	// 退出期限从等待在途请求开始，不能等完请求后重新计时。
-	defer s.persistPending()
+	defer func() {
+		_ = s.persistPending()
+		if err := s.pendingStore.compact(); err != nil {
+			s.logger().Warn("failed to compact pending traffic on shutdown", "error", err)
+		}
+	}()
 	s.pushMu.Lock()
 	s.pushClosing = true
 	s.pushMu.Unlock()
@@ -1559,6 +1647,10 @@ func (s *Service) persistBatchLocked(batch *reportBatch) error {
 	if s.pendingStore == nil {
 		return nil
 	}
+	revision := s.tracker.PendingRevision()
+	if s.pendingPersisted && revision == s.persistedRevision && batch == s.persistedBatch {
+		return nil
+	}
 	var saved *pendingBatch
 	if batch != nil {
 		saved = &pendingBatch{ID: batch.id, LimitEvents: batch.payload.LimitEvents, pendingTraffic: pendingTraffic{
@@ -1572,6 +1664,7 @@ func (s *Service) persistBatchLocked(batch *reportBatch) error {
 		s.logger().Warn("failed to save pending traffic", "error", err)
 		return err
 	}
+	s.persistedBatch, s.persistedRevision, s.pendingPersisted = batch, revision, true
 	return nil
 }
 
@@ -1777,6 +1870,9 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	s.metricsMu.RUnlock()
 
 	m := make(map[string]interface{})
+	if results := s.scheduler.Snapshot(); len(results) > 0 {
+		m["scheduling_probes"] = results
+	}
 	online := s.tracker.CurrentOnline()
 
 	m["uptime"] = status.Uptime
@@ -1839,6 +1935,12 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	}
 
 	return m
+}
+
+func (s *Service) applySchedulingTargets(cfg *model.NodeSpec) {
+	if cfg != nil && s.scheduler != nil {
+		s.scheduler.Update(cfg.SchedulingTargets)
+	}
 }
 
 // applyDeviceIPExclude 更新当前实例的前置服务器名单，不影响同进程其他节点。
@@ -1934,6 +2036,9 @@ func validateNodeRuntime(cfg *config.Config, kcfgSupported []string, spec *model
 	var kcfg config.KernelConfig
 	if cfg != nil {
 		kcfg = cfg.Kernel
+	}
+	if _, err := config.ResolveKernelLogLevel(kcfg.LogLevel, spec.KernelLogLevel); err != nil {
+		return err
 	}
 	if err := model.ValidateNodeSpec(spec, kcfg); err != nil {
 		return err

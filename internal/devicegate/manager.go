@@ -86,11 +86,13 @@ type Manager struct {
 	retired            map[string]retiredSource
 	loopWG             sync.WaitGroup
 	callWG             sync.WaitGroup
+	stopOnce           sync.Once
+	stopDone           chan struct{}
 	onError            func(error)
 }
 
 func New(remote Remote, onError func(error)) *Manager {
-	return &Manager{remote: remote, syncMu: make(chan struct{}, 1), sources: make(map[sourceKey]*sourceState),
+	return &Manager{remote: remote, stopDone: make(chan struct{}), syncMu: make(chan struct{}, 1), sources: make(map[sourceKey]*sourceState),
 		flights: make(map[sourceKey]*flight), revoked: make(map[string]revokedLease), retired: make(map[string]retiredSource), onError: onError}
 }
 
@@ -641,14 +643,26 @@ func (m *Manager) Stop(ctx context.Context) error {
 	if !m.Enabled() {
 		return nil
 	}
-	m.mu.Lock()
-	m.closing, m.ready = true, false
-	cancel := m.cancel
-	m.mu.Unlock()
-	cancel()
-	m.closeAll()
-	m.callWG.Wait()
-	m.loopWG.Wait()
+	m.stopOnce.Do(func() {
+		m.mu.Lock()
+		m.closing, m.ready = true, false
+		cancel := m.cancel
+		m.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		go func() {
+			m.closeAll()
+			m.callWG.Wait()
+			m.loopWG.Wait()
+			close(m.stopDone)
+		}()
+	})
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("等待设备来源关闭: %w", ctx.Err())
+	case <-m.stopDone:
+	}
 	return m.Sync(ctx)
 }
 

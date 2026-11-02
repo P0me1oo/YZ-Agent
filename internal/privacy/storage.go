@@ -48,7 +48,17 @@ var registry = struct {
 	keys  map[string]*State
 }{paths: map[string]binding{}, keys: map[string]*State{}}
 
-var writeMu sync.Mutex
+var writeMu sync.RWMutex
+var fileWrites [256]sync.Mutex
+
+// 文件写入并行；身份绑定和密钥迁移仍使用全局独占屏障。
+func LockFileWrite(path string) func() {
+	key := sha256.Sum256([]byte(canonical(path)))
+	lock := &fileWrites[key[0]]
+	writeMu.RLock()
+	lock.Lock()
+	return func() { lock.Unlock(); writeMu.RUnlock() }
+}
 
 func LockWrite() func() { writeMu.Lock(); return writeMu.Unlock }
 
@@ -301,7 +311,7 @@ func ReadFile(path string) ([]byte, error) {
 }
 
 func WriteFile(path string, data []byte, perm os.FileMode) error {
-	release := LockWrite()
+	release := LockFileWrite(path)
 	defer release()
 	data, err := Protect(path, data)
 	if err != nil {

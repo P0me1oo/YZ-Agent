@@ -18,6 +18,7 @@ import (
 type M = map[string]interface{}
 
 func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TLSCert) M {
+	level, _ := config.ResolveKernelLogLevel(kcfg.LogLevel, nc.KernelLogLevel)
 	var outbounds []M
 	tags := make(map[string]bool)
 
@@ -55,7 +56,7 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 
 	cfg := M{
 		"log": M{
-			"loglevel": xrayLogLevel(kcfg.LogLevel),
+			"loglevel": xrayLogLevel(level),
 			"error":    "",
 			"access":   "",
 		},
@@ -250,6 +251,8 @@ func xrayLogLevel(singboxLevel string) string {
 		return "warning"
 	case "error":
 		return "error"
+	case "disabled", "none":
+		return "none"
 	case "fatal", "panic":
 		return "error"
 	default:

@@ -52,10 +52,15 @@ func (s *Service) prepareRuntime(ctx context.Context, nc *model.NodeSpec, users 
 		return false
 	}
 	if nc != nil && nc.CertConfig == nil {
-		if _, err := s.cert.Reconfigure(ctx, s.cfg.Cert); err != nil {
+		effective := s.cfg.Cert
+		if nc.Domain != "" {
+			effective.Domain = nc.Domain
+		}
+		if _, err := s.cert.Reconfigure(ctx, effective); err != nil {
 			s.failRuntime("应用本地证书失败", nc, users, err)
 			return false
 		}
+		s.cfg.Cert = effective
 	}
 	if err := validateNodeRuntime(s.cfg, s.kernel.Protocols(), nc, s.tlsCert()); err != nil {
 		s.failRuntime("配置校验失败", nc, users, err)
@@ -63,6 +68,10 @@ func (s *Service) prepareRuntime(ctx context.Context, nc *model.NodeSpec, users 
 	}
 	if _, err := s.applyRemoteOverrides(ctx, nc); err != nil {
 		s.failRuntime("应用远程配置失败", nc, users, err)
+		return false
+	}
+	if err := validateTLSRequirements(nc, s.tlsCert(), cfgKernelType(s.cfg)); err != nil {
+		s.failRuntime("应用证书后配置校验失败", nc, users, err)
 		return false
 	}
 	s.setTimeUsage(nc)

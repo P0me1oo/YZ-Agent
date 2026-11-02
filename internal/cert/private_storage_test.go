@@ -19,7 +19,7 @@ func TestPrivateCertificatePersistenceAndACMEStorage(t *testing.T) {
 	certPEM, keyPEM := generateSelfSignedPair(t, "private.example.invalid")
 	manager := NewManager(config.CertConfig{CertDir: dir})
 	manager.storePEM(certPEM, keyPEM)
-	raw, err := os.ReadFile(filepath.Join(dir, "key.pem"))
+	raw, err := os.ReadFile(filepath.Join(dir, "cert-pair.json"))
 	if err != nil || !privacy.IsEncrypted(raw) || bytes.Contains(raw, keyPEM) {
 		t.Fatal("证书私钥仍以明文保存")
 	}

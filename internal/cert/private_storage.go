@@ -14,7 +14,7 @@ type privateStorage struct {
 }
 
 func (s *privateStorage) Store(ctx context.Context, key string, value []byte) error {
-	release := privacy.LockWrite()
+	release := privacy.LockFileWrite(filepath.Join(s.root, key))
 	defer release()
 	data, err := privacy.Protect(filepath.Join(s.root, key), value)
 	if err != nil {

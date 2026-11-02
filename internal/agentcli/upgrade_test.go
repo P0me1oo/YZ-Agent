@@ -333,6 +333,7 @@ func TestUpgradePreservesBackupWhenRollbackFails(t *testing.T) {
 // 无论直连还是镜像，必须先取得校验清单，随后才能下载和核验程序。
 func TestUpgradeDownloadsChecksumsBeforeBinaries(t *testing.T) {
 	paths, ops := upgradeFixture(t)
+	ops.run = func(string, ...string) ([]byte, error) { return []byte("xboard-node v1.20.0"), nil }
 	download := ops.download
 	var requested []string
 	ops.downloadChecksums = func(url, destination string) error {
@@ -359,6 +360,7 @@ func TestUpgradeContinuesWhenAllChecksumSourcesAreUnavailable(t *testing.T) {
 		t.Run(fmt.Sprint(unified), func(t *testing.T) {
 			paths, ops := upgradeFixture(t)
 			ops.downloadChecksums = func(string, string) error { return errReleaseChecksumsUnavailable }
+			ops.run = func(string, ...string) ([]byte, error) { return []byte("xboard-node v2.18.0"), nil }
 			if unified {
 				ops.run = func(string, ...string) ([]byte, error) { return []byte("yz-agent v2.18.0 (test build)"), nil }
 				ops.migrate = func(node, cli string) error {

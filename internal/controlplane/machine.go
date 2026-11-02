@@ -14,8 +14,9 @@ import (
 // with machine-level auth; WS events are delivered via an externally-managed
 // PushClient supplied by the machine WS mux.
 type MachinePanelControlPlane struct {
-	client *panel.Client
-	push   PushClient // virtual push client from WS mux (may be nil)
+	client     *panel.Client
+	prefetched *panel.NodeConfig
+	push       PushClient // virtual push client from WS mux (may be nil)
 
 	registerFn func(statuses chan<- StatusChange) *NodeMailbox
 }
@@ -39,6 +40,9 @@ func NewMachinePanelControlPlane(
 	}
 }
 
+// SetPrefetchedConfig 只在首次初始化前设置；预取的 ETag 与这份配置一起接纳。
+func (p *MachinePanelControlPlane) SetPrefetchedConfig(cfg *panel.NodeConfig) { p.prefetched = cfg }
+
 func (p *MachinePanelControlPlane) SupportsPolling() bool       { return true }
 func (p *MachinePanelControlPlane) SupportsDiscovery() bool     { return true }
 func (p *MachinePanelControlPlane) SupportsReporting() bool     { return true }
@@ -53,7 +57,7 @@ func (p *MachinePanelControlPlane) Initial(
 	// In machine mode the orchestrator handles the shared WS handshake, but each
 	// node service still needs one initial REST snapshot so newly discovered nodes
 	// can start immediately instead of waiting for a subsequent WS full-sync.
-	hs, err := p.client.Handshake()
+	hs, err := p.client.HandshakeContext(ctx)
 	if err != nil {
 		nlog.Core().Debug("machine node handshake skipped, using REST", "error", err)
 	}
@@ -78,22 +82,26 @@ func (p *MachinePanelControlPlane) Initial(
 		return bootstrap, nil
 	}
 
-	configETag, userETag := p.client.ETags()
 	committed := false
 	defer func() {
 		if !committed {
-			p.client.RestoreETags(configETag, userETag)
+			p.client.ResetETags()
 		}
 	}()
 
-	configSnapshot, err := p.client.GetConfig()
+	err = nil
+	configSnapshot := p.prefetched
+	p.prefetched = nil
+	if configSnapshot == nil {
+		configSnapshot, err = p.client.GetConfigContext(ctx)
+	}
 	if err != nil {
 		return Bootstrap{}, fmt.Errorf("machine initial config: %w", err)
 	}
 	if configSnapshot == nil {
 		return Bootstrap{}, fmt.Errorf("machine initial config is nil")
 	}
-	users, err := p.client.GetUsers()
+	users, err := p.client.GetUsersContext(ctx)
 	if err != nil {
 		return Bootstrap{}, fmt.Errorf("machine initial users: %w", err)
 	}
@@ -118,19 +126,18 @@ func (p *MachinePanelControlPlane) Poll(ctx context.Context) (Snapshot, error) {
 	if p.client.RealtimeEnabled() {
 		return pollRealtime(ctx, p.client)
 	}
-	configETag, userETag := p.client.ETags()
 	committed := false
 	defer func() {
 		if !committed {
-			p.client.RestoreETags(configETag, userETag)
+			p.client.ResetETags()
 		}
 	}()
 
-	configSnapshot, err := p.client.GetConfig()
+	configSnapshot, err := p.client.GetConfigContext(ctx)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("machine poll config: %w", err)
 	}
-	users, err := p.client.GetUsers()
+	users, err := p.client.GetUsersContext(ctx)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("machine poll users: %w", err)
 	}
@@ -153,7 +160,7 @@ func (p *MachinePanelControlPlane) Discover(
 	events chan<- Event,
 	statuses chan<- StatusChange,
 ) (PushClient, error) {
-	if _, err := p.client.Handshake(); err != nil {
+	if _, err := p.client.HandshakeContext(ctx); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {

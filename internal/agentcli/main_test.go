@@ -126,7 +126,7 @@ func TestInstalledVersion(t *testing.T) {
 	if got := installedVersion("latest", report); got != "v1.13-yz.2" {
 		t.Fatalf("installedVersion(latest) = %q", got)
 	}
-	if got := installedVersion("v1.13-yz.2", []byte("invalid report")); got != "v1.13-yz.2" {
+	if got := installedVersion("v1.13-yz.2", []byte("invalid report")); got != "unknown" {
 		t.Fatalf("installedVersion(fixed) = %q", got)
 	}
 }

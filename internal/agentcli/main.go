@@ -792,13 +792,13 @@ func verifyReleaseChecksum(path, artifact string, checksums []byte) error {
 	return nil
 }
 
-func installedVersion(requested string, report []byte) string {
-	if requested != "" && requested != "latest" {
-		return requested
-	}
+func installedVersion(_ string, report []byte) string {
 	fields := strings.Fields(string(report))
-	if len(fields) >= 2 {
-		return fields[1]
+	if len(fields) >= 2 && releaseVersionPattern.MatchString(fields[1]) {
+		switch fields[0] {
+		case "yz-agent", "agent", "xboard-node", "xbctl":
+			return fields[1]
+		}
 	}
 	return "unknown"
 }
