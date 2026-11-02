@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,8 @@ func newPendingReportStore(cfg *config.Config) *pendingReportStore {
 // save 用临时文件替换的方式写入，写到一半断电也不会留下损坏的文件。
 // 没有任何待确认数据时删除文件。
 func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) error {
+	release := privacy.LockWrite()
+	defer release()
 	if s == nil {
 		return nil
 	}
@@ -95,6 +98,10 @@ func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) e
 		Batch:    batch,
 		Pending:  pending,
 	})
+	if err != nil {
+		return err
+	}
+	data, err = privacy.Protect(s.path, data)
 	if err != nil {
 		return err
 	}
@@ -143,7 +150,7 @@ func (s *pendingReportStore) load() (*pendingBatch, pendingTraffic, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := os.ReadFile(s.path)
+	data, err := privacy.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, pendingTraffic{}, nil
 	}

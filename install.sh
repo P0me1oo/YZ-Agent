@@ -91,6 +91,7 @@ CLI_ENTRY_BACKUP_DIR=""
 CLI_ENTRY_CHANGED=0
 BINARIES_CHANGED=0
 BINARY_REPLACE_STARTED=0
+PRIVATE_LEGACY_EXPORT=0
 CLI_REPLACE_STARTED=0
 ROLLBACK_FAILED=0
 LOCK_HELD=0
@@ -179,6 +180,21 @@ rollback_install() {
         fi
     fi
     local failed=0 name target previous
+    # 新版已写入加密状态时，恢复不支持该格式的旧程序前先安全解密。
+    previous="$BIN_STAGE_DIR/previous-$APP_NAME"
+    if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then previous="$PREVIOUS_BINARY_PATH"; fi
+    if [ "$BINARY_REPLACE_STARTED" -eq 1 ] && [ -x "$BINARY_PATH" ] &&
+        "$BINARY_PATH" config init --supports-private-storage >/dev/null 2>&1 &&
+        { [ ! -x "$previous" ] || ! "$previous" config init --supports-private-storage >/dev/null 2>&1; }; then
+        local export_args=(config private-export --config "$CONFIG_FILE")
+        if [ -n "$BACKUP_PATH" ] && [ -d "$BACKUP_PATH" ]; then export_args+=(--backup "$BACKUP_PATH"); fi
+        if ! "$BINARY_PATH" "${export_args[@]}"; then
+            ROLLBACK_FAILED=1
+            log_error "Private data could not be recovered for the old release; current program and recovery files retained"
+            service_start >/dev/null 2>&1 || true
+            return 1
+        fi
+    fi
     if [ "$BINARIES_CHANGED" -eq 1 ]; then
         local names=("$APP_NAME")
         if [ "$CLI_NAME" != "$APP_NAME" ]; then names+=("$CLI_NAME"); fi
@@ -211,7 +227,7 @@ rollback_install() {
             case "$item" in
                 config.yml) target="$CONFIG_FILE"; mode=600 ;;
                 credentials.env) target="$CREDENTIALS_FILE"; mode=600 ;;
-                install-meta.json) target="$INSTALL_META"; mode=644 ;;
+                install-meta.json) target="$INSTALL_META"; mode=600 ;;
                 bin-dir) target="$BIN_DIR_FILE"; mode=644 ;;
                 install.sh) target="$INSTALLER_COPY_PATH"; mode=755 ;;
                 service) target="${PREVIOUS_SERVICE_PATH:-$SERVICE_PATH}"; mode=$(service_file_mode) ;;
@@ -1299,12 +1315,12 @@ stage_xbctl() {
 }
 
 render_config() {
+    local config_helper="$BIN_STAGE_DIR/xbctl"
     local init_args=(
         config init
         --mode "$MODE"
         --panel-url "$PANEL_URL"
         --health-port "${HEALTH_PORT:-0}"
-        --token "$TOKEN"
         --version "$RELEASE_VERSION"
         --output "$TMP_DIR/config.yml"
         --credentials-out "$TMP_DIR/credentials.env"
@@ -1336,8 +1352,23 @@ render_config() {
         init_args+=(--gogc "$RUNTIME_GOGC")
     fi
 
+    # 旧版无法直接读取加密配置，由已安装的新程序生成兼容格式。
+    PRIVATE_LEGACY_EXPORT=0
+    if ! "$config_helper" config init --supports-private-storage >/dev/null 2>&1 &&
+        [ -x "$PREVIOUS_BINARY_PATH" ] &&
+        "$PREVIOUS_BINARY_PATH" config init --supports-private-storage >/dev/null 2>&1; then
+        config_helper="$PREVIOUS_BINARY_PATH"
+        init_args+=(--legacy-output)
+        PRIVATE_LEGACY_EXPORT=1
+    fi
+    # 新版从标准输入接收凭据，避免令牌出现在进程参数中；历史版本保留原兼容方式。
+    if "$config_helper" config init --supports-token-stdin >/dev/null 2>&1; then
+        init_args+=(--token-stdin)
+    else
+        init_args+=(--token "$TOKEN")
+    fi
     local output
-    output=$("$BIN_STAGE_DIR/xbctl" "${init_args[@]}") || {
+    output=$("$config_helper" "${init_args[@]}" <<<"$TOKEN") || {
         log_error "xbctl config init failed"
         exit 1
     }
@@ -1542,11 +1573,14 @@ install_staged_files() {
     stop_previous_service
     stop_existing_service
     cleanup_installation_firewall
+    if [ "$PRIVATE_LEGACY_EXPORT" -eq 1 ] && [ -f "$CONFIG_FILE" ]; then
+        "$PREVIOUS_BINARY_PATH" config private-export --config "$CONFIG_FILE"
+    fi
     migrate_install_root
     replace_binary_files
     install -m 600 "$TMP_DIR/config.yml" "$CONFIG_FILE"
     install -m 600 "$TMP_DIR/credentials.env" "$CREDENTIALS_FILE"
-    install -m 644 "$TMP_DIR/install-meta.json" "$INSTALL_META"
+    install -m 600 "$TMP_DIR/install-meta.json" "$INSTALL_META"
     if [ -f "$0" ] && [ "$(realpath "$0")" != "$(realpath "$INSTALLER_COPY_PATH" 2>/dev/null || echo "$INSTALLER_COPY_PATH")" ]; then
         install -m 755 "$0" "$INSTALLER_COPY_PATH"
     fi

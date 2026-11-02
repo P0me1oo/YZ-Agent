@@ -12,27 +12,44 @@ import (
 
 // Remote 只模拟接口边界，具体替换决策由各用例明确给出。
 type Remote struct {
-	Calls atomic.Int64
-	Admit func(context.Context, devicegate.AdmissionRequest) (devicegate.AdmissionReply, error)
-	Sync  func(context.Context, devicegate.Snapshot) (devicegate.SyncReply, error)
+	Calls         atomic.Int64
+	Admit         func(context.Context, devicegate.AdmissionRequest) (devicegate.AdmissionReply, error)
+	Sync          func(context.Context, devicegate.Snapshot) (devicegate.SyncReply, error)
+	CacheDuration time.Duration
 }
 
 func (*Remote) DeviceHandoverSupported() bool { return true }
-func (*Remote) BeginDeviceSession(_ context.Context, run string) (devicegate.BeginReply, error) {
-	return devicegate.BeginReply{Version: 1, Run: run}, nil
+func (r *Remote) BeginDeviceSession(_ context.Context, run string) (devicegate.BeginReply, error) {
+	reply := devicegate.BeginReply{Version: 1, Run: run}
+	if r.CacheDuration > 0 {
+		reply.LeaseCache = 1
+	}
+	return reply, nil
 }
 func (r *Remote) AdmitDeviceSource(ctx context.Context, req devicegate.AdmissionRequest) (devicegate.AdmissionReply, error) {
 	n := r.Calls.Add(1)
 	if r.Admit != nil {
 		return r.Admit(ctx, req)
 	}
-	return devicegate.AdmissionReply{Status: "allowed", Lease: fmt.Sprintf("%032x", n)}, nil
+	reply := devicegate.AdmissionReply{Status: "allowed", Lease: fmt.Sprintf("%032x", n)}
+	if r.CacheDuration > 0 {
+		reply.ConfirmedAt = time.Now().UnixMilli()
+		reply.ServerTime = reply.ConfirmedAt
+		reply.ExpiresAt = reply.ConfirmedAt + r.CacheDuration.Milliseconds()
+		reply.Sync = &devicegate.SyncReply{Run: req.Run, Sequence: req.Snapshot.Sequence}
+	}
+	return reply, nil
 }
 func (r *Remote) SyncDeviceSession(ctx context.Context, s devicegate.Snapshot) (devicegate.SyncReply, error) {
 	if r.Sync != nil {
 		return r.Sync(ctx, s)
 	}
-	return devicegate.SyncReply{Run: s.Run, Sequence: s.Sequence}, nil
+	reply := devicegate.SyncReply{Run: s.Run, Sequence: s.Sequence}
+	if r.CacheDuration > 0 {
+		reply.LeaseCache = 1
+		reply.ServerTime = time.Now().UnixMilli()
+	}
+	return reply, nil
 }
 
 func Manager(t *testing.T, remote *Remote) *devicegate.Manager {

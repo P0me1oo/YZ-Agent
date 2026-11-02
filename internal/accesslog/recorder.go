@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -203,6 +203,8 @@ func (r *Recorder) Checkpoint(path string) (int, error) {
 }
 
 func writeState(path string, state savedState) error {
+	release := privacy.LockWrite()
+	defer release()
 	if path == "" {
 		return nil
 	}
@@ -213,6 +215,10 @@ func writeState(path string, state savedState) error {
 		return nil
 	}
 	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	data, err = privacy.Protect(path, data)
 	if err != nil {
 		return err
 	}
@@ -244,20 +250,14 @@ func (r *Recorder) Restore(path string) error {
 	if path == "" {
 		return nil
 	}
-	f, err := os.Open(path)
+	data, err := privacy.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	const maxSize = 16 << 20
-	data, err := io.ReadAll(io.LimitReader(f, maxSize+1))
-	if err != nil {
-		return err
-	}
-	if len(data) > maxSize {
+	if len(data) > 16<<20 {
 		return errors.New("访问记录缓存过大")
 	}
 	var state savedState

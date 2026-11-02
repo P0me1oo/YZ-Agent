@@ -8,7 +8,56 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy/privacytest"
 )
+
+func TestNodeSpecFromPanelValidated_EncryptedCustomConfig(t *testing.T) {
+	for _, kernel := range []string{"xray", "singbox"} {
+		for _, format := range []struct{ name, data string }{
+			{"json", `{"outbounds":[{"tag":"custom-exit"}]}`},
+			{"yaml", "outbounds:\n  - tag: custom-exit\n"},
+		} {
+			t.Run(kernel+"/"+format.name, func(t *testing.T) {
+				dir := t.TempDir()
+				state := privacytest.Bind(t, dir)
+				path := filepath.Join(dir, "custom."+format.name)
+				if err := privacy.WriteFile(path, []byte(format.data), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				stored, err := os.ReadFile(path)
+				if err != nil || !privacy.IsEncrypted(stored) {
+					t.Fatalf("custom config must be encrypted: %v", err)
+				}
+				node := &panel.NodeConfig{Protocol: "shadowsocks", ServerPort: 8388,
+					CustomRouteRules: []panel.CustomRouteRule{{
+						Action: panel.RouteAction{Type: "route", Target: "custom-exit"},
+						Match:  panel.RouteMatch{DomainSuffixes: []string{"example.com"}},
+					}},
+				}
+				kcfg := config.KernelConfig{Type: kernel, CustomConfig: path}
+				for attempt := 0; attempt < 2; attempt++ {
+					if _, err := NodeSpecFromPanelValidated(node, kcfg); err != nil {
+						t.Fatalf("startup/reload validation failed: %v", err)
+					}
+				}
+				duplicate := kcfg
+				duplicate.CustomOutbound = []map[string]any{{"tag": "custom-exit"}}
+				if _, err := NodeSpecFromPanelValidated(node, duplicate); err == nil || !strings.Contains(err.Error(), "duplicates") {
+					t.Fatalf("decrypted outbound collisions must still be rejected: %v", err)
+				}
+				privacy.Bind(dir, nil, nil, true)
+				if _, err := NodeSpecFromPanelValidated(node, kcfg); err == nil || !strings.Contains(err.Error(), "read custom config") {
+					t.Fatalf("unbound encrypted config must fail at reading: %v", err)
+				}
+				privacy.Bind(dir, state, nil, true)
+				if _, err := NodeSpecFromPanelValidated(node, kcfg); err != nil {
+					t.Fatalf("restored binding must allow validation: %v", err)
+				}
+			})
+		}
+	}
+}
 
 func TestNodeSpecFromPanelValidated_AllowsTargetsFromCustomConfigOutbounds(t *testing.T) {
 	dir := t.TempDir()

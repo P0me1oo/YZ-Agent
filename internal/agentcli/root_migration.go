@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
+	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -38,15 +39,81 @@ func runConfigMigrateRoot(args []string) error {
 			return err
 		}
 	}
-	data, err := os.ReadFile(values["--config"])
+	data, err := migratePrivateConfigRoot(values["--config"], strings.TrimRight(values["--from"], "/"), strings.TrimRight(values["--to"], "/"))
 	if err != nil {
 		return err
 	}
-	data, err = migrateConfigRoot(data, strings.TrimRight(values["--from"], "/"), strings.TrimRight(values["--to"], "/"))
+	return writePrivateFile(values["--output"], data)
+}
+
+// 密文中的路径也一同迁移，明文只留在内存中。
+func migratePrivateConfigRoot(path, from, to string) ([]byte, error) {
+	data, err := config.ReadConfigData(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return os.WriteFile(values["--output"], data, 0o600)
+	if _, err := config.LoadWritableRoot(path); err != nil {
+		return nil, err
+	}
+	data, err = migrateConfigRoot(data, from, to)
+	if err != nil {
+		return nil, err
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	if len(document.Content) == 0 {
+		return data, nil
+	}
+	changed := false
+	var rewrite func(*yaml.Node) error
+	rewrite = func(node *yaml.Node) error {
+		if node.Kind != yaml.MappingNode {
+			return nil
+		}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			name, value := node.Content[i].Value, node.Content[i+1]
+			if name == "instances" && value.Kind == yaml.SequenceNode {
+				for _, instance := range value.Content {
+					if err := rewrite(instance); err != nil {
+						return err
+					}
+				}
+			}
+			if name != "protected" || value.Kind != yaml.ScalarNode || value.Value == "" {
+				continue
+			}
+			plain, err := privacy.Open([]byte(value.Value))
+			if err != nil {
+				return err
+			}
+			updated, err := migrateConfigRoot(plain, from, to)
+			if err != nil {
+				return err
+			}
+			if bytes.Equal(plain, updated) {
+				continue
+			}
+			state := privacy.CachedState(value.Value)
+			if state == nil {
+				return errors.New("无法取得目录迁移所需的文件密钥")
+			}
+			sealed, err := state.Seal(updated, nil)
+			if err != nil {
+				return err
+			}
+			value.Value, changed = string(sealed), true
+		}
+		return nil
+	}
+	if err := rewrite(document.Content[0]); err != nil {
+		return nil, err
+	}
+	if !changed {
+		return data, nil
+	}
+	return yaml.Marshal(&document)
 }
 
 // 只改本程序定义的文件路径；凭据、地址、实例标识及用户扩展字段保持原值。

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"os"
 	"path/filepath"
 	"slices"
@@ -87,7 +88,7 @@ func New(path string, reader Reader) *Meter {
 		reader = Read
 	}
 	m := &Meter{path: path, reader: reader}
-	data, err := os.ReadFile(path)
+	data, err := privacy.ReadFile(path)
 	if err == nil {
 		err = json.Unmarshal(data, &m.state)
 		if err == nil && m.state.Version == 1 && m.state.Policy.Epoch > 0 {
@@ -275,8 +276,14 @@ func (m *Meter) blockedLocked(now time.Time) bool {
 }
 
 func (m *Meter) saveLocked() (err error) {
+	release := privacy.LockWrite()
+	defer release()
 	defer func() { m.writeFailed = err != nil }()
 	data, err := json.Marshal(m.state)
+	if err != nil {
+		return err
+	}
+	data, err = privacy.Protect(m.path, data)
 	if err != nil {
 		return err
 	}

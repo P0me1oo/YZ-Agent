@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -14,21 +15,29 @@ import (
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	InstanceID string         `yaml:"-"`
-	Panel      PanelConfig    `yaml:"panel"`
-	Node       NodeConfig     `yaml:"node"`
-	Kernel     KernelConfig   `yaml:"kernel"`
-	Cert       CertConfig     `yaml:"cert"`
-	Log        LogConfig      `yaml:"log"`
-	Runtime    RuntimeConfig  `yaml:"runtime"`
-	WS         WSConfig       `yaml:"ws"`
-	TimeSync   TimeSyncConfig `yaml:"time_sync"`
-	Firewall   FirewallConfig `yaml:"firewall,omitempty"`
+	PrivacyNodeID   int `yaml:"privacy_node_id,omitempty"`
+	privateOwner    string
+	privateState    *privacy.State
+	Protected       string  `yaml:"protected,omitempty"`
+	PrivacyDefaults *Config `yaml:"privacy_defaults,omitempty"`
+	PrivacyError    error   `yaml:"-"`
+	privateSource   []byte
+	InstanceID      string         `yaml:"-"`
+	Panel           PanelConfig    `yaml:"panel"`
+	Node            NodeConfig     `yaml:"node"`
+	Kernel          KernelConfig   `yaml:"kernel"`
+	Cert            CertConfig     `yaml:"cert"`
+	Log             LogConfig      `yaml:"log"`
+	Runtime         RuntimeConfig  `yaml:"runtime"`
+	WS              WSConfig       `yaml:"ws"`
+	TimeSync        TimeSyncConfig `yaml:"time_sync"`
+	Firewall        FirewallConfig `yaml:"firewall,omitempty"`
 	// Standalone enables a local-only node that never contacts the panel.
 	Standalone *StandaloneConfig `yaml:"standalone,omitempty"`
 	// HealthPort enables a lightweight HTTP health-check endpoint on the
@@ -355,14 +364,23 @@ type LogConfig struct {
 }
 
 type RootConfig struct {
-	Instances []Config `yaml:"instances,omitempty"`
-	Config    `yaml:",inline"`
+	ExportLegacy bool `yaml:"-"`
+	PrivacyReady bool `yaml:"-"`
+	sourceHash   [32]byte
+	sourcePath   string
+	wrapped      bool
+	Instances    []Config `yaml:"instances,omitempty"`
+	Config       `yaml:",inline"`
 }
 
 func LoadRoot(path string) (*RootConfig, error) {
 	rc := &RootConfig{}
 
-	data, err := os.ReadFile(path)
+	data, err := ReadConfigData(path)
+	rc.sourceHash, rc.sourcePath = sha256.Sum256(data), path
+	if raw, e := os.ReadFile(path); e == nil {
+		rc.wrapped = strings.HasPrefix(string(raw), "YZENC1\n")
+	}
 	if err == nil {
 		if err := yaml.Unmarshal(data, rc); err != nil {
 			return nil, fmt.Errorf("parse config: %w", err)
@@ -378,6 +396,9 @@ func LoadRoot(path string) (*RootConfig, error) {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
+	if err := rc.openProtected(path, false); err != nil {
+		return nil, err
+	}
 	// In multi-instance mode, top-level settings (log, kernel, node, ws, etc.)
 	// serve as defaults that each instance inherits. Instance-level settings
 	// take precedence over top-level ones.
@@ -395,6 +416,17 @@ func LoadRoot(path string) (*RootConfig, error) {
 
 	rc.applyEnvOverrides()
 	rc.resolveEnvRefs()
+	for _, c := range privacyItems(rc) {
+		if c.Protected != "" && c.PrivacyError == nil {
+			b := bootstrapFor(c, path)
+			if c.IsMachineMode() && c.Machine.Token == "" {
+				c.Machine.Token = b.Credential(path)
+			}
+			if !c.IsMachineMode() && c.Panel.Token == "" {
+				c.Panel.Token = b.Credential(path)
+			}
+		}
+	}
 
 	// Compute stable instance IDs early — they're content-based (derived from
 	// panel URL + machine/node ID), so reordering instances in the YAML doesn't
@@ -486,12 +518,18 @@ func configBaseDir(configPath string) string {
 
 func (rc *RootConfig) validateRoot() error {
 	if len(rc.Instances) == 0 {
+		if rc.Config.PrivacyError != nil {
+			return nil
+		}
 		return rc.Config.validate()
 	}
 	seen := map[string]struct{}{}
 	for i := range rc.Instances {
 		// InstanceID is already computed by assignInstanceIDs().
 		id := rc.Instances[i].InstanceID
+		if rc.Instances[i].PrivacyError != nil {
+			continue
+		}
 		if err := rc.Instances[i].validate(); err != nil {
 			return fmt.Errorf("instances[%d]: %w", i, err)
 		}

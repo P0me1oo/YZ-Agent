@@ -52,6 +52,7 @@ type Client struct {
 	deviceHandoverWS        atomic.Bool
 	deviceHandoverRenewal   atomic.Bool
 	deviceHandoverAdmitSync atomic.Bool
+	deviceLeaseCache        atomic.Bool
 }
 
 // NewClient creates a new panel API client.
@@ -144,6 +145,7 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	c.deviceHandoverWS.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverWS == 1)
 	c.deviceHandoverRenewal.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverRenewal == 1)
 	c.deviceHandoverAdmitSync.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverAdmitSync == 1)
+	c.deviceLeaseCache.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceLeaseCache == 1)
 	return &hs, nil
 }
 

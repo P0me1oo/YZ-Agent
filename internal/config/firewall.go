@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
@@ -20,7 +19,7 @@ type FirewallConfig struct {
 
 // LoadFirewall 只读取规则清理所需配置，不要求加载面板凭据或启动内核。
 func LoadFirewall(name string) (FirewallConfig, error) {
-	data, err := os.ReadFile(name)
+	data, err := ReadConfigData(name)
 	if err != nil {
 		return FirewallConfig{}, err
 	}

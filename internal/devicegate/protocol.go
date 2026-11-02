@@ -15,27 +15,33 @@ var (
 )
 
 type BeginReply struct {
-	Version int    `json:"version"`
-	Run     string `json:"run"`
+	Version    int    `json:"version"`
+	Run        string `json:"run"`
+	LeaseCache int    `json:"lease_cache"`
 }
 
 type AdmissionRequest struct {
-	Run      string    `json:"run"`
-	Sequence uint64    `json:"sequence"`
-	UserID   int       `json:"user_id"`
-	IP       string    `json:"ip"`
-	Snapshot *Snapshot `json:"snapshot,omitempty"`
+	LeaseCache int       `json:"lease_cache,omitempty"`
+	Run        string    `json:"run"`
+	Sequence   uint64    `json:"sequence"`
+	UserID     int       `json:"user_id"`
+	IP         string    `json:"ip"`
+	Snapshot   *Snapshot `json:"snapshot,omitempty"`
 }
 
 type AdmissionReply struct {
-	Status        string                `json:"status"`
-	Lease         string                `json:"lease"`
-	Limit         int                   `json:"limit"`
-	Observed      int                   `json:"observed"`
-	Reason        string                `json:"reason"`
-	Revoked       []Revocation          `json:"revoked"`
-	LimitSnapshot *limitreport.Snapshot `json:"limit_snapshot,omitempty"`
-	Sync          *SyncReply            `json:"sync,omitempty"`
+	ConfirmedSequence uint64                `json:"confirmed_sequence,omitempty"`
+	ConfirmedAt       int64                 `json:"confirmed_at"`
+	ExpiresAt         int64                 `json:"expires_at"`
+	ServerTime        int64                 `json:"server_time"`
+	Status            string                `json:"status"`
+	Lease             string                `json:"lease"`
+	Limit             int                   `json:"limit"`
+	Observed          int                   `json:"observed"`
+	Reason            string                `json:"reason"`
+	Revoked           []Revocation          `json:"revoked"`
+	LimitSnapshot     *limitreport.Snapshot `json:"limit_snapshot,omitempty"`
+	Sync              *SyncReply            `json:"sync,omitempty"`
 }
 
 type Source struct {
@@ -47,6 +53,7 @@ type Source struct {
 }
 
 type Snapshot struct {
+	LeaseCache   int          `json:"lease_cache,omitempty"`
 	Unchanged    bool         `json:"unchanged,omitempty"`
 	BaseSequence uint64       `json:"base_sequence,omitempty"`
 	Run          string       `json:"run"`
@@ -57,15 +64,30 @@ type Snapshot struct {
 }
 
 type SyncReply struct {
-	Run      string       `json:"run"`
-	Sequence uint64       `json:"sequence"`
-	Revoked  []Revocation `json:"revoked"`
+	Idle       []Revocation `json:"idle,omitempty"`
+	LeaseCache int          `json:"lease_cache"`
+	ServerTime int64        `json:"server_time"`
+	Leases     []Lease      `json:"leases"`
+	Run        string       `json:"run"`
+	Sequence   uint64       `json:"sequence"`
+	Revoked    []Revocation `json:"revoked"`
+}
+
+type Lease struct {
+	ConfirmedSequence uint64 `json:"confirmed_sequence,omitempty"`
+	UserID            int    `json:"user_id"`
+	IP                string `json:"ip"`
+	Lease             string `json:"lease"`
+	ConfirmedAt       int64  `json:"confirmed_at"`
+	ExpiresAt         int64  `json:"expires_at"`
 }
 
 type Revocation struct {
-	UserID int    `json:"user_id"`
-	IP     string `json:"ip"`
-	Lease  string `json:"lease"`
+	Run               string `json:"run,omitempty"`
+	ConfirmedSequence uint64 `json:"confirmed_sequence,omitempty"`
+	UserID            int    `json:"user_id"`
+	IP                string `json:"ip"`
+	Lease             string `json:"lease"`
 }
 
 type Remote interface {

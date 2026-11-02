@@ -113,6 +113,7 @@ jobs:
       - name: Validate installer syntax
         run: |
           bash -n install.sh tests/install_service_manager_test.sh tests/install_health_test.sh tests/install_kernel_defaults_test.sh tests/install_paths_test.sh tests/install_name_migration_test.sh tests/singbox_isolated_install.sh
+          bash tests/install_privacy_test.sh
           python3 -c 'import ast, pathlib; [ast.parse(path.read_text(encoding="utf-8")) for path in pathlib.Path("tests").glob("*.py")]'
 
   firewall-native:

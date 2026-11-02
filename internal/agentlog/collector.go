@@ -11,6 +11,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"os"
 	"path/filepath"
 	"sync"
@@ -66,6 +67,8 @@ type saved struct {
 }
 
 func (c *collector) save() error {
+	release := privacy.LockWrite()
+	defer release()
 	if c.path == "" {
 		return nil
 	}
@@ -73,6 +76,10 @@ func (c *collector) save() error {
 	state := saved{c.pending, append([]nlog.Event(nil), c.queue...)}
 	c.mu.Unlock()
 	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	data, err = privacy.Protect(c.path, data)
 	if err != nil {
 		return err
 	}
@@ -105,20 +112,18 @@ func (c *collector) restore() error {
 	if c.path == "" {
 		return nil
 	}
-	file, err := os.Open(c.path)
+	data, err := privacy.ReadFile(c.path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || info.Size() > 12*1024*1024 {
+	if len(data) > 12*1024*1024 {
 		return fmt.Errorf("日志缓存大小无效")
 	}
 	var state saved
-	if err := json.NewDecoder(file).Decode(&state); err != nil {
+	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
 	valid := func(event nlog.Event) bool {
