@@ -11,11 +11,22 @@ on:
         description: "可选：同一固定源码已有成功检查的工作流编号；只复用明确成功的检查"
         required: false
         type: string
+      publish_docker:
+        description: "单独获得镜像发布授权后开启；须填写正式 Tag，将更新版本镜像和 latest"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main, master, dev]
     tags: ["v*"]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE*'
   pull_request:
     branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -296,6 +307,7 @@ jobs:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
     needs: [test, build]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_docker && inputs.release_tag != ''
     permissions:
       contents: read
       packages: write
@@ -370,7 +382,12 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     needs: [test, build, build-docker]
-    if: inputs.release_tag != '' || startsWith(github.ref, 'refs/tags/')
+    if: >-
+      always() &&
+      needs.test.result == 'success' &&
+      needs.build.result == 'success' &&
+      (needs.build-docker.result == 'success' || needs.build-docker.result == 'skipped') &&
+      (inputs.release_tag != '' || startsWith(github.ref, 'refs/tags/'))
     permissions:
       contents: write
     steps:
