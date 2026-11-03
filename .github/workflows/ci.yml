@@ -78,6 +78,8 @@ jobs:
         with:
           script: |
             core.setOutput('full_tests', 'false');
+            core.setOutput('mihomo', 'false');
+            core.setOutput('installer_syntax', 'false');
             const id = process.env.REUSE_RUN_ID;
             if (!id) return;
             if (!/^[1-9][0-9]*$/.test(id)) throw new Error('Invalid reuse run ID');
@@ -92,6 +94,12 @@ jobs:
             if (passed('Verify fixed release source') && passed('Run tests')) {
               core.setOutput('full_tests', 'true');
               core.info(`Reusing successful full tests from run ${id} for ${run.head_sha}`);
+            }
+            if (passed('Verify fixed release source') && passed('Verify Mihomo WG client')) {
+              core.setOutput('mihomo', 'true');
+            }
+            if (passed('Verify fixed release source') && passed('Validate installer syntax')) {
+              core.setOutput('installer_syntax', 'true');
             }
 
       - name: Set up Go
@@ -111,6 +119,7 @@ jobs:
           make test TEST_EXEC="sudo -E"
 
       - name: Verify Mihomo WG client
+        if: steps.reuse.outputs.mihomo != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -122,6 +131,7 @@ jobs:
           WG_MIHOMO_BIN="$RUNNER_TEMP/mihomo" go test -mod=readonly -v -race -count=1 -timeout 3m -tags "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration" -run '^TestDirectWireGuardMihomo$' ./internal/directwg
 
       - name: Validate installer syntax
+        if: steps.reuse.outputs.installer_syntax != 'true'
         run: |
           bash -n install.sh tests/install_service_manager_test.sh tests/install_health_test.sh tests/install_kernel_defaults_test.sh tests/install_paths_test.sh tests/install_name_migration_test.sh tests/singbox_isolated_install.sh
           bash tests/install_privacy_test.sh
