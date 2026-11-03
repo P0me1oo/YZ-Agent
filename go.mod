@@ -309,4 +309,4 @@ replace github.com/sagernet/sing-vmess => ./compat/sing-vmess
 
 // 上游 v26.10.31 没有对应的 Go module Tag；保留兼容的 require 版本，
 // 并将实际依赖固定到 YZ fork 的发布提交，避免解析到移动分支。
-replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261031144429-b56aa7997c7e
+replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261103192507-3c480b0c0d73

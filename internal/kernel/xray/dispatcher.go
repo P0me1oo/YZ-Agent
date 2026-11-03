@@ -793,6 +793,9 @@ type closeTrackingWriter struct {
 	closed  atomic.Bool
 }
 
+// 关闭登记不改变数据，允许核心快速复制遍历其后的计数和限速包装。
+func (w *closeTrackingWriter) UnwrapWriter() buf.Writer { return w.Writer }
+
 func (w *closeTrackingWriter) release() {
 	if w.closed.CompareAndSwap(false, true) {
 		w.onClose()

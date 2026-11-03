@@ -1,5 +1,10 @@
 # 变更记录
 
+## v2.30.1 - 2026-11-04（发布准备）
+
+- 修复 Xray VLESS Vision 快速复制遗漏下载计数、绕过限速及长连接计量延迟的问题。保留已认证用户的内核 splice，按实际字节数执行限速并及时更新全部嵌套计数器。
+- Agent 的关闭登记支持核心遍历包装链。Xray 正式依赖固定到 `3c480b0c0d736157547f80036c0eb4687d3f1586`，包含 32 位 Linux 兼容修正；修复位置和验证见 [Vision 流量计量](docs/vision-accounting.md)。
+
 ## v2.30.0 - 2026-11-03
 
 [已正式发布](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.30.0)。固定源码 `ec5926e8e482b8890db11a9a63a671c7a013c788`；完整并发回归、Mihomo、四组原生防火墙和双架构构建通过。12 份原始附件及 11 项校验已匿名下载核对，核验报告见[兼容矩阵](YZ_COMPATIBILITY.md)。未发布 Docker 镜像或更新生产服务器。
