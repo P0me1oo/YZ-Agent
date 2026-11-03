@@ -1,6 +1,6 @@
 # Vision 流量计量
 
-维护者：P0me1oo。Agent 版本：`v2.30.1`（发布准备）。核心源码：YZ-Xray-core `v26.11.1`，固定提交 `3c480b0c0d736157547f80036c0eb4687d3f1586`。
+维护者：P0me1oo。Agent 版本：`v2.30.1`，固定源码 `d553bc5d5d3ab57b5a622c898fe15ae466e89116`。核心源码：YZ-Xray-core `v26.11.1`，固定提交 `3c480b0c0d736157547f80036c0eb4687d3f1586`。
 
 ## 问题与实现
 
@@ -27,4 +27,6 @@
 
 核心修复与 32 位、格式修正已推送至 `fix/vision-accounting`；Agent 的正式 `go.mod`、`go.sum` 与内核构建标识固定到 `v0.0.0-20261103192507-3c480b0c0d73`，完整提交 `3c480b0c0d736157547f80036c0eb4687d3f1586`，不保留本地核心路径或移动分支。
 
-本次仅发布安装附件，不发布 Docker 镜像或更新服务器。前次核心流水线的格式检查和 Windows KCP 启动失败不作为成功依据；格式和生成文件的本地检查通过，固定核心及 Agent 的完整流水线结果、安装附件核验完成后记录。
+v2.30.1 已[正式发布](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.30.1)，包含 12 份安装附件。核心[完整流水线](https://github.com/P0me1oo/YZ-Xray-core/actions/runs/41703079540)全部通过；Agent [固定来源验证](https://github.com/P0me1oo/YZ-Agent/actions/runs/41707738940)及[发布流水线](https://github.com/P0me1oo/YZ-Agent/actions/runs/41710775597)成功，发布阶段复用成功结果，不复用前次失败检查。
+
+Docker 任务跳过，未发布镜像或更新服务器。按用户要求未执行公开附件下载及其校验值、实际版本和核心来源复核；流水线构建阶段已有的来源、版本及架构检查保留。
