@@ -19,6 +19,7 @@
 - Agent 实际 TLS 1.3 + Vision 直连及 REALITY/Vision 中转四组并发测试通过，包含有限速/无限速、保持连接重载及停止后恢复，累计与实测字节一致。
 - strace 确认直连、限速及中转嵌套计数测试执行 `splice`，没有只依据分支日志判断。实际 TLS 1.3 直连和 REALITY/Vision 中转四组跟踪全部通过，记录 80 次 splice 调用和 68 次正数返回。
 - Agent 的 Xray、节点服务、面板通信、累计、限速和机器流量相关并发回归通过；双核心 REALITY/Vision 和中转生命周期复测通过。
+- 发布前完整回归发现普通 WG 的测试在回包到达后立即采样，可能早于成功写入后的计数回调。测试改为在两秒内等待精确累计，超计立即失败、持续漏计仍失败；生产统计代码不变，双核心连续三轮复测通过。
 - 首次多平台构建检出 32 位 Linux 的 `unix.Splice` 返回值类型不同；显式转换后，amd64/386 的复制、dispatcher 和 buf 测试通过，ARM 5/6/7、MIPS/MIPSLE 交叉构建通过。
 - 正式固定依赖已可下载，模块校验为 `h1:Udd9yk+cgTCovHKHv2Y27g6Iuu7MtNLBZlV2uswVssE=`，核心源码与已验证实现一致，仅补充了格式规范空行；构建标识记录完整提交。默认依赖下的实际 Vision 四组检查和 Linux amd64/arm64 正式功能标签开发构建通过；发布检查须另行核对固定 Agent 提交、实际核心来源、目标架构、`CGO_ENABLED=0` 和 `vcs.modified=false`。
 

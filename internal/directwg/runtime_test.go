@@ -177,13 +177,25 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 				}
 			}
 			recorder.Ack(batch.ID)
-			traffic, alive, _, e := k.GetUserTraffic(context.Background())
-			if e != nil || traffic[1][0] == 0 || traffic[1][1] == 0 {
-				t.Fatal("用户流量未统计")
-			}
 			payloadBytes := int64(len("wireguard-test") * 20 * 2)
-			if traffic[1] != [2]int64{payloadBytes, payloadBytes} {
-				t.Fatalf("流量应只计算 TCP/UDP 有效负载：得到 %v，单向应为 %d", traffic[1], payloadBytes)
+			// 回包到达客户端时，服务端成功写入后的计数回调可能尚未完成。
+			// 等待精确累计；超计立即失败，持续漏计仍在期限内失败。
+			deadline := time.Now().Add(2 * time.Second)
+			var alive map[int]map[string]bool
+			for {
+				traffic, sources, _, err := k.GetUserTraffic(context.Background())
+				if err != nil {
+					t.Fatal("用户流量采样失败:", err)
+				}
+				alive = sources
+				got := traffic[1]
+				if got == [2]int64{payloadBytes, payloadBytes} {
+					break
+				}
+				if got[0] > payloadBytes || got[1] > payloadBytes || time.Now().After(deadline) {
+					t.Fatalf("流量应只计算 TCP/UDP 有效负载：得到 %v，单向应为 %d", got, payloadBytes)
+				}
+				time.Sleep(time.Millisecond)
 			}
 			if !alive[1]["127.0.0.1"] || alive[1]["10.0.0.2"] {
 				t.Fatal("在线来源必须是隧道外地址")
