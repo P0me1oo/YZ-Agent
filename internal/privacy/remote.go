@@ -128,14 +128,14 @@ func Fetch(ctx context.Context, b Bootstrap, configPath string, client *http.Cli
 	if result.Data.Version != 1 {
 		return nil, false, errors.New("面板不支持所需的文件保护版本")
 	}
-	if !result.Data.Enabled {
+	if !result.Data.Enabled && len(result.Data.Keys) == 0 {
 		return nil, false, nil
 	}
 	if !secure {
 		return nil, false, errors.New("文件保护需要 HTTPS 面板入口")
 	}
 	s, err := New(result.Data.Keys)
-	return s, true, err
+	return s, result.Data.Enabled, err
 }
 
 // 旧面板没有密钥接口时，已开启的隐私策略不能静默降级为明文。

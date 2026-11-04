@@ -43,10 +43,13 @@ func TestLogPolicyIsAppliedBeforeReturningPanelResponses(t *testing.T) {
 			}
 			disabled.Store(true)
 			call()
+			if !nlog.LogsDisabled() || client.AgentLogEnabled() {
+				t.Fatal("panel privacy must disable all runtime logs")
+			}
 			disabled.Store(false)
 			call()
-			if !nlog.LogsDisabled() || client.AgentLogEnabled() {
-				t.Fatal("policy replay must not restore runtime logs")
+			if nlog.LogsDisabled() {
+				t.Fatal("panel must restore runtime log output")
 			}
 		})
 	}

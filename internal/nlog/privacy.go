@@ -10,7 +10,6 @@ import (
 var logsDisabled atomic.Bool
 var policyMu sync.Mutex
 var activePolicies = map[string]bool{}
-var lockedPolicies = map[string]bool{}
 
 func LogPolicyKey(panelURL string, machineID, nodeID int) string {
 	if machineID > 0 {
@@ -20,7 +19,7 @@ func LogPolicyKey(panelURL string, machineID, nodeID int) string {
 }
 
 // 启动或重载时先静默，收到所有身份的明确策略后才允许输出。
-// 已收到的停用策略在同一进程中永久保留，不受本地日志级别影响。
+// 面板可恢复日志，本地日志级别不能解除面板的停用策略。
 func ConfigureLogPolicies(keys []string) {
 	policyMu.Lock()
 	defer policyMu.Unlock()
@@ -37,10 +36,7 @@ func ApplyLogPolicy(key string, disabled bool) {
 	if _, active := activePolicies[key]; !active {
 		return
 	}
-	if disabled {
-		lockedPolicies[key] = true
-	}
-	activePolicies[key] = disabled || lockedPolicies[key]
+	activePolicies[key] = disabled
 	updateLogPolicyLocked()
 }
 

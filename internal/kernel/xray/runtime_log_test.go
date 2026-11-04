@@ -46,6 +46,11 @@ func TestRuntimeLogPrivacySkipsConsoleAndPanel(t *testing.T) {
 	if inner.count != 0 || count != 0 {
 		t.Fatal("raw Xray logs bypassed privacy")
 	}
+	nlog.ApplyLogPolicy(t.Name(), false)
+	handler.Handle(&clog.GeneralMessage{Severity: clog.Severity_Error, Content: "restored"})
+	if inner.count != 1 || count != 1 {
+		t.Fatal("Xray console and events did not resume")
+	}
 	if err := handler.Close(); err != nil || !inner.closed {
 		t.Fatal("privacy must not change logger cleanup")
 	}

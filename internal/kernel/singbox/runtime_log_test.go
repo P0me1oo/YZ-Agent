@@ -78,6 +78,11 @@ func TestRuntimeLogPrivacyDisablesRawLogsWithoutChangingUsers(t *testing.T) {
 	if count != 0 {
 		t.Fatal("raw sing-box logs bypassed privacy")
 	}
+	nlog.ApplyLogPolicy(t.Name(), false)
+	writer.WriteMessage(blog.LevelWarn, "restored")
+	if count != 1 || console.Len() == 0 {
+		t.Fatal("sing-box console and events did not resume")
+	}
 }
 
 func TestRunningLogFactoryStopsOutputWhenPanelPolicyChanges(t *testing.T) {

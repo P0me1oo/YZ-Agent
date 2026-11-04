@@ -22,6 +22,10 @@ import (
 )
 
 func privacyFixture(t *testing.T) (string, string, *atomic.Bool) {
+	return privacyFixtureWithPolicy(t, nil)
+}
+
+func privacyFixtureWithPolicy(t *testing.T, policy *atomic.Bool) (string, string, *atomic.Bool) {
 	t.Helper()
 	dir := t.TempDir()
 	token, secret := rand.Text(), rand.Text()
@@ -43,8 +47,11 @@ func privacyFixture(t *testing.T) (string, string, *atomic.Bool) {
 			return
 		}
 		enabled := auth["machine_id"] == float64(1)
+		if policy != nil {
+			enabled = enabled && policy.Load()
+		}
 		keys := []privacy.Key{}
-		if enabled {
+		if auth["machine_id"] == float64(1) {
 			keys = append(keys, key)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": 1, "enabled": enabled, "keys": keys}})

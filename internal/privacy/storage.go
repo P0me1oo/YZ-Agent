@@ -2,6 +2,7 @@ package privacy
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
@@ -10,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +48,8 @@ var registry = struct {
 	sync.RWMutex
 	paths map[string]binding
 	keys  map[string]*State
-}{paths: map[string]binding{}, keys: map[string]*State{}}
+	plain map[string]bool
+}{paths: map[string]binding{}, keys: map[string]*State{}, plain: map[string]bool{}}
 
 var writeMu sync.RWMutex
 var fileWrites [256]sync.Mutex
@@ -161,11 +164,27 @@ func Open(data []byte) ([]byte, error) {
 	if s == nil {
 		return nil, errors.New("解密密钥尚未从面板取得，保留原文件")
 	}
+	return s.Open(data)
+}
+
+// 恢复文件时只接受当前认证身份领取的密钥，不能借用其他实例的内存缓存。
+func (s *State) Open(data []byte) ([]byte, error) {
+	if !IsEncrypted(data) {
+		return data, nil
+	}
+	e, err := parse(data)
+	if err != nil {
+		return nil, err
+	}
+	aead := s.keys[e.KeyID]
+	if aead == nil {
+		return nil, errors.New("加密文件不属于当前机器，保留原文件")
+	}
 	ciphertext, err := base64.StdEncoding.DecodeString(e.Data)
 	if err != nil {
 		return nil, errors.New("加密文件内容无效")
 	}
-	plain, err := s.keys[e.KeyID].Open(nil, nil, ciphertext, aad(e))
+	plain, err := aead.Open(nil, nil, ciphertext, aad(e))
 	if err != nil {
 		return nil, errors.New("加密文件校验失败，保留原文件")
 	}
@@ -241,6 +260,89 @@ func CachedState(data string) *State {
 	return registry.keys[e.KeyID]
 }
 
+// 策略按机器密钥共享，避免旧运行实例在切换期间重新加密已恢复的文件。
+func EnableProtection(s *State) {
+	release := LockWrite()
+	defer release()
+	registry.Lock()
+	defer registry.Unlock()
+	for id := range s.keys {
+		delete(registry.plain, id)
+	}
+}
+
+// 与运行中的写入互斥；失败保留未转换文件，配置仍可凭面板密钥恢复。
+func RestoreScopes(ctx context.Context, paths []string, s *State) error {
+	release := LockWrite()
+	defer release()
+	for _, dir := range paths {
+		if dir == "" {
+			continue
+		}
+		if err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			header := make([]byte, len(Magic))
+			_, readErr := io.ReadFull(file, header)
+			_ = file.Close()
+			if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+				return readErr
+			}
+			if !IsEncrypted(header) {
+				return nil
+			}
+			if info.Size() > 96<<20 {
+				return errors.New("待恢复文件过大，保留原文件")
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil || !IsEncrypted(raw) {
+				return err
+			}
+			e, err := parse(raw)
+			if err != nil {
+				return err
+			}
+			if s.keys[e.KeyID] == nil {
+				return errors.New("待恢复文件不属于当前机器，保留原文件")
+			}
+			plain, err := s.Open(raw)
+			if err != nil {
+				return err
+			}
+			return WriteRaw(path, plain, 0o600)
+		}); err != nil {
+			return err
+		}
+	}
+	registry.Lock()
+	defer registry.Unlock()
+	for id := range s.keys {
+		registry.plain[id] = true
+	}
+	return nil
+}
+
 func lookup(path string) (binding, bool) {
 	path = canonical(path)
 	registry.RLock()
@@ -274,6 +376,12 @@ func Protect(path string, data []byte) ([]byte, error) {
 			if b.state.keys[e.KeyID] == nil {
 				return nil, errors.New("不能用其他机器的密钥覆盖加密文件")
 			}
+		}
+		registry.RLock()
+		plain := registry.plain[b.state.current]
+		registry.RUnlock()
+		if plain {
+			return data, nil
 		}
 		return b.state.Seal(data, b.bootstrap)
 	}

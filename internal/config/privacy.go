@@ -63,11 +63,11 @@ func ReadConfigData(path string) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, enabled, err := privacy.Fetch(ctx, b, path, nil)
+	state, _, err := privacy.Fetch(ctx, b, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	if !enabled {
+	if state == nil {
 		return nil, errors.New("面板没有返回配置解密密钥，保留原文件")
 	}
 	return privacy.Open(data)
@@ -162,11 +162,11 @@ func openInstance(path string, data []byte, owner *privacy.Bootstrap) ([]byte, e
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_, enabled, err := privacy.Fetch(ctx, b, path, nil)
+	state, _, err := privacy.Fetch(ctx, b, path, nil)
 	if err != nil {
 		return nil, err
 	}
-	if !enabled {
+	if state == nil {
 		return nil, errors.New("面板不再提供该配置的解密密钥")
 	}
 	return privacy.Open(data)
@@ -194,6 +194,7 @@ func LoadWritableRoot(path string) (*RootConfig, error) {
 type privateInstance struct {
 	state     *privacy.State
 	bootstrap privacy.Bootstrap
+	enabled   bool
 }
 
 func resolvePrivacy(ctx context.Context, path string, root *RootConfig) map[int]privateInstance {
@@ -214,13 +215,17 @@ func resolvePrivacy(ctx context.Context, path string, root *RootConfig) map[int]
 			continue
 		}
 		if !enabled {
-			if c.Protected != "" {
+			if state == nil && (c.Protected != "" || root.wrapped) {
 				c.PrivacyError = errors.New("面板没有提供已有加密数据的密钥")
 			}
-			continue
+			if state == nil || c.Protected == "" && c.privateState == nil && !root.wrapped {
+				continue
+			}
 		}
-		result[i] = privateInstance{state, b}
-		c.privateState, c.privateOwner = state, path
+		result[i] = privateInstance{state, b, enabled}
+		if enabled {
+			c.privateState, c.privateOwner = state, path
+		}
 	}
 	items := privacyItems(root)
 	for i, a := range result {
@@ -241,7 +246,15 @@ func resolvePrivacy(ctx context.Context, path string, root *RootConfig) map[int]
 	}
 	for i := range result {
 		if items[i].PrivacyError == nil {
-			BindPrivacy(items[i])
+			if result[i].enabled {
+				privacy.EnableProtection(result[i].state)
+				BindPrivacy(items[i])
+			} else {
+				items[i].PrivacyError = privacy.RestoreScopes(ctx, privateScopes(items[i]), result[i].state)
+				if items[i].PrivacyError == nil {
+					items[i].privateState = nil
+				}
+			}
 		}
 	}
 
@@ -271,6 +284,8 @@ func fetchInstancePrivacy(ctx context.Context, c *Config, path string, b privacy
 	}
 	var last error
 	answered := false
+	var recovery *privacy.State
+	recoveryOwner := b
 	for _, candidate := range candidates {
 		state, enabled, err := privacy.Fetch(ctx, candidate, path, nil)
 		if err != nil {
@@ -278,6 +293,9 @@ func fetchInstancePrivacy(ctx context.Context, c *Config, path string, b privacy
 			continue
 		}
 		answered = true
+		if state != nil {
+			recovery, recoveryOwner = state, candidate
+		}
 		if enabled {
 			if len(c.Nodes) > 0 {
 				c.PrivacyNodeID = candidate.NodeID
@@ -286,7 +304,7 @@ func fetchInstancePrivacy(ctx context.Context, c *Config, path string, b privacy
 		}
 	}
 	if answered {
-		return nil, false, b, nil
+		return recovery, false, recoveryOwner, nil
 	}
 	return nil, false, b, last
 }
@@ -387,10 +405,18 @@ func encodePrivateRoot(data []byte, root *RootConfig, states map[int]privateInst
 			return nil, errors.New("配置实例格式无效")
 		}
 		state, enabled := states[i]
-		if !enabled {
+		if !enabled || items[i].PrivacyError != nil {
 			if len(original) > 0 {
 				entry["privacy_defaults"] = original
 			}
+			continue
+		}
+		if !state.enabled {
+			restored, err := restorePrivateEntry(entry, items[i], state.state)
+			if err != nil {
+				return nil, err
+			}
+			entries[i] = mergeFields(original, restored)
 			continue
 		}
 		inner := map[string]any{}
@@ -442,6 +468,41 @@ func encodePrivateRoot(data []byte, root *RootConfig, states map[int]privateInst
 	return yaml.Marshal(map[string]any{"instances": entries})
 }
 
+// 把单个实例的密文及其默认值还原，保留扩展字段和公开启动信息。
+func restorePrivateEntry(entry map[string]any, c *Config, state *privacy.State) (map[string]any, error) {
+	plain := c.privateSource
+	if encrypted, _ := entry["protected"].(string); encrypted != "" {
+		var err error
+		plain, err = state.Open([]byte(encrypted))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(plain) == 0 {
+		return entry, nil
+	}
+	var saved map[string]any
+	if err := yaml.Unmarshal(plain, &saved); err != nil {
+		return nil, errors.New("原加密配置内容无效")
+	}
+	previous := saved
+	if values, ok := saved["instances"].([]any); ok && len(values) == 1 {
+		previous, _ = values[0].(map[string]any)
+		delete(saved, "instances")
+		previous = mergeFields(saved, previous)
+	}
+	outer := mergeFields(nil, entry)
+	delete(outer, "protected")
+	delete(outer, "privacy_defaults")
+	previous = mergeFields(previous, outer)
+	delete(previous, "protected")
+	if defaults, ok := previous["privacy_defaults"].(map[string]any); ok {
+		delete(previous, "privacy_defaults")
+		previous = mergeFields(defaults, previous)
+	}
+	return previous, nil
+}
+
 func pathForBootstrap(b privacy.Bootstrap) string {
 	return filepath.Join(filepath.Dir(b.CredentialsFile), "config.yml")
 }
@@ -475,6 +536,13 @@ func PreparePrivacy(ctx context.Context, path string, root *RootConfig) error {
 		root.PrivacyReady = true
 		return nil
 	}
+	for i, state := range states {
+		if !state.enabled && privacyItems(root)[i].PrivacyError == nil {
+			if err := migrateBackups(filepath.Join(filepath.Dir(path), "backups"), state); err != nil {
+				privacyItems(root)[i].PrivacyError = errors.New("历史备份恢复未完成，保留原文件，稍后重试")
+			}
+		}
+	}
 	encoded, err := encodePrivateRoot(data, root, states)
 	if err != nil {
 		return err
@@ -492,10 +560,18 @@ func PreparePrivacy(ctx context.Context, path string, root *RootConfig) error {
 		}
 	}
 	root.sourceHash, root.sourcePath, root.PrivacyReady = sha256.Sum256(encoded), path, true
+	for i, state := range states {
+		if !state.enabled && items[i].PrivacyError == nil {
+			items[i].Protected, items[i].privateSource, items[i].PrivacyDefaults = "", nil, nil
+		}
+	}
 	if err := MinimizeInstallMeta(filepath.Join(filepath.Dir(path), "install-meta.json")); err != nil {
 		return err
 	}
 	for index, state := range states {
+		if !state.enabled {
+			continue
+		}
 		if err := migrateBackups(filepath.Join(filepath.Dir(path), "backups"), state); err != nil {
 			items[index].PrivacyError = errors.New("历史备份保护未完成，保留原文件，稍后重试")
 		}
@@ -548,6 +624,9 @@ func migrateBackups(dir string, state privateInstance) error {
 		if err != nil || privacy.IsEncrypted(data) {
 			return err
 		}
+		if !state.enabled && !hasCipherConfig(data) {
+			return nil
+		}
 		var root RootConfig
 		if yaml.Unmarshal(data, &root) != nil {
 			return nil
@@ -560,7 +639,7 @@ func migrateBackups(dir string, state privateInstance) error {
 			c.inheritFrom(&root.Config)
 			b := bootstrapFor(c, path)
 			if b.URL == state.bootstrap.URL && b.MachineID == state.bootstrap.MachineID && b.NodeID == state.bootstrap.NodeID && b.Credential(path) != "" {
-				matched[i] = privateInstance{state.state, b}
+				matched[i] = privateInstance{state.state, b, state.enabled}
 			}
 		}
 		// 不改写无法确认所属身份、无法自动恢复的历史备份。

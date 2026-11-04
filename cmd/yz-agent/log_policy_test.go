@@ -27,11 +27,14 @@ func TestConfigureLogPoliciesCoversMachineAndLegacyNodes(t *testing.T) {
 	}
 	nlog.ApplyLogPolicy(keys[0], true)
 	configureLogPolicies(instances)
+	config.InitLogger(config.LogConfig{Level: "debug", Output: "stdout"})
+	if !nlog.LogsDisabled() {
+		t.Fatal("reload and local debug level must wait for panel policies")
+	}
 	for _, key := range keys {
 		nlog.ApplyLogPolicy(key, false)
 	}
-	config.InitLogger(config.LogConfig{Level: "debug", Output: "stdout"})
-	if !nlog.LogsDisabled() {
-		t.Fatal("reload and local debug level must not remove permanent policy")
+	if nlog.LogsDisabled() {
+		t.Fatal("panel policies must restore logs after reload")
 	}
 }
