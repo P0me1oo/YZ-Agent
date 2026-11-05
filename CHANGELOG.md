@@ -2,6 +2,8 @@
 
 ## v2.32.0 - 2026-11-06
 
+[已正式发布](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.32.0)。固定源码、安装附件及完整验证结果见[兼容矩阵](YZ_COMPATIBILITY.md)。
+
 - XHTTP 参数按当前核心规则规范化，迁移旧会话和连接池字段、恢复 PHP 空对象，普通与中转入站/出站共用相同转换。
 - 启动前使用实际核心校验模式、下载参数及互斥项；未启用 VLESS Encryption 的 XHTTP 拒绝 Vision，防止配置可启动却不能连接。
 - 下发 XHTTP TLS ALPN，原生 HTTP/3 使用 UDP 防火墙规则并拒绝 TCP PROXY 头；配套面板 2.3.0、管理端 0.88.0，两个核心固定依赖不变。

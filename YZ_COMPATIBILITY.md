@@ -1,5 +1,13 @@
 # YZ-Agent 兼容矩阵
 
+## v2.32.0 正式发布（2026-11-06）
+
+- [Release v2.32.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.32.0) 已发布，固定源码 `e9aa39b297a670ce99ce5042cf9979a429f2b002`，配套面板 2.3.0、管理端 0.88.0。包括此前全部隐私开关恢复改动和 XHTTP 参数、分流、ALPN、HTTP/3 UDP 防火墙适配。
+- [固定来源发布流程](https://github.com/P0me1oo/YZ-Agent/actions/runs/42066161712) 的完整并发回归、兼容模块、Mihomo、安装器与 UFW/firewalld × nftables/iptables 四组原生防火墙均通过；amd64、arm64 构建及 Release 成功。
+- 12 份安装附件已下载，11 项 SHA256SUMS 校验全部通过；兼容入口与 Agent 字节一致，两种架构及四份构建信息的完整提交、CGO_ENABLED=0、vcs.modified=false 匹配。amd64 Agent 与 xbctl 实际版本均为 v2.32.0。Agent SHA-256：amd64 `b31e99ca041945a7ebf26d1cef79871d35bab2623454a8cfd8da98db52f12c74`，arm64 `eb4a6f4d0e3b8db111029f1677861511b74b13ec7e4751c5ab821dcd0a41ccfb`。
+- 正式核心依赖仍为 YZ-sing-box v1.15.1 和 YZ-Xray-core v0.0.0-20261103192507-3c480b0c0d73。按本次范围仅发布安装包，不升级 Agent 节点。
+
+
 ## v2.32.0 XHTTP 参数适配（2026-11-05，本地未发布）
 
 - 配套面板 2.3.0、管理端 0.88.0。统一 extra 优先级、旧会话/连接池字段和 PHP 空对象，启动前调用固定核心校验；下载端口接受数字字符串，Reality 下载补齐默认 chrome 指纹。
