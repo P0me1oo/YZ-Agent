@@ -7,6 +7,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/portset"
+	"github.com/P0me1oo/YZ-Agent/internal/xhttp"
 )
 
 func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
@@ -71,6 +72,9 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	}
 	if err := ValidateCustomRouteRules(n.CustomRouteRules, kernelType, availableTags); err != nil {
 		return fmt.Errorf("validate custom route rules: %w", err)
+	}
+	if err := validateXHTTPNode(n); err != nil {
+		return err
 	}
 	if err := validateTransportKernel(n.Network, kernelType); err != nil {
 		return err
@@ -141,4 +145,47 @@ func buildAvailableOutboundTags(structured []OutboundConfig, rawTags []string) m
 		}
 	}
 	return available
+}
+
+func validateXHTTPNode(n *NodeSpec) error {
+	if xhttp.Is(n.Network) {
+		if err := xhttp.Validate(n.NetworkSettings); err != nil {
+			return fmt.Errorf("xhttp: %w", err)
+		}
+		if n.Protocol == "vless" && n.Flow == "xtls-rprx-vision" && (n.Decryption == "" || n.Decryption == "none") {
+			return fmt.Errorf("XHTTP Vision requires VLESS Encryption; use empty flow otherwise")
+		}
+		if alpn := xhttp.ALPN(n.TLSSettings); len(alpn) > 0 {
+			for _, p := range alpn {
+				if p != "h2" && p != "http/1.1" && p != "h3" {
+					return fmt.Errorf("unsupported XHTTP ALPN")
+				}
+			}
+			if containsH3(alpn) && (n.TLS != 1 || len(alpn) != 1) {
+				return fmt.Errorf("XHTTP h3 requires TLS and a single h3 ALPN")
+			}
+		}
+	}
+	if n.Relay != nil {
+		for _, child := range n.Relay.Children {
+			v := child.VLESS
+			if v != nil && xhttp.Is(v.Network) {
+				if err := xhttp.Validate(v.NetworkSettings); err != nil {
+					return fmt.Errorf("relay xhttp: %w", err)
+				}
+				if v.Flow == "xtls-rprx-vision" && (v.Encryption == "" || v.Encryption == "none") {
+					return fmt.Errorf("relay XHTTP Vision requires VLESS Encryption")
+				}
+			}
+		}
+	}
+	return nil
+}
+func containsH3(values []string) bool {
+	for _, v := range values {
+		if v == "h3" {
+			return true
+		}
+	}
+	return false
 }

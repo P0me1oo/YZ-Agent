@@ -3,6 +3,7 @@ package model
 import (
 	"github.com/P0me1oo/YZ-Agent/internal/balancer"
 	"github.com/P0me1oo/YZ-Agent/internal/scheduling"
+	"github.com/P0me1oo/YZ-Agent/internal/xhttp"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -283,7 +284,12 @@ func (n *NodeSpec) ProxyProtocolSetting() *bool {
 	return &value
 }
 
+func (n *NodeSpec) UsesXHTTP3() bool { return xhttp.IsH3(n.Network, n.TLS, n.TLSSettings) }
+
 func (n *NodeSpec) SupportsProxyProtocol() bool {
+	if n.UsesXHTTP3() {
+		return false
+	}
 	switch n.Protocol {
 	case "shadowsocks", "vmess", "vless", "trojan", "anytls", "socks", "http", "naive":
 	default:

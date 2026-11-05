@@ -11,6 +11,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/xhttp"
 	xrayTLS "github.com/xtls/xray-core/transport/internet/tls"
 )
 
@@ -561,6 +562,11 @@ func applyStreamSettings(base M, kcfg config.KernelConfig, nc *model.NodeSpec, t
 	// TLS
 	if nc.TLS == 1 {
 		tlsSettings := M{}
+		if xhttp.Is(nc.Network) {
+			if alpn := xhttp.ALPN(nc.TLSSettings); len(alpn) > 0 {
+				tlsSettings["alpn"] = alpn
+			}
+		}
 		serverName := nc.ServerName
 		if serverName == "" && nc.Host != "" {
 			serverName = nc.Host
@@ -615,7 +621,7 @@ func applyStreamSettings(base M, kcfg config.KernelConfig, nc *model.NodeSpec, t
 // 用户侧 TCP 连接通过保活确认存活，避免换网后的失效来源长时间占用设备名额。
 // 无业务流量但仍能回应探测的连接继续保留，名额仍由原有关闭回调回收。
 func applyVLESSInboundTCPHealth(stream M, node *model.NodeSpec) {
-	if node.Protocol != "vless" || node.IsRelayLanding() {
+	if node.Protocol != "vless" || node.IsRelayLanding() || node.UsesXHTTP3() {
 		return
 	}
 	switch stream["network"] {

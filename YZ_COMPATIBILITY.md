@@ -1,5 +1,13 @@
 # YZ-Agent 兼容矩阵
 
+## v2.32.0 XHTTP 参数适配（2026-11-05，本地未发布）
+
+- 配套面板 2.3.0、管理端 0.88.0。统一 extra 优先级、旧会话/连接池字段和 PHP 空对象，启动前调用固定核心校验；下载端口接受数字字符串，Reality 下载补齐默认 chrome 指纹。
+- XHTTP ALPN 下发到普通及中转流配置，原生 HTTP/3 使用 UDP 防火墙计划并拒绝 TCP PROXY 头。VLESS 未启用 Encryption 时，XHTTP 不允许 Vision；正常空 Flow 和已有有效 Encryption 参数保留。
+- Go 1.27.3：internal/xhttp、internal/model、internal/kernel/xray、internal/firewall 四个包测试通过。实际传输覆盖四种模式、TLS HTTP/2、HTTP/3、三个分流模式的独立 TLS 下载及反向代理请求计数；两份面板 PHP 订阅结果通过实际核心配置构建。
+- Xray 正式依赖仍为 v0.0.0-20261103192507-3c480b0c0d73，sing-box 依赖不变。没有发布产物、更新服务器或执行新的核心依赖升级。
+
+
 ## v2.31.0 隐私保护开关（2026-11-05，发布准备）
 
 - 配套面板 2.2.0、管理端 0.87.0。支持反复开关、运行日志恢复、受管理文件及配置备份解密、关闭后整机冷启动；保留身份隔离和文件写入屏障。两个核心及固定依赖不变。

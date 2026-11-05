@@ -156,6 +156,9 @@ func listenerAddresses(raw string) ([]Rule, error) {
 }
 
 func listenerProtocols(node *model.NodeSpec, kernelType string) ([]string, error) {
+	if node.UsesXHTTP3() {
+		return []string{"udp"}, nil
+	}
 	switch node.Protocol {
 	case "balancer":
 		if node.Balancer != nil && node.Balancer.Network == "tcp" {

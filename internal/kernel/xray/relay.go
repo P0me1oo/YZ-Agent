@@ -9,6 +9,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/xhttp"
 	xnet "github.com/xtls/xray-core/common/net"
 )
 
@@ -186,6 +187,11 @@ func buildRelayVLESSClientStream(v *model.RelayVLESSConfig) M {
 	switch v.TLS {
 	case 1:
 		tlsSettings := M{}
+		if xhttp.Is(v.Network) {
+			if alpn := xhttp.ALPN(v.TLSSettings); len(alpn) > 0 {
+				tlsSettings["alpn"] = alpn
+			}
+		}
 		if value := stringSetting(v.TLSSettings, "server_name"); value != "" {
 			tlsSettings["serverName"] = value
 		}
@@ -261,11 +267,8 @@ func buildTransportStreamSettings(network string, settings map[string]any, trans
 	case "httpupgrade":
 		ss["httpupgradeSettings"] = copySettings
 	case "xhttp":
-		if extra, exists := copySettings["extra"].(map[string]any); exists {
-			sanitizeEmptyArrays(extra)
-			if len(extra) == 0 {
-				delete(copySettings, "extra")
-			}
+		if normalized, err := xhttp.Normalize(copySettings); err == nil {
+			copySettings = normalized
 		}
 		ss["xhttpSettings"] = copySettings
 	case "kcp":
