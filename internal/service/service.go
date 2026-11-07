@@ -39,6 +39,8 @@ import (
 )
 
 type Service struct {
+	autoSpeed           autoSpeedState
+	operations          operationsState
 	accessLog           *accesslog.Recorder
 	accessLogFailed     bool
 	cfg                 *config.Config
@@ -60,6 +62,7 @@ type Service struct {
 	lastUsers  []model.UserSpec
 	// 同一份失败配置只尝试一次，配置变化或重新创建 Service 后才允许再启动。
 	failedRuntimeHash string
+	runtimeErrorID    string
 	runtimeError      error
 	xrayCrashReported bool
 
@@ -381,6 +384,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 		case at := <-speedTicker.C:
 			s.speedTracker.SampleThrottled(at)
 		case <-trackTicker.C:
+			s.updateOperations(ctx)
 			s.refreshSourcePolicyAsync(ctx)
 			if s.trackAndEnforce(ctx) {
 				s.publishRuntimeState(ctx)
@@ -994,6 +998,7 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 	s.lastUsers = append([]model.UserSpec{}, users...)
 	s.metricsMu.Unlock()
 	s.lastUserHash = computeUserHash(users)
+	s.updateAutoSpeed(time.Now())
 }
 
 // applyConfigUpdate 先把配置作为待应用状态交给内核。
@@ -1390,6 +1395,7 @@ func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int,
 		return 0, 0, err
 	}
 	s.userSpeed.sample(traffic, time.Now())
+	s.updateAutoSpeed(time.Now())
 	s.tracker.Process(traffic, aliveIPs, connCount)
 	s.trackRelayTraffic(ctx)
 	s.trackRelayAlive(ctx)
@@ -1870,6 +1876,9 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	s.metricsMu.RUnlock()
 
 	m := make(map[string]interface{})
+	if state := s.operations.snapshot.Load(); state != nil {
+		m["operations"] = state
+	}
 	if results := s.scheduler.Snapshot(); len(results) > 0 {
 		m["scheduling_probes"] = results
 	}
@@ -1997,6 +2006,8 @@ func computeUserHash(users []model.UserSpec) string {
 		h.Write(buf[:])
 		binary.LittleEndian.PutUint64(buf[:], uint64(u.ConnRateLimit))
 		h.Write(buf[:])
+		data, _ := json.Marshal(u.AutoSpeedLimit)
+		h.Write(data)
 		io.WriteString(h, u.RelayRoutesKey())
 		if u.WireGuard != nil {
 			data, _ := json.Marshal(u.WireGuard)

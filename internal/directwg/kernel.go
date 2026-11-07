@@ -3,6 +3,7 @@ package directwg
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -308,4 +309,17 @@ func cloneUsers(users []model.UserSpec) []model.UserSpec {
 		copyUsers[i].WireGuard = model.CloneWireGuardPeer(copyUsers[i].WireGuard)
 	}
 	return copyUsers
+}
+
+// ProbeDial 透传诊断请求，保持包装后的双核心检查能力。
+func (m *Managed) ProbeDial(ctx context.Context, tag, network, address string) (net.Conn, error) {
+	m.mu.Lock()
+	base := m.Kernel
+	m.mu.Unlock()
+	if probe, ok := base.(interface {
+		ProbeDial(context.Context, string, string, string) (net.Conn, error)
+	}); ok {
+		return probe.ProbeDial(ctx, tag, network, address)
+	}
+	return nil, fmt.Errorf("核心不支持链路检查")
 }

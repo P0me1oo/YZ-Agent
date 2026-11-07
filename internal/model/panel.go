@@ -129,7 +129,8 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 	}
 
 	return &NodeSpec{
-		SchedulingTargets:   append([]scheduling.Target(nil), nc.SchedulingTargets...),
+		SchedulingTargets: append([]scheduling.Target(nil), nc.SchedulingTargets...),
+		HealthCheck:       nc.HealthCheck, CertificateRenew: nc.CertificateRenew,
 		Balancer:            balancer.CloneConfig(nc.Balancer),
 		BalancerReceiver:    balancer.CloneReceiver(nc.BalancerReceiver),
 		Protocol:            nc.Protocol,
@@ -191,14 +192,15 @@ func UserSpecsFromPanel(users []panel.User) []UserSpec {
 	out := make([]UserSpec, 0, len(users))
 	for _, user := range users {
 		out = append(out, UserSpec{
-			ID:            user.ID,
-			UUID:          user.UUID,
-			SpeedLimit:    user.SpeedLimit,
-			DeviceLimit:   user.DeviceLimit,
-			ConnLimit:     user.ConnLimit,
-			ConnRateLimit: user.ConnRateLimit,
-			RelayRoutes:   CloneRelayRoutes(user.RelayRoutes),
-			WireGuard:     CloneWireGuardPeer(user.WireGuard),
+			ID:             user.ID,
+			UUID:           user.UUID,
+			SpeedLimit:     user.SpeedLimit,
+			DeviceLimit:    user.DeviceLimit,
+			ConnLimit:      user.ConnLimit,
+			ConnRateLimit:  user.ConnRateLimit,
+			AutoSpeedLimit: user.AutoSpeedLimit,
+			RelayRoutes:    CloneRelayRoutes(user.RelayRoutes),
+			WireGuard:      CloneWireGuardPeer(user.WireGuard),
 		})
 	}
 	return out
@@ -323,7 +325,8 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 	}
 
 	return &panel.NodeConfig{
-		SchedulingTargets:   append([]scheduling.Target(nil), n.SchedulingTargets...),
+		SchedulingTargets: append([]scheduling.Target(nil), n.SchedulingTargets...),
+		HealthCheck:       n.HealthCheck, CertificateRenew: n.CertificateRenew,
 		Balancer:            balancer.CloneConfig(n.Balancer),
 		BalancerReceiver:    balancer.CloneReceiver(n.BalancerReceiver),
 		Protocol:            n.Protocol,
@@ -411,14 +414,15 @@ func UserSpecsToPanel(users []UserSpec) []panel.User {
 	out := make([]panel.User, 0, len(users))
 	for _, user := range users {
 		out = append(out, panel.User{
-			ID:            user.ID,
-			UUID:          user.UUID,
-			SpeedLimit:    user.SpeedLimit,
-			DeviceLimit:   user.DeviceLimit,
-			ConnLimit:     user.ConnLimit,
-			ConnRateLimit: user.ConnRateLimit,
-			RelayRoutes:   CloneRelayRoutes(user.RelayRoutes),
-			WireGuard:     CloneWireGuardPeer(user.WireGuard),
+			ID:             user.ID,
+			UUID:           user.UUID,
+			SpeedLimit:     user.SpeedLimit,
+			DeviceLimit:    user.DeviceLimit,
+			ConnLimit:      user.ConnLimit,
+			ConnRateLimit:  user.ConnRateLimit,
+			AutoSpeedLimit: user.AutoSpeedLimit,
+			RelayRoutes:    CloneRelayRoutes(user.RelayRoutes),
+			WireGuard:      CloneWireGuardPeer(user.WireGuard),
 		})
 	}
 	return out

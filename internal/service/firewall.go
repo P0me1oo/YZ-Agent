@@ -90,13 +90,17 @@ func (s *Service) retrySourceFirewall(ctx context.Context) {
 }
 
 func computeKernelConfigHash(node *model.NodeSpec) string {
-	if node == nil || node.Relay == nil {
-		return computeConfigHash(node)
+	if node == nil {
+		return ""
 	}
 	copy := *node
-	relay := *node.Relay
-	relay.Firewall = nil
-	copy.Relay = &relay
+	copy.HealthCheck = nil
+	copy.CertificateRenew = ""
+	if node.Relay != nil {
+		relay := *node.Relay
+		relay.Firewall = nil
+		copy.Relay = &relay
+	}
 	return computeConfigHash(&copy)
 }
 

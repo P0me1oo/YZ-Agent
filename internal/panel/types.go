@@ -3,7 +3,9 @@ package panel
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/autospeed"
 	"github.com/P0me1oo/YZ-Agent/internal/balancer"
+	"github.com/P0me1oo/YZ-Agent/internal/healthcheck"
 	"github.com/P0me1oo/YZ-Agent/internal/limitreport"
 	"github.com/P0me1oo/YZ-Agent/internal/scheduling"
 	"strings"
@@ -113,6 +115,8 @@ type MachineBaseConfig struct {
 
 // NodeConfig is the response from GET /api/v1/server/UniProxy/config
 type NodeConfig struct {
+	HealthCheck       *healthcheck.Config      `json:"health_check,omitempty"`
+	CertificateRenew  string                   `json:"certificate_renew,omitempty"`
 	SchedulingTargets []scheduling.Target      `json:"scheduling_targets,omitempty"`
 	Balancer          *balancer.Config         `json:"balancer,omitempty"`
 	BalancerReceiver  *balancer.ReceiverConfig `json:"balancer_receiver,omitempty"`
@@ -392,11 +396,12 @@ type RouteAction struct {
 
 // User represents a user returned by the panel
 type User struct {
-	WireGuard   *WireGuardPeer `json:"wireguard,omitempty"`
-	ID          int            `json:"id"`
-	UUID        string         `json:"uuid"`
-	SpeedLimit  int            `json:"speed_limit"`  // Mbps, 0 = unlimited
-	DeviceLimit int            `json:"device_limit"` // max devices, 0 = unlimited
+	AutoSpeedLimit *autospeed.Rule `json:"auto_speed_limit,omitempty"`
+	WireGuard      *WireGuardPeer  `json:"wireguard,omitempty"`
+	ID             int             `json:"id"`
+	UUID           string          `json:"uuid"`
+	SpeedLimit     int             `json:"speed_limit"`  // Mbps, 0 = unlimited
+	DeviceLimit    int             `json:"device_limit"` // max devices, 0 = unlimited
 	// ConnLimit 是并发连接数上限，ConnRateLimit 是每秒新建连接数上限，0 都表示不限制。
 	// 面板旧版本不下发这两个字段，缺省解码为 0，等同于保持原有行为。
 	ConnLimit     int `json:"conn_limit"`

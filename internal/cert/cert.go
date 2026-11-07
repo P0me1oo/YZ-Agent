@@ -53,6 +53,7 @@ import (
 //  3. "file" (if both CertFile and KeyFile paths are provided)
 //  4. "none" (default)
 type Manager struct {
+	status      atomic.Pointer[Status]
 	fileSources map[string]bool
 	opMu        sync.Mutex
 	materialMu  sync.Mutex
@@ -92,6 +93,7 @@ func (m *Manager) storePEM(cert, key []byte) {
 
 // publishPEM 在发布锁内写入完整证书组，内存读者也只看到完整组。
 func (m *Manager) publishPEM(cfg config.CertConfig, cert, key []byte) {
+	m.renewalStatus(resolveModeFor(cfg), "")
 	m.mat.Store(&certMaterial{certPEM: append([]byte(nil), cert...), keyPEM: append([]byte(nil), key...)})
 	if cfg.CertDir == "" {
 		return
@@ -510,6 +512,9 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 		Storage: storage,
 		OnEvent: func(evtCtx context.Context, event string, data map[string]any) error {
 			// Only react to renewals; initial load happens explicitly after ObtainCertSync.
+			if event == "cert_failed" && generation == m.generation.Load() {
+				m.renewalStatus(resolveModeFor(cfg), "自动续期失败，请检查验证设置与节点日志")
+			}
 			if event != "cert_obtained" {
 				return nil
 			}

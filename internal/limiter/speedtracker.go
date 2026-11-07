@@ -26,10 +26,11 @@ const (
 // 每个用户最多一个限速器对象，同一用户的所有连接共用额度。套餐调整时原地修改
 // 该对象，不重建，已持有它的连接立即按新速率执行。
 type SpeedTracker struct {
-	limiter *Limiter
-	mu      sync.RWMutex
-	buckets map[int]*rate.Limiter // userID → shared rate limiter
-	uuidMap map[string]int        // UUID → userID
+	limiter   *Limiter
+	mu        sync.RWMutex
+	temporary map[int]int
+	buckets   map[int]*rate.Limiter // userID → shared rate limiter
+	uuidMap   map[string]int        // UUID → userID
 
 	// Fast-path: when no users have a speed limit, GetLimiter returns nil
 	// immediately without any map lookup.
@@ -91,13 +92,13 @@ func (t *SpeedTracker) UpdateBuckets() {
 			if user.UUID != "" {
 				newUUIDMap[user.UUID] = user.ID
 			}
-			if user.SpeedLimit > 0 {
+			if t.effective(user.ID, user.SpeedLimit) > 0 {
 				hasLimits = true
 			}
 
 			// 已有限速器原地调速；取消限速时保留对象并放开速率，持有它的连接随即不再受限。
 			if lim, ok := t.buckets[user.ID]; ok {
-				limit, burst := speedSettings(user.SpeedLimit)
+				limit, burst := speedSettings(t.effective(user.ID, user.SpeedLimit))
 				lim.SetLimit(limit)
 				lim.SetBurst(burst)
 			}
@@ -152,11 +153,12 @@ func (t *SpeedTracker) limiterFor(user string) (*rate.Limiter, bool) {
 	if !userExists {
 		return nil, false
 	}
-	limited := u.SpeedLimit > 0
+	speed := t.effective(uid, u.SpeedLimit)
+	limited := speed > 0
 	if lim := t.buckets[uid]; lim != nil {
 		return lim, limited
 	}
-	limit, burst := speedSettings(u.SpeedLimit)
+	limit, burst := speedSettings(speed)
 	created := rate.NewLimiter(limit, burst)
 	t.buckets[uid] = created
 	return created, limited
@@ -185,4 +187,25 @@ func (t *SpeedTracker) LimitedUserCount() int {
 		}
 	}
 	return count
+}
+
+// SetTemporary 更新叠加上限，保持已有连接持有的令牌桶对象不变。
+func (t *SpeedTracker) SetTemporary(limits map[int]int) {
+	t.mu.Lock()
+	t.temporary = make(map[int]int, len(limits))
+	for id, limit := range limits {
+		if limit > 0 {
+			t.temporary[id] = limit
+		}
+	}
+	t.mu.Unlock()
+	t.UpdateBuckets()
+}
+
+// 调用方持有 t.mu。
+func (t *SpeedTracker) effective(id, base int) int {
+	if temporary := t.temporary[id]; temporary > 0 && (base <= 0 || temporary < base) {
+		return temporary
+	}
+	return base
 }

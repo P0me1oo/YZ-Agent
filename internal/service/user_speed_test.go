@@ -87,6 +87,7 @@ func TestUserSpeedStateDoesNotDrainBillingAndFailureClearsBaseline(t *testing.T)
 	s.kernel = k
 	p := &speedTestPublisher{shutdownReportPlane: cp, states: make(chan panel.StatePayload, 1)}
 	s.sink = p
+	s.operations.snapshot.Store(&operationsSnapshot{Version: 1})
 	ctx := context.Background()
 	if _, _, err := s.collectTraffic(ctx); err != nil {
 		t.Fatal(err)
@@ -99,6 +100,12 @@ func TestUserSpeedStateDoesNotDrainBillingAndFailureClearsBaseline(t *testing.T)
 	s.publishRuntimeState(ctx)
 	select {
 	case state := <-p.states:
+		if state.Operations == nil {
+			t.Fatal("实时状态缺少运行状态")
+		}
+		if _, duplicate := state.Metrics["operations"]; duplicate {
+			t.Fatal("实时状态重复携带运行状态")
+		}
 		if state.UserSpeeds[1][0] <= 0 || state.UserSpeeds[1][1] <= 0 {
 			t.Fatalf("网速未传入状态: %v", state.UserSpeeds)
 		}

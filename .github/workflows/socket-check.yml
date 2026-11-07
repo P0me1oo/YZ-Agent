@@ -27,7 +27,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.3'
           cache: true
       - name: Check actual socket options
         run: go test -mod=readonly -race -tags "with_quic,with_utls,with_wireguard,with_gvisor,with_acme,with_clash_api" -count=1 -timeout 2m -v -run '^Test(VLESSInbound|TCPListenerDefault)' ./internal/kernel/xray

@@ -105,7 +105,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.3'
           cache: true
 
       - name: Prepare kernel modules
@@ -179,7 +179,7 @@ jobs:
       - uses: actions/setup-go@v5
         if: steps.reuse.outputs.firewall != 'true'
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.3'
           cache: true
       - name: Build isolated firewall tests
         if: steps.reuse.outputs.firewall != 'true'
@@ -248,7 +248,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.3'
           cache: true
 
       - name: Build

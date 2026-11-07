@@ -290,7 +290,7 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 // panel user ID, and TCP flag.
 // Returns a non-nil error only when the connection should be rejected.
 func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destination) (email, sourceIP string, uid int, isTCP bool, err error) {
-	if !d.relayAccess.Allows(relayAccessKey(ctx)) {
+	if internal, _ := ctx.Value(healthProbeContextKey{}).(bool); !internal && !d.relayAccess.Allows(relayAccessKey(ctx)) {
 		return "", "", 0, false, errors.New("relay route access denied")
 	}
 	si := session.InboundFromContext(ctx)

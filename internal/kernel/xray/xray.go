@@ -315,6 +315,9 @@ func (x *Xray) Reload(nodeConfig *model.NodeSpec, users []model.UserSpec, tls ke
 	}
 	x.mu.Unlock()
 
+	if applied, err := x.tryHotRoutes(nodeConfig, users, tls); applied || err != nil {
+		return err
+	}
 	x.logger().Info("xray: configuration changed, performing full restart")
 	return x.Start(nodeConfig, users, tls)
 }

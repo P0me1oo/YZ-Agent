@@ -18,6 +18,7 @@ const realtimeFallbackInterval = 10 * time.Second
 
 // StatePayload 只含当前状态，不含会累计结算的流量或超限事件。
 type StatePayload struct {
+	Operations            any                      `json:"operations,omitempty"`
 	Alive                 map[int][]string         `json:"alive,omitempty"`
 	Online                map[int]int              `json:"online,omitempty"`
 	ConnectionCounts      map[int]int              `json:"connection_counts,omitempty"`
@@ -31,6 +32,9 @@ type StatePayload struct {
 // mapValue 保留非 nil 的空快照，空状态与不支持该采样不是一回事。
 func (s StatePayload) mapValue() map[string]interface{} {
 	out := make(map[string]interface{})
+	if s.Operations != nil {
+		out["operations"] = s.Operations
+	}
 	if s.Alive != nil {
 		out["alive"] = s.Alive
 	}

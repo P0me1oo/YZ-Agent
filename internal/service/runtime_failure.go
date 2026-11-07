@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -13,7 +14,7 @@ import (
 
 // 只保存配置指纹，避免重复轮询或重复事件触发同一份失败配置的启动。
 func runtimeAttemptHash(nc *model.NodeSpec, users []model.UserSpec, tls kernel.TLSCert) string {
-	return fmt.Sprintf("%s:%s:%x:%x", computeConfigHash(nc), computeUserHash(users),
+	return fmt.Sprintf("%s:%s:%x:%x", computeKernelConfigHash(nc), computeUserHash(users),
 		sha256.Sum256(tls.CertPEM), sha256.Sum256(tls.KeyPEM))
 }
 
@@ -32,6 +33,7 @@ func (s *Service) tlsCert() kernel.TLSCert {
 func (s *Service) failRuntime(operation string, nc *model.NodeSpec, users []model.UserSpec, err error) {
 	s.reportXrayCrash(operation, err)
 	s.failedRuntimeHash = runtimeAttemptHash(nc, users, s.tlsCert())
+	s.runtimeErrorID = fmt.Sprintf("%d", time.Now().UnixNano())
 	s.runtimeError = fmt.Errorf("%s: %w", operation, err)
 	logger := s.nodeLog
 	if logger == nil {
@@ -82,6 +84,7 @@ func (s *Service) runtimeApplied(nc *model.NodeSpec, users []model.UserSpec) {
 	s.xrayCrashReported = false
 	s.failedRuntimeHash = ""
 	s.runtimeError = nil
+	s.runtimeErrorID = ""
 	s.appliedState.Config = nc
 	s.appliedState.Users = users
 	s.appliedState.TLSHash = s.currentTLSHash()

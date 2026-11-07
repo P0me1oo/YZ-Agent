@@ -46,9 +46,14 @@ func (s *Service) publishRuntimeState(ctx context.Context) {
 	if speeds {
 		state.UserSpeeds = s.userSpeed.rates
 	}
+	if value := s.operations.snapshot.Load(); value != nil {
+		state.Operations = value
+	}
 	if details {
 		status := monitor.Collect()
 		state.Metrics = s.buildMetrics(status)
+		// 实时通道已在顶层发送运行状态；指标中的副本只供旧报告路径使用。
+		delete(state.Metrics, "operations")
 		state.Metrics["kernel_status"] = s.kernel.IsRunning()
 		state.Status = map[string]interface{}{
 			"cpu":           status.CPU,

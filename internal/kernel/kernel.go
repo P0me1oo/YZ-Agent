@@ -171,7 +171,13 @@ func ComputeHash(nc *model.NodeSpec, users []model.UserSpec) string {
 	// 跳跃端口由 Node 的防火墙管理器更新，不改变内核实际监听或会话。
 	kernelConfig := nc
 	if nc != nil {
-		copyConfig := *nc
+		c := *nc
+		c.HealthCheck = nil
+		c.CertificateRenew = ""
+		kernelConfig = &c
+	}
+	if nc != nil {
+		copyConfig := *kernelConfig
 		copyConfig.PortHopping = ""
 		kernelConfig = &copyConfig
 	}

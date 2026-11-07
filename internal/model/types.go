@@ -1,7 +1,9 @@
 package model
 
 import (
+	"github.com/P0me1oo/YZ-Agent/internal/autospeed"
 	"github.com/P0me1oo/YZ-Agent/internal/balancer"
+	"github.com/P0me1oo/YZ-Agent/internal/healthcheck"
 	"github.com/P0me1oo/YZ-Agent/internal/scheduling"
 	"github.com/P0me1oo/YZ-Agent/internal/xhttp"
 	"strings"
@@ -12,6 +14,8 @@ import (
 )
 
 type NodeSpec struct {
+	HealthCheck      *healthcheck.Config `json:"health_check,omitempty"`
+	CertificateRenew string              `json:"certificate_renew,omitempty"`
 	// 探测清单独立于核心配置，更新测量目标不重建监听。
 	SchedulingTargets []scheduling.Target `json:"-"`
 	Balancer          *balancer.Config
@@ -256,11 +260,12 @@ type BrutalConfig struct {
 }
 
 type UserSpec struct {
-	WireGuard   *panel.WireGuardPeer
-	ID          int
-	UUID        string
-	SpeedLimit  int
-	DeviceLimit int
+	AutoSpeedLimit *autospeed.Rule `json:"auto_speed_limit,omitempty"`
+	WireGuard      *panel.WireGuardPeer
+	ID             int
+	UUID           string
+	SpeedLimit     int
+	DeviceLimit    int
 	// ConnLimit 是并发连接数上限，ConnRateLimit 是每秒新建连接数上限，0 都表示不限制。
 	ConnLimit     int
 	ConnRateLimit int
