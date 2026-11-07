@@ -1,8 +1,10 @@
 # YZ-Agent 兼容矩阵
 
-## v2.33.1 运行检查修复与优化（2026-11-07，本地未发布）
+## v2.33.1 运行检查修复与优化（2026-11-07，已发布，未部署）
 
-配套面板 2.6.1、管理端 0.91.1。修复采样抖动、HTTP/3 监听、慢出站误报及停机旧结果，缓存规则摘要并消除重复运行状态。正式标签下 autospeed、healthcheck、limiter、service 全包与双核心相关专项竞态通过；核心固定依赖不变。没有提交、推送、发布或部署；验证范围见[运行检查](docs/node-operations.md)。
+[Release v2.33.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.33.1)，固定源码 `b61051f2abfae5d94b9a82f2d21048018e52ea37`。12 份附件下载及校验通过，两种架构、版本、核心模块来源与 vcs.modified=false 核对一致；Actions 因账单锁定未启动，按确认采用本地检查手动发布。未新增完整 CI、外部 Mihomo 或四组原生防火墙验证；详见[配套发布记录](../YZboard/docs/release-2.6.1.md)。
+
+配套面板 2.6.1、管理端 0.91.1。修复采样抖动、HTTP/3 监听、慢出站误报及停机旧结果，缓存规则摘要并消除重复运行状态。正式标签下 autospeed、healthcheck、limiter、service 全包与双核心相关专项竞态通过；核心固定依赖不变。本版已发布、未部署；验证范围见[运行检查](docs/node-operations.md)。
 
 ## v2.32.1 安全依赖更新（2026-11-07，本地未发布）
 
