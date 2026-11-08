@@ -1,0 +1,277 @@
+{
+  "version": "v2.36.0",
+  "source": "a9c48981ee93ddb830cb30e4b5ae42e3fb4aff82",
+  "release_id": 438288712,
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.36.0",
+  "published_at": "2026-11-08T14:12:09Z",
+  "latest": true,
+  "assets": [
+    {
+      "name": "install.sh",
+      "bytes": 65427,
+      "sha256": "5a2131fee6ff3c83fba37c180e0a71c2180209e2fcc39cb2bdbab43725a9c23d",
+      "public_download_verified": true
+    },
+    {
+      "name": "SHA256SUMS",
+      "bytes": 997,
+      "sha256": "2c6b9666add7a64345eabb328f11ecf28dae2ce5f5a469e4f29dd2477f996b1f",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "bytes": 33108128,
+      "sha256": "ace289ec2725bbb3bc31743ec5d4e761ae139769d6672bbf94e8728c0a507f8f",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "bytes": 4844,
+      "sha256": "3fa07b2efb87e2a504cae458e4c2ae73f5c6e8e09100bbddf16ba56d40febc23",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "bytes": 30867616,
+      "sha256": "ec271ebe344ba0fbd2c34dd6913933c79bc7717fea0e9278b3d849212e82bb85",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "bytes": 4846,
+      "sha256": "2b73f5a17117a6a3124feaae8d250c3f9ae7f2dddc287bd0f776f00f978d14b8",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "bytes": 78905504,
+      "sha256": "2ba1aa2320f0e6391c6a1c3c63f721ceb930585386a853f4d74f8206d83e96f6",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "bytes": 72876192,
+      "sha256": "9ad7540929d278617f277590391e095327975777308a21a68dec7735e3e74e13",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "bytes": 78905504,
+      "sha256": "2ba1aa2320f0e6391c6a1c3c63f721ceb930585386a853f4d74f8206d83e96f6",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "bytes": 18411,
+      "sha256": "81f9f6ab2e032d4a931d03295cdf9c30ed27364a403118d17fa2e662cee6e4b8",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "bytes": 72876192,
+      "sha256": "9ad7540929d278617f277590391e095327975777308a21a68dec7735e3e74e13",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "bytes": 18413,
+      "sha256": "e251e671b3e96b7dc2b7754dbfa554a185a0e437b298ddd2c370f004864923b5",
+      "public_download_verified": true
+    }
+  ],
+  "build_time": "2026-11-08T14:02:16Z",
+  "go": "1.27.3",
+  "cgo_enabled": false,
+  "vcs_modified": false,
+  "architectures": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "workflow": {
+    "url": "https://github.com/P0me1oo/YZ-Agent/actions/runs/42488421211",
+    "status": "not_started",
+    "reason": "account_locked_billing",
+    "executed_steps": 0
+  },
+  "validation": {
+    "go-full": {
+      "top_level_passed": 978,
+      "failed": [],
+      "packages_passed": 40,
+      "skipped": [
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeClientProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeSourceFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+          "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSRuntime"
+        ]
+      ],
+      "race_detected": false
+    },
+    "go-deps": {
+      "top_level_passed": 43,
+      "failed": [],
+      "packages_passed": 8,
+      "skipped": [],
+      "race_detected": false
+    },
+    "go-mihomo": {
+      "top_level_passed": 2,
+      "failed": [],
+      "packages_passed": 2,
+      "skipped": [],
+      "race_detected": false
+    },
+    "native_firewall": [
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "backend",
+        "exit_code": 0
+      },
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 30.731
+      },
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 24.08
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 57.966
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 32.112
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 24.11
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 28.77
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 23.884
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 21.02
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 26.716
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 25.788
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 20.904
+      }
+    ],
+    "installer": [
+      {
+        "name": "upgrade_version",
+        "exit_code": 0,
+        "seconds": 0.105
+      },
+      {
+        "name": "download_mirrors",
+        "exit_code": 0,
+        "seconds": 0.291
+      },
+      {
+        "name": "install_service_manager",
+        "exit_code": 0,
+        "seconds": 0.041
+      },
+      {
+        "name": "install_health",
+        "exit_code": 0,
+        "seconds": 0.026
+      },
+      {
+        "name": "install_kernel_defaults",
+        "exit_code": 0,
+        "seconds": 0.176
+      },
+      {
+        "name": "install_privacy",
+        "exit_code": 0,
+        "seconds": 0.168
+      },
+      {
+        "name": "install_paths",
+        "exit_code": 0,
+        "seconds": 5.1
+      },
+      {
+        "name": "install_name_migration",
+        "exit_code": 0,
+        "seconds": 8.79
+      },
+      {
+        "name": "syntax",
+        "exit_code": 0
+      }
+    ]
+  },
+  "agent_servers_updated": false,
+  "docker_published": false
+}
