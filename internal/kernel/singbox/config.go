@@ -57,6 +57,11 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 		outbounds = append(outbounds, M{"type": "block", "tag": "block"})
 	}
 	outbounds = append(outbounds, buildRelayOutbounds(nc)...)
+	for _, rule := range nc.Routes {
+		if rule.Action == "block" && rule.ID > 0 {
+			outbounds = append(outbounds, M{"type": "block", "tag": model.PanelBlockTag(rule.ID)})
+		}
+	}
 
 	logConfig := M{"level": level, "timestamp": true}
 	if level == "disabled" {
@@ -318,6 +323,9 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 		}
 	}
 	newRule := func() M {
+		if pr.Action == "block" && pr.ID > 0 {
+			outbound = model.PanelBlockTag(pr.ID)
+		}
 		compiled := M{"outbound": outbound}
 		if len(conditions.Protocols) > 0 {
 			compiled["protocol"] = copyStrings(conditions.Protocols)

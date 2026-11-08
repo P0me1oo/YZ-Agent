@@ -54,6 +54,11 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 		// block is often added after direct but before others for safety
 		outbounds = append(outbounds, M{"protocol": "blackhole", "tag": "block"})
 	}
+	for _, rule := range nc.Routes {
+		if rule.Action == "block" && rule.ID > 0 {
+			outbounds = append(outbounds, M{"protocol": "blackhole", "tag": model.PanelBlockTag(rule.ID)})
+		}
+	}
 
 	cfg := M{
 		"log": M{
@@ -789,6 +794,9 @@ func compilePanelRouteRule(rule model.RouteRule) []M {
 		action.Target = rule.ActionValue
 	}
 	outbound := xrayOutboundForAction(action)
+	if rule.Action == "block" && rule.ID > 0 {
+		outbound = model.PanelBlockTag(rule.ID)
+	}
 	newRule := func() M {
 		compiled := M{"type": "field", "outboundTag": outbound}
 		if len(conditions.Protocols) > 0 {

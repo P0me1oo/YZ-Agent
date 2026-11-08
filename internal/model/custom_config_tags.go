@@ -124,6 +124,9 @@ func validateOutboundTagCollisions(structured []OutboundConfig, additional []out
 	seen := make(map[string]string, len(additional))
 	for _, source := range additional {
 		key := strings.ToLower(strings.TrimSpace(source.Tag))
+		if strings.HasPrefix(key, panelBlockPrefix) {
+			return fmt.Errorf("%s.tag uses reserved panel block prefix", source.Source)
+		}
 		if key == "" {
 			continue
 		}
@@ -134,6 +137,9 @@ func validateOutboundTagCollisions(structured []OutboundConfig, additional []out
 	}
 	for i, outbound := range structured {
 		key := strings.ToLower(strings.TrimSpace(outbound.Tag))
+		if strings.HasPrefix(key, panelBlockPrefix) {
+			return fmt.Errorf("custom_outbounds[%d].tag uses reserved panel block prefix", i)
+		}
 		if key == "" {
 			continue
 		}

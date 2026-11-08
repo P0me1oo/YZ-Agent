@@ -142,6 +142,7 @@ func (u *userStats) aliveIPList() map[string]bool {
 //   - Per-connection rate limit token accumulation (amortized WaitN)
 type ConnTracker struct {
 	accessLog    *accesslog.Recorder
+	blockLog     *accesslog.Recorder
 	relayAccess  kernel.RelayAccess
 	deviceFilter *deviceip.Filter
 	deviceGate   atomic.Pointer[devicegate.Manager]
@@ -361,6 +362,7 @@ func (t *ConnTracker) RoutedConnection(
 	}
 	permit.Bind(func() { _ = wrapped.Close() })
 	if registered && permit.Valid() {
+		t.recordBlock(ctx, uid, metadata, outbound, "tcp")
 		t.recordAccess(uid, metadata, outbound)
 	}
 	return wrapped
@@ -445,6 +447,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 	}
 	permit.Bind(func() { _ = wrapped.Close() })
 	if registered && permit.Valid() {
+		t.recordBlock(ctx, uid, metadata, outbound, "udp")
 		t.recordAccess(uid, metadata, outbound)
 	}
 	return wrapped

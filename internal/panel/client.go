@@ -46,6 +46,7 @@ type Client struct {
 
 	apiSuccess              atomic.Uint64
 	accessLog               atomic.Bool
+	blockLog                atomic.Bool
 	agentLog                atomic.Bool
 	agentLogEvents          atomic.Bool
 	apiFailure              atomic.Uint64
@@ -143,6 +144,7 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	c.applyHostMonitoring(hs.HostMonitoring)
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
 	c.accessLog.Store(hs.AccessLog.Version == 2)
+	c.blockLog.Store(hs.BlockLog.Version == 1)
 	c.agentLog.Store(hs.AgentLog.Version == 1)
 	c.agentLogEvents.Store(hs.AgentLog.Version == 1 && containsXrayCrash(hs.AgentLog.Events))
 	c.deviceHandover.Store(hs.Realtime.DeviceHandover == 1)

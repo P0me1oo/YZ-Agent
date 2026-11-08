@@ -63,6 +63,7 @@ const (
 //   - running (atomic) skips instance checks when the wrapper is stopped.
 type Xray struct {
 	accessLog *accesslog.Recorder
+	blockLog  *accesslog.Recorder
 	cfg       config.KernelConfig
 
 	// mu protects instance, limitDispatcher, users, protocol, inboundTag,
@@ -210,6 +211,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	ctx = internet.ContextWithProxyProtocolTrust(ctx, x.proxyTrust)
 	ctx = context.WithValue(ctx, deviceFilterContextKey{}, x.deviceFilter)
 	ctx = context.WithValue(ctx, accessLogContextKey{}, x.accessLog)
+	ctx = context.WithValue(ctx, blockLogContextKey{}, x.blockLog)
 	ctx = context.WithValue(ctx, accessLogNodesContextKey{}, nodeConfig.RelayNodeIDByTag())
 	ctx = singService.ContextWithDefaultRegistry(ctx)
 	singService.MustRegister[ntp.TimeService](ctx, timesync.Default())

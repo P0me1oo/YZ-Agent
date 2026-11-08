@@ -63,6 +63,7 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 	}
 	ld.deviceFilter, _ = ctx.Value(deviceFilterContextKey{}).(*deviceip.Filter)
 	ld.accessLog, _ = ctx.Value(accessLogContextKey{}).(*accesslog.Recorder)
+	ld.blockLog, _ = ctx.Value(blockLogContextKey{}).(*accesslog.Recorder)
 	if ld.deviceFilter == nil {
 		ld.deviceFilter = deviceip.DefaultFilter()
 	}
@@ -80,6 +81,7 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 // lifecycle bookkeeping.
 type LimitDispatcher struct {
 	accessLog *accesslog.Recorder
+	blockLog  *accesslog.Recorder
 	// 核心创建时的上下文供 WG 入站复用，保留实例级调度与带宽管理。
 	coreContext       context.Context
 	relayAccess       kernel.RelayAccess

@@ -42,6 +42,8 @@ type Service struct {
 	autoSpeed           autoSpeedState
 	operations          operationsState
 	accessLog           *accesslog.Recorder
+	blockLog            *accesslog.Recorder
+	blockLogFailed      bool
 	accessLogFailed     bool
 	cfg                 *config.Config
 	source              controlplane.Source
@@ -259,6 +261,10 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 	if consumer, ok := k.(interface{ SetAccessLog(*accesslog.Recorder) }); ok {
 		consumer.SetAccessLog(accessRecorder)
 	}
+	blockRecorder := &accesslog.Recorder{NodeID: cfg.Panel.NodeID}
+	if consumer, ok := k.(interface{ SetBlockLog(*accesslog.Recorder) }); ok {
+		consumer.SetBlockLog(blockRecorder)
+	}
 	l := limiter.New()
 	st := limiter.NewSpeedTracker(l)
 
@@ -266,6 +272,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 		scheduler:    scheduling.New(),
 		nodeLog:      nlog.Scoped(cfg.LogScope(), cfg.Panel.NodeID, fmt.Sprintf("node:%d", cfg.Panel.NodeID)),
 		accessLog:    accessRecorder,
+		blockLog:     blockRecorder,
 		cfg:          cfg,
 		source:       cp,
 		sink:         cp,
@@ -337,6 +344,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 		return fmt.Errorf("initial setup: %w", err)
 	}
 	defer s.startAccessLog(ctx)()
+	defer s.startBlockLog(ctx)()
 
 	// 状态实时采样与流量批次周期分离，累计流量仍沿用原有落盘和确认。
 	trackInterval := time.Duration(s.cfg.Node.TrackInterval) * time.Second
@@ -459,6 +467,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 		return err
 	}
 	s.initializeAccessLog()
+	s.initializeBlockLog()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

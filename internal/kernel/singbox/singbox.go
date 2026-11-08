@@ -41,6 +41,7 @@ const drainTimeout = 5 * time.Second
 // restarting listeners — zero connection disruption.
 type SingBox struct {
 	accessLog *accesslog.Recorder
+	blockLog  *accesslog.Recorder
 	cfg       config.KernelConfig
 
 	mu       sync.RWMutex
@@ -190,6 +191,7 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 	// 在开放监听前注册统计器，首个连接也必须纳入同一份用户统计。
 	tracker := NewConnTracker(0)
 	tracker.accessLog = s.accessLog
+	tracker.blockLog = s.blockLog
 	tracker.deviceGate.Store(s.deviceGate)
 	tracker.deviceFilter = s.deviceFilter
 	tracker.traffic = s.traffic

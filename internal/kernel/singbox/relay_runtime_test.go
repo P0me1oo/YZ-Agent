@@ -251,6 +251,9 @@ func relayStartCore(t *testing.T, kind string, node *model.NodeSpec, users []mod
 	if len(recorders) > 0 {
 		core.(interface{ SetAccessLog(*accesslog.Recorder) }).SetAccessLog(recorders[0])
 	}
+	if len(recorders) > 1 {
+		core.(interface{ SetBlockLog(*accesslog.Recorder) }).SetBlockLog(recorders[1])
+	}
 	if err := core.Start(node, users, cert); err != nil {
 		t.Fatal(err)
 	}

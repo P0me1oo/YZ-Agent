@@ -43,6 +43,9 @@ type HandshakeResponse struct {
 	AccessLog struct {
 		Version int `json:"version"`
 	} `json:"access_log"`
+	BlockLog struct {
+		Version int `json:"version"`
+	} `json:"block_log"`
 	WebSocket WSConfig           `json:"websocket"`
 	Settings  Settings           `json:"settings"`
 	Realtime  RealtimeCapability `json:"realtime"`

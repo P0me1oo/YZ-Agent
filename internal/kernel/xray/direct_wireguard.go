@@ -2,6 +2,7 @@ package xray
 
 import (
 	"context"
+	"github.com/P0me1oo/YZ-Agent/internal/accesslog"
 	"net"
 
 	sbuf "github.com/sagernet/sing/common/buf"
@@ -23,6 +24,7 @@ func (x *Xray) wireGuardContext(parent context.Context, source smeta.Socksaddr) 
 		return nil, func() {}, nil
 	}
 	ctx, cancel := context.WithCancel(d.coreContext)
+	ctx = accesslog.ContextWithUser(ctx, accesslog.ContextUser(parent))
 	stop := context.AfterFunc(parent, cancel)
 	ctx = session.ContextWithInbound(ctx, &session.Inbound{Name: "wireguard", Tag: "wireguard-in", Source: xnet.TCPDestination(xnet.ParseAddress(source.AddrString()), xnet.Port(source.Port))})
 	ctx = session.ContextWithContent(ctx, &session.Content{})

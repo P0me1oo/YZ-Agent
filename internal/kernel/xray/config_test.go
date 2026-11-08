@@ -476,8 +476,8 @@ func TestBuildRouting_WithRules(t *testing.T) {
 	if domains[0] != "domain:baidu.com" || domains[1] != "domain:qq.com" {
 		t.Errorf("unexpected domains: %v", domains)
 	}
-	if r1["outboundTag"] != "block" {
-		t.Errorf("expected block, got %v", r1["outboundTag"])
+	if r1["outboundTag"] != "yz-panel-block-1" {
+		t.Errorf("expected rule 1 block outbound, got %v", r1["outboundTag"])
 	}
 
 	// Rule 2: IP block

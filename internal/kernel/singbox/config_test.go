@@ -638,12 +638,12 @@ func TestBuildRoutes_WithCustomRules(t *testing.T) {
 		t.Fatalf("rules count: got %d, want 8", len(allRules))
 	}
 
-	assertMapValue(t, allRules[5], "outbound", "block")
+	assertMapValue(t, allRules[5], "outbound", "yz-panel-block-1")
 	if _, ok := allRules[5]["domain_suffix"]; !ok {
 		t.Error("domain rule should use domain_suffix")
 	}
 
-	assertMapValue(t, allRules[6], "outbound", "block")
+	assertMapValue(t, allRules[6], "outbound", "yz-panel-block-2")
 	if _, ok := allRules[6]["ip_cidr"]; !ok {
 		t.Error("IP rule should use ip_cidr")
 	}
@@ -669,14 +669,14 @@ func TestBuildRoutes_MultiMatch(t *testing.T) {
 	if len(domains) != 2 || domains[0] != "evil.com" || domains[1] != "bad.org" {
 		t.Errorf("domain_suffix: got %v, want [evil.com bad.org]", domains)
 	}
-	assertMapValue(t, allRules[5], "outbound", "block")
+	assertMapValue(t, allRules[5], "outbound", "yz-panel-block-1")
 
 	// 第二条面板规则：网段。
 	cidrs := allRules[6]["ip_cidr"].([]string)
 	if len(cidrs) != 1 || cidrs[0] != "192.168.1.0/24" {
 		t.Errorf("ip_cidr: got %v, want [192.168.1.0/24]", cidrs)
 	}
-	assertMapValue(t, allRules[6], "outbound", "block")
+	assertMapValue(t, allRules[6], "outbound", "yz-panel-block-1")
 
 	// 第三条面板规则：直连域名。
 	directDomains := allRules[7]["domain_suffix"].([]string)

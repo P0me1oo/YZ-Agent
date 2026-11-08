@@ -39,13 +39,13 @@ func TestCompilePanelRouteRule_Conditions(t *testing.T) {
 	})
 	got := compilePanelRouteRule(routes[0])
 	want := []M{
-		{"domain_suffix": []string{"example.com"}, "protocol": []string{"bittorrent"}, "port": []int{25}, "port_range": []string{"6881:6889"}, "network": []string{"udp"}, "outbound": "block"},
-		{"ip_cidr": []string{"1.1.1.0/24"}, "protocol": []string{"bittorrent"}, "port": []int{25}, "port_range": []string{"6881:6889"}, "network": []string{"udp"}, "outbound": "block"},
+		{"domain_suffix": []string{"example.com"}, "protocol": []string{"bittorrent"}, "port": []int{25}, "port_range": []string{"6881:6889"}, "network": []string{"udp"}, "outbound": "yz-panel-block-1"},
+		{"ip_cidr": []string{"1.1.1.0/24"}, "protocol": []string{"bittorrent"}, "port": []int{25}, "port_range": []string{"6881:6889"}, "network": []string{"udp"}, "outbound": "yz-panel-block-1"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("地址加条件 = %#v, want %#v", got, want)
 	}
-	if got := compilePanelRouteRule(routes[1]); !reflect.DeepEqual(got, []M{{"protocol": []string{"bittorrent"}, "outbound": "block"}}) {
+	if got := compilePanelRouteRule(routes[1]); !reflect.DeepEqual(got, []M{{"protocol": []string{"bittorrent"}, "outbound": "yz-panel-block-2"}}) {
 		t.Fatalf("只有协议 = %#v", got)
 	}
 	if got := compilePanelRouteRule(routes[2]); !reflect.DeepEqual(got, []M{{"port": []int{443}, "network": []string{"tcp"}, "outbound": "direct"}}) {

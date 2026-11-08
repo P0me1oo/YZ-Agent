@@ -30,6 +30,8 @@ type Record struct {
 	ConnectedAt int64  `json:"connected_at"`
 	Destination string `json:"destination"`
 	Port        uint16 `json:"port"`
+	RuleID      int    `json:"rule_id,omitempty"`
+	Network     string `json:"network,omitempty"`
 }
 
 type Batch struct {
@@ -91,7 +93,14 @@ func (r *Recorder) Add(user int, domain, address string, port uint16) {
 
 // 节点 0 表示本节点直出，已入队的节点归属不随重载或重试改变。
 func (r *Recorder) AddForNode(node, user int, domain, address string, port uint16) {
-	if r == nil || !r.enabled.Load() || node < 0 || user <= 0 || port == 0 {
+	if user <= 0 {
+		return
+	}
+	r.add(node, user, domain, address, port, 0, "")
+}
+
+func (r *Recorder) add(node, user int, domain, address string, port uint16, rule int, network string) {
+	if r == nil || !r.enabled.Load() || node < 0 || port == 0 {
 		return
 	}
 	if node == 0 {
@@ -123,7 +132,7 @@ func (r *Recorder) AddForNode(node, user int, domain, address string, port uint1
 		batch = &Batch{ID: hex.EncodeToString(id[:])}
 		r.queue = append(r.queue, batch)
 	}
-	batch.Records = append(batch.Records, Record{NodeID: node, UserID: user, ConnectedAt: time.Now().Unix(), Destination: host, Port: port})
+	batch.Records = append(batch.Records, Record{NodeID: node, UserID: user, ConnectedAt: time.Now().Unix(), Destination: host, Port: port, RuleID: rule, Network: network})
 	r.count++
 }
 
@@ -274,7 +283,8 @@ func (r *Recorder) Restore(path string) error {
 	}
 	validate := func(records []Record) error {
 		for _, record := range records {
-			if record.NodeID < 0 || record.UserID <= 0 || record.Port == 0 || record.ConnectedAt <= 0 || record.ConnectedAt > time.Now().Add(5*time.Minute).Unix() || Host(record.Destination) != record.Destination {
+			block := record.RuleID > 0 && (record.Network == "tcp" || record.Network == "udp")
+			if record.NodeID < 0 || record.UserID < 0 || (!block && (record.UserID == 0 || record.RuleID != 0 || record.Network != "")) || record.Port == 0 || record.ConnectedAt <= 0 || record.ConnectedAt > time.Now().Add(5*time.Minute).Unix() || Host(record.Destination) != record.Destination {
 				return fmt.Errorf("访问记录缓存包含无效记录")
 			}
 		}

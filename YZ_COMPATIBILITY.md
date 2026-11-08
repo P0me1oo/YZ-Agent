@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+## v2.36.0 路由拦截记录（2026-11-08，本地未发布）
+
+支持面板 `2.10.0` 起的上报接口，推荐配套面板 `2.11.0`、管理端 `0.95.0` 的路由页用户汇总。功能范围、队列边界和新增/移除拦截规则时的核心重建行为见[说明](docs/route-block-logs.md)。两个核心固定依赖未改变。
+
+- Go `1.27.3` / Linux amd64，使用 `with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api` 正式功能标签。`go test -mod=readonly -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./internal/accesslog ./internal/panel ./internal/controlplane ./internal/service ./internal/model` 五包普通测试通过，覆盖有界队列、旧访问记录、缓存和隐私存储、能力握手、确认与失败重试；新增拦截缓存验证无用户的落地记录恢复、规则/网络字段与容量上限。
+- `go test` 双核心专项 `-run '^TestBlockLog'` 通过，真实本机 VLESS/Shadowsocks 的 TCP、UDP、BT 与端口拦截、正常放行、关闭采集仍保持拦截、重载规则编号、四种入口/落地核心组合均验证。修复首轮发现的 Xray 网络名称大小写漏记；重载夹具使用独立的新配置，符合控制层实际调用方式。
+- 核心配置、规则编译、热路由、既有访问记录和普通 WireGuard 专项执行后，更新原断言中的公共拦截标签为规则独立标签，失败项单独复验通过；未跳过断言。普通 WireGuard 新专项确认 TCP 在拨号阶段被拒绝时仍取得记录，TCP/UDP 均保留真实用户、节点和规则编号，旧访问记录不重复。
+- Linux amd64 正式标签构建通过，`CGO_ENABLED=0`、`vcs.revision=7ad842033d2d687e1ad8c3b92f20e080b5f8aabe`、`vcs.modified=true`，构建来源为该提交加本地修改。产物 SHA-256 `cb8c4627715318bddfcf8ed915324957e2c9f43005a828a7d2957c51eea351e2`；sing-box `v1.15.1`、Xray `v0.0.0-20261103192507-3c480b0c0d73` 的模块来源已核对。
+- 本次未运行全仓完整回归、竞态检查或生产节点联调；不是正式发布安装包，没有提交、推送、发布或升级服务器。临时构建和测试服务在交付前清理。
+
 ## v2.35.0 正式发布（2026-11-08）
 
 [Release v2.35.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.35.0) 已发布并标记为 Latest，固定源码 `e5249417c0a4c8b3eb56162f3fcc825c3482462c`。包含 Lite 主机监控切换及每个 IP 连接数；配套 Solid-US LA 已部署的面板 2.9.0、管理端 0.93.0。
