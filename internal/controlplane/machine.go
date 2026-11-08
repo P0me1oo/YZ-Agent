@@ -180,7 +180,7 @@ func (p *MachinePanelControlPlane) ReportContext(ctx context.Context, payload Re
 		payload.CPU, payload.Mem, payload.Swap, payload.Disk,
 		payload.Metrics,
 		payload.LimitEvents,
-		panel.ConnectionSnapshot{Users: payload.ConnectionCounts, Relay: payload.RelayConnectionCounts},
+		panel.ConnectionSnapshot{Users: payload.ConnectionCounts, Relay: payload.RelayConnectionCounts, IPs: payload.IPConnectionCounts},
 	)
 }
 

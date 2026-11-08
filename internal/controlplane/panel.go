@@ -149,7 +149,7 @@ func (p *PanelControlPlane) Report(payload ReportPayload) error {
 }
 
 func (p *PanelControlPlane) ReportContext(ctx context.Context, payload ReportPayload) error {
-	return p.client.ReportContext(ctx, payload.ReportID, payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.RelayUserAlive, payload.Alive, payload.Online, payload.CPU, payload.Mem, payload.Swap, payload.Disk, payload.Metrics, payload.LimitEvents, panel.ConnectionSnapshot{Users: payload.ConnectionCounts, Relay: payload.RelayConnectionCounts})
+	return p.client.ReportContext(ctx, payload.ReportID, payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.RelayUserAlive, payload.Alive, payload.Online, payload.CPU, payload.Mem, payload.Swap, payload.Disk, payload.Metrics, payload.LimitEvents, panel.ConnectionSnapshot{Users: payload.ConnectionCounts, Relay: payload.RelayConnectionCounts, IPs: payload.IPConnectionCounts})
 }
 
 func (p *PanelControlPlane) ReportDevices(push PushClient, devices map[int][]string) {

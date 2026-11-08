@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"golang.org/x/time/rate"
@@ -323,3 +324,32 @@ func (m *Managed) ProbeDial(ctx context.Context, tag, network, address string) (
 	}
 	return nil, fmt.Errorf("核心不支持链路检查")
 }
+
+// 来源跟随每条转发连接，不用最近一次握手地址代替已有连接的来源。
+func (m *Managed) GetIPConnectionSnapshot(ctx context.Context) (map[int]map[string]int, error) {
+	m.mu.Lock()
+	direct := m.direct
+	m.mu.Unlock()
+	if !direct {
+		if reader, ok := m.Kernel.(kernel.IPConnectionSnapshotReader); ok {
+			return reader.GetIPConnectionSnapshot(ctx)
+		}
+		return nil, nil
+	}
+	m.state.mu.Lock()
+	defer m.state.mu.Unlock()
+	counts := make(map[int]map[string]int)
+	for id, user := range m.state.users {
+		for conn := range user.connections {
+			if ip := deviceip.PublicAddress(user.connectionIPs[conn]); ip != "" {
+				if counts[id] == nil {
+					counts[id] = make(map[string]int)
+				}
+				counts[id][ip]++
+			}
+		}
+	}
+	return counts, nil
+}
+
+var _ kernel.IPConnectionSnapshotReader = (*Managed)(nil)

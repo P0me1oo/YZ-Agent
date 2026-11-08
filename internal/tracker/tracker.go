@@ -61,8 +61,9 @@ type Tracker struct {
 	pendingRelayUser  map[int]map[int][2]int64
 
 	// relayAlive 是中转入口按实际出网节点拆分的在线来源快照，每次采样整体替换。
-	relayAlive  atomic.Pointer[map[int]map[int]map[string]bool]
-	connections atomic.Pointer[connectionSnapshot]
+	relayAlive    atomic.Pointer[map[int]map[int]map[string]bool]
+	connections   atomic.Pointer[connectionSnapshot]
+	ipConnections atomic.Pointer[map[int]map[string]int]
 
 	// live holds the current snapshot, swapped atomically.
 	// Readers load this pointer without any lock.
@@ -305,3 +306,15 @@ func copyTrafficMap(src map[int][2]int64) map[int][2]int64 {
 
 // PendingRevision 只在待上报内容变化时推进，避免静止流量重复复制和编码。
 func (t *Tracker) PendingRevision() uint64 { t.mu.Lock(); defer t.mu.Unlock(); return t.revision }
+
+// ProcessIPConnectionCounts 替换整份快照；采集失败用 nil 撤销旧样本。
+func (t *Tracker) ProcessIPConnectionCounts(counts map[int]map[string]int) {
+	t.ipConnections.Store(&counts)
+}
+
+func (t *Tracker) CurrentIPConnectionCounts() map[int]map[string]int {
+	if current := t.ipConnections.Load(); current != nil {
+		return *current
+	}
+	return nil
+}

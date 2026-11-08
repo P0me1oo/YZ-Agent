@@ -27,6 +27,14 @@ func (s *Service) realtimeEnabled() bool {
 	return ok && publisher.RealtimeEnabled()
 }
 
+func (s *Service) collectStatus() monitor.Status {
+	enabled := true
+	if policy, ok := s.source.(interface{ HostMonitoringEnabled() bool }); ok {
+		enabled = policy.HostMonitoringEnabled()
+	}
+	return monitor.CollectWithHost(enabled)
+}
+
 // publishRuntimeState 不阻塞主循环。慢通道期间不堆积采样，下一次发送直接取最新快照。
 func (s *Service) publishRuntimeState(ctx context.Context) {
 	publisher, ok := s.sink.(controlplane.StatePublisher)
@@ -41,7 +49,8 @@ func (s *Service) publishRuntimeState(ctx context.Context) {
 	state := panel.StatePayload{
 		Alive: s.tracker.FlushAliveIPs(), Online: s.tracker.CurrentOnline(),
 		ConnectionCounts: counts, RelayConnectionCounts: relayCounts,
-		RelayUserAlive: s.tracker.RelayUserAlive(),
+		IPConnectionCounts: s.tracker.CurrentIPConnectionCounts(),
+		RelayUserAlive:     s.tracker.RelayUserAlive(),
 	}
 	if speeds {
 		state.UserSpeeds = s.userSpeed.rates
@@ -50,7 +59,7 @@ func (s *Service) publishRuntimeState(ctx context.Context) {
 		state.Operations = value
 	}
 	if details {
-		status := monitor.Collect()
+		status := s.collectStatus()
 		state.Metrics = s.buildMetrics(status)
 		// 实时通道已在顶层发送运行状态；指标中的副本只供旧报告路径使用。
 		delete(state.Metrics, "operations")
@@ -61,6 +70,9 @@ func (s *Service) publishRuntimeState(ctx context.Context) {
 			"swap":          map[string]uint64{"total": status.SwapTotal, "used": status.SwapUsed},
 			"disk":          map[string]uint64{"total": status.DiskTotal, "used": status.DiskUsed},
 			"kernel_status": s.kernel.IsRunning(),
+		}
+		if status.HostSkipped {
+			state.Status = map[string]interface{}{"kernel_status": s.kernel.IsRunning()}
 		}
 	}
 	go func() {

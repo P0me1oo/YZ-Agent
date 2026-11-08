@@ -32,6 +32,9 @@ func TestRealtimeHTTPPreservesEmptySnapshotsAndUsesFallbackInterval(t *testing.T
 				w.WriteHeader(400)
 				return
 			}
+			if ips, ok := state["ip_connection_counts"].(map[string]interface{}); !ok || len(ips) != 0 {
+				t.Error("IP 空快照丢失")
+			}
 			if _, ok := state["connection_counts"]; !ok {
 				t.Error("空连接快照被省略")
 			}
@@ -51,7 +54,7 @@ func TestRealtimeHTTPPreservesEmptySnapshotsAndUsesFallbackInterval(t *testing.T
 	defer server.Close()
 	client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 1})
 	client.realtime.enabled.Store(true)
-	state := StatePayload{Alive: map[int][]string{}, ConnectionCounts: map[int]int{}, UserSpeeds: map[int][2]int64{}}
+	state := StatePayload{IPConnectionCounts: map[int]map[string]int{}, Alive: map[int][]string{}, ConnectionCounts: map[int]int{}, UserSpeeds: map[int][2]int64{}}
 	if err := client.PublishState(context.Background(), state); err != nil {
 		t.Fatal(err)
 	}

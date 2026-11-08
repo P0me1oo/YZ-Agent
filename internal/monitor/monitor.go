@@ -16,31 +16,22 @@ import (
 
 var startTime = time.Now()
 
-func init() {
-	// Warm up the CPU sampler. The first cpu.Percent call with interval=0
-	// always returns 0% because it has no prior sample. This throwaway call
-	// seeds the baseline so subsequent Collect() calls return real values.
-	cpu.Percent(500*time.Millisecond, false)
-
-	// Seed the network baseline so the first Collect() can compute rates.
-	collectNetSpeed()
-}
-
 // Status holds system resource metrics
 type Status struct {
-	Uptime     uint64
-	CPU        float64
-	CPUPerCore []float64
-	Load1      float64
-	Load5      float64
-	Load15     float64
-	MemTotal   uint64
-	MemUsed    uint64
-	SwapTotal  uint64
-	SwapUsed   uint64
-	DiskTotal  uint64
-	DiskUsed   uint64
-	Goroutines int
+	HostSkipped bool
+	Uptime      uint64
+	CPU         float64
+	CPUPerCore  []float64
+	Load1       float64
+	Load5       float64
+	Load15      float64
+	MemTotal    uint64
+	MemUsed     uint64
+	SwapTotal   uint64
+	SwapUsed    uint64
+	DiskTotal   uint64
+	DiskUsed    uint64
+	Goroutines  int
 
 	// Network speed (bytes/sec), -1 means unavailable (first sample).
 	NetInSpeed  float64
@@ -122,10 +113,18 @@ func Collect() Status {
 	return systemSampler.sample()
 }
 
-func collect() Status {
-	var s Status
+// CollectWithHost 关闭主机监控时只读取 Agent 自身的运行时信息。
+func CollectWithHost(enabled bool) Status {
+	if enabled {
+		return Collect()
+	}
+	s := processStatus()
+	s.HostSkipped = true
+	return s
+}
 
-	s.Uptime = uint64(time.Since(startTime).Seconds())
+func collect() Status {
+	s := processStatus()
 
 	if cpuPercent, err := cpu.Percent(0, false); err == nil && len(cpuPercent) > 0 {
 		s.CPU = cpuPercent[0]
@@ -160,7 +159,11 @@ func collect() Status {
 	}
 
 	s.NetInSpeed, s.NetOutSpeed = collectNetSpeed()
+	return s
+}
 
+func processStatus() Status {
+	s := Status{Uptime: uint64(time.Since(startTime).Seconds())}
 	// GC metrics
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)

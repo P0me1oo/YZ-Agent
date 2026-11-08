@@ -31,12 +31,14 @@ var (
 // When machineID > 0 the client uses machine-level authentication
 // (machine_id + token) instead of the legacy (token + node_type) scheme.
 type Client struct {
-	baseURL    string
-	token      string
-	nodeID     int
-	nodeType   string
-	machineID  int
-	httpClient *http.Client
+	baseURL                string
+	token                  string
+	nodeID                 int
+	nodeType               string
+	machineID              int
+	httpClient             *http.Client
+	hostMonitoringParent   *Client
+	hostMonitoringDisabled atomic.Bool
 
 	configETag string
 	userETag   string
@@ -78,12 +80,13 @@ func NewClient(cfg config.PanelConfig) *Client {
 // same base URL, auth and HTTP transport. ETags and metric counters start fresh.
 func (c *Client) ForNode(nodeID int) *Client {
 	return &Client{
-		baseURL:    c.baseURL,
-		token:      c.token,
-		nodeID:     nodeID,
-		nodeType:   c.nodeType,
-		machineID:  c.machineID,
-		httpClient: c.httpClient,
+		baseURL:              c.baseURL,
+		token:                c.token,
+		nodeID:               nodeID,
+		nodeType:             c.nodeType,
+		machineID:            c.machineID,
+		httpClient:           c.httpClient,
+		hostMonitoringParent: c,
 	}
 }
 
@@ -137,6 +140,7 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 		return nil, fmt.Errorf("decode handshake: %w", err)
 	}
 	c.applyLogPolicy(hs.LogPolicy)
+	c.applyHostMonitoring(hs.HostMonitoring)
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
 	c.accessLog.Store(hs.AccessLog.Version == 2)
 	c.agentLog.Store(hs.AgentLog.Version == 1)
@@ -157,6 +161,7 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 // 不作为用户套餐流量。
 // relayUserTraffic 是同一组计数按用户和逻辑落地节点拆分的归属数据。
 type ConnectionSnapshot struct {
+	IPs   map[int]map[string]int
 	Users map[int]int
 	Relay map[int]map[int]int
 }
@@ -272,6 +277,9 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 		}()
 	}
 	if len(counts) > 0 {
+		if ips := counts[0].IPs; ips != nil {
+			payload["ip_connection_counts"] = ips
+		}
 		if users := counts[0].Users; users != nil {
 			payload["connection_counts"] = users
 		}
@@ -286,10 +294,12 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 		"swap": map[string]interface{}{"total": swap[0], "used": swap[1]},
 		"disk": map[string]interface{}{"total": disk[0], "used": disk[1]},
 	}
-	payload["status"] = status
-
-	if len(metrics) > 0 {
-		payload["metrics"] = metrics
+	state := c.filterHostState(StatePayload{Status: status, Metrics: metrics})
+	if state.Status != nil {
+		payload["status"] = state.Status
+	}
+	if len(state.Metrics) > 0 {
+		payload["metrics"] = state.Metrics
 	}
 
 	if len(limitEvents) > 0 {
@@ -492,12 +502,16 @@ func (c *Client) GetMachineNodesContext(ctx context.Context) (*MachineNodesRespo
 		return nil, fmt.Errorf("decode machine nodes: %w", err)
 	}
 	c.applyLogPolicy(out.LogPolicy)
+	c.applyHostMonitoring(out.HostMonitoring)
 	return &out, nil
 }
 
 // ReportMachineStatus sends machine-level load metrics to the panel.
 // netIn/netOut are bytes/sec; negative values mean "unavailable" (first sample).
 func (c *Client) ReportMachineStatus(cpu float64, mem, swap, disk [2]uint64, netIn, netOut float64) error {
+	if !c.HostMonitoringEnabled() {
+		return nil
+	}
 	payload := map[string]interface{}{
 		"cpu":  cpu,
 		"mem":  map[string]interface{}{"total": mem[0], "used": mem[1]},

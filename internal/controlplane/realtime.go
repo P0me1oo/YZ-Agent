@@ -37,3 +37,8 @@ func (p *panelPushClient) WebSocket() *panel.WSClient { return p.inner }
 
 func (p *PanelControlPlane) TelemetryNeeds() (bool, bool)        { return p.client.TelemetryNeeds() }
 func (p *MachinePanelControlPlane) TelemetryNeeds() (bool, bool) { return p.client.TelemetryNeeds() }
+
+func (p *PanelControlPlane) HostMonitoringEnabled() bool { return p.client.HostMonitoringEnabled() }
+func (p *MachinePanelControlPlane) HostMonitoringEnabled() bool {
+	return p.client.HostMonitoringEnabled()
+}

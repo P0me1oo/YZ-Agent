@@ -164,6 +164,11 @@ type ConnectionSnapshotReader interface {
 	GetConnectionSnapshot(ctx context.Context) (map[int]int, map[int]map[int]int, error)
 }
 
+// IPConnectionSnapshotReader 按用户和完整公网来源 IP 返回活跃连接数；nil 表示采样不可用。
+type IPConnectionSnapshotReader interface {
+	GetIPConnectionSnapshot(ctx context.Context) (map[int]map[string]int, error)
+}
+
 // ComputeHash returns a hash of config + user identities that would
 // require a kernel restart/reconstruction if changed.
 func ComputeHash(nc *model.NodeSpec, users []model.UserSpec) string {

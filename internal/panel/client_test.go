@@ -323,7 +323,7 @@ func TestReportIncludesBatchID(t *testing.T) {
 		[2]uint64{1000, 500},
 		map[string]interface{}{"kernel_status": true},
 		[]LimitEvent{{UserID: 1, Kind: "conn", Limit: 512, Observed: 530, Count: 3}},
-		ConnectionSnapshot{Users: map[int]int{1: 12}, Relay: map[int]map[int]int{1: {0: 2, 7: 10}}},
+		ConnectionSnapshot{IPs: map[int]map[string]int{1: {"8.8.8.8": 12}}, Users: map[int]int{1: 12}, Relay: map[int]map[int]int{1: {0: 2, 7: 10}}},
 	)
 	if err != nil {
 		t.Fatalf("Report: %v", err)
@@ -359,6 +359,14 @@ func TestReportIncludesBatchID(t *testing.T) {
 	}
 	if ips, ok := aliveNodes["7"].([]interface{}); !ok || len(ips) != 1 || ips[0] != "192.0.2.10" {
 		t.Fatalf("relay_user_alive node 7 = %#v", aliveNodes["7"])
+	}
+	ipCounts, ok := received["ip_connection_counts"].(map[string]interface{})
+	if !ok {
+		t.Fatal("缺少 IP 连接数")
+	}
+	ips, ok := ipCounts["1"].(map[string]interface{})
+	if !ok || ips["8.8.8.8"] != float64(12) {
+		t.Fatalf("IP 连接数错误: %v", ipCounts)
 	}
 	connectionCounts, ok := received["connection_counts"].(map[string]interface{})
 	if !ok || connectionCounts["1"] != float64(12) {

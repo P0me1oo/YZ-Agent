@@ -34,8 +34,9 @@ func (s *StringOrArray) UnmarshalJSON(data []byte) error {
 
 // HandshakeResponse is the response from POST /api/v2/server/handshake
 type HandshakeResponse struct {
-	LogPolicy *LogPolicy `json:"log_policy,omitempty"`
-	AgentLog  struct {
+	HostMonitoring *bool      `json:"host_monitoring"`
+	LogPolicy      *LogPolicy `json:"log_policy,omitempty"`
+	AgentLog       struct {
 		Version int      `json:"version"`
 		Events  []string `json:"events"`
 	} `json:"agent_log"`
@@ -101,10 +102,11 @@ type MachineNode struct {
 
 // MachineNodesResponse is the response from GET /api/v2/server/machine/nodes.
 type MachineNodesResponse struct {
-	LogPolicy  *LogPolicy             `json:"log_policy,omitempty"`
-	Traffic    *machinetraffic.Policy `json:"traffic,omitempty"`
-	Nodes      []MachineNode          `json:"nodes"`
-	BaseConfig MachineBaseConfig      `json:"base_config"`
+	HostMonitoring *bool                  `json:"host_monitoring"`
+	LogPolicy      *LogPolicy             `json:"log_policy,omitempty"`
+	Traffic        *machinetraffic.Policy `json:"traffic,omitempty"`
+	Nodes          []MachineNode          `json:"nodes"`
+	BaseConfig     MachineBaseConfig      `json:"base_config"`
 }
 
 // MachineBaseConfig holds polling intervals for machine mode.

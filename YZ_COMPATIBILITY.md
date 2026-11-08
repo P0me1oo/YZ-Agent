@@ -1,5 +1,26 @@
 # YZ-Agent 兼容矩阵
 
+## v2.35.0 Lite 主机监控切换（2026-11-08，本地未发布）
+
+配套面板 2.9.0，沿用管理端 0.93.0。新增 `host_monitoring` 策略，机器与全部节点共享；关闭后跳过主机采集并过滤报告中的 CPU/内存/磁盘/网速/负载，保留代理业务、进程指标、控制和流量保护。解绑或停用自动恢复，网络失败保持上次策略，旧面板无字段时沿用原行为。详见 [主机监控切换](docs/host-monitoring.md)。
+
+- Go 1.27.3 / Linux amd64，正式构建标签：`go test -mod=readonly -race -count=1 -timeout 5m -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./internal/monitor ./internal/panel ./internal/controlplane ./internal/machine ./internal/service ./internal/tracker ./internal/machinetraffic`，7 包通过，无数据竞争。使用临时解包 GCC 14，不安装或修改系统软件。
+- 新增检查证明关闭时不调用系统采集器、机器/节点策略同步、旧面板和失败响应兼容、HTTP/WS 回执停报与恢复、空机器心跳、重试原批次过滤、节点流量/连接/IP/设备/运行状态保持。临时链接环境首轮缺少 libc 路径，补齐后上述命令通过。
+- `CGO_ENABLED=0 go build -mod=readonly -trimpath -buildvcs=true -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./cmd/yz-agent` 成功，实际版本 v2.35.0；来源为工作区基线 `21a2b82d4b24c0a78ed660fa5b0326e4258b515f` 加未提交改动，`vcs.modified=true`。YZ-sing-box v1.15.1、YZ-Xray-core v0.0.0-20261103192507-3c480b0c0d73 固定依赖不变。
+- 面板双数据库各 109 项、1091 断言通过。未执行全项目回归、arm64 构建、双核心完整联调或生产节点验证；临时构建仅用于验证，未发布安装包、提交、推送或部署。
+
+## v2.34.0 每个 IP 的连接数（2026-11-08，本地未发布）
+
+配套面板 2.8.0、管理端 0.93.0。新增 `ip_connection_counts`（用户 ID → 完整公网来源 IP → 活跃连接数），两种内核复用连接引用计数，Xray 包含排空中的旧实例，普通 WireGuard 使用连接建立时登记的来源。实时及兼容 HTTP 通道均发送；空快照清空，采样失败撤销旧样本，IPv6 保留完整地址，设备名额和计费不变。
+
+Go 1.27.3 / Linux amd64，`CGO_ENABLED=0`，使用 `with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api` 构建标签：
+
+- `go test -mod=readonly -count=1`：`internal/kernel/xray`、`internal/directwg`、`internal/service`、`internal/tracker`、`internal/controlplane`、`internal/panel` 六个包通过。新增检查覆盖同源多连接、不同 IPv6、重复关闭、热重载旧实例、WireGuard 来源保持、采集失败/不支持、HTTP 上报及实时空快照。
+- `internal/kernel/singbox` 使用 `-run 'IPConnection|Connection|ConnTracker|Device|ConnLimit|RelaySource|RelayUserAlive|Snapshot' -timeout 5m`，相关连接、设备和快照检查通过。首轮全包运行进入无关的慢健康检查后终止，未声明 sing-box 全包通过；Xray 新测试首次误用布尔返回值导致编译失败，修正断言后整个 Xray 包通过。
+- `go build -mod=readonly -trimpath -buildvcs=true ... ./cmd/yz-agent` 成功。产物实际来源为当前未提交工作区，`vcs.modified=true`；模块仍为 YZ-sing-box v1.15.1 与 YZ-Xray-core v0.0.0-20261103192507-3c480b0c0d73，未更换核心依赖。
+
+未运行全项目回归、竞态检测、arm64 构建或真实公网节点联调；本次不是发布或服务器升级，未提交、推送、Tag 或 Release。协议与展示规则见 [中转说明](docs-relay.md#每个来源-ip-的连接数)。
+
 ## v2.33.1 运行检查修复与优化（2026-11-07，已发布，未部署）
 
 [Release v2.33.1](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.33.1)，固定源码 `b61051f2abfae5d94b9a82f2d21048018e52ea37`。12 份附件下载及校验通过，两种架构、版本、核心模块来源与 vcs.modified=false 核对一致；Actions 因账单锁定未启动，按确认采用本地检查手动发布。未新增完整 CI、外部 Mihomo 或四组原生防火墙验证；详见[配套发布记录](../YZboard/docs/release-2.6.1.md)。

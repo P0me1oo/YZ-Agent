@@ -573,6 +573,9 @@ func (o *Orchestrator) rediscoverOnce(ctx context.Context) {
 // ─── Machine status reporting ────────────────────────────────────────────
 
 func (o *Orchestrator) reportMachineStatus() {
+	if !o.client.HostMonitoringEnabled() {
+		return
+	}
 	s := monitor.Collect()
 	if err := o.client.ReportMachineStatus(
 		s.CPU,

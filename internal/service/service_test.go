@@ -735,3 +735,38 @@ func TestValidateNodeRuntimeRejectsRealityWithoutServerNameOrDest(t *testing.T) 
 		t.Fatalf("unexpected error: %v", got)
 	}
 }
+
+type ipCountingKernel struct {
+	*countingKernel
+	ips map[int]map[string]int
+	err error
+}
+
+func (k *ipCountingKernel) GetIPConnectionSnapshot(context.Context) (map[int]map[string]int, error) {
+	return k.ips, k.err
+}
+
+func TestIPConnectionSamplingClearsFailuresAndUnsupportedKernels(t *testing.T) {
+	k := &ipCountingKernel{countingKernel: &countingKernel{fakeKernel: &fakeKernel{}}, ips: map[int]map[string]int{7: {"8.8.8.8": 3}}}
+	s := &Service{kernel: k, tracker: tracker.New()}
+	s.trackConnectionCounts(context.Background())
+	if s.tracker.CurrentIPConnectionCounts()[7]["8.8.8.8"] != 3 {
+		t.Fatal("未保存 IP 样本")
+	}
+	k.err = errors.New("采样失败")
+	s.trackConnectionCounts(context.Background())
+	if s.tracker.CurrentIPConnectionCounts() != nil {
+		t.Fatal("失败不能复用旧样本")
+	}
+	k.err = nil
+	k.ips = map[int]map[string]int{}
+	s.trackConnectionCounts(context.Background())
+	if got := s.tracker.CurrentIPConnectionCounts(); got == nil || len(got) != 0 {
+		t.Fatal("空快照未保留")
+	}
+	s.kernel = &fakeKernel{}
+	s.trackConnectionCounts(context.Background())
+	if s.tracker.CurrentIPConnectionCounts() != nil {
+		t.Fatal("不支持采集时必须未知")
+	}
+}

@@ -86,6 +86,8 @@ type ReportPayload struct {
 	Online         map[int]int
 	// ConnectionCounts 是按用户统计的真实活跃连接条数。
 	ConnectionCounts map[int]int
+	// IPConnectionCounts 按用户和完整公网来源 IP 拆分，不写入可靠流量批次。
+	IPConnectionCounts map[int]map[string]int
 	// RelayConnectionCounts 是中转入口按用户和实际出网节点拆分的活跃连接条数。
 	RelayConnectionCounts map[int]map[int]int
 	CPU                   float64

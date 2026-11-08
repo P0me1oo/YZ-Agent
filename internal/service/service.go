@@ -649,7 +649,7 @@ func (s *Service) requestWSResync(ctx context.Context, reason string) {
 }
 
 func (s *Service) wsMetrics() map[string]interface{} {
-	status := monitor.Collect()
+	status := s.collectStatus()
 	m := s.buildMetrics(status)
 	m["kernel_status"] = s.kernel.IsRunning()
 	return m
@@ -1574,6 +1574,7 @@ func (s *Service) takeReportBatch() *reportBatch {
 			Alive:                 aliveIPs,
 			Online:                s.tracker.CurrentOnline(),
 			ConnectionCounts:      connectionCounts,
+			IPConnectionCounts:    s.tracker.CurrentIPConnectionCounts(),
 			RelayConnectionCounts: relayConnectionCounts,
 			LimitEvents:           limitEvents,
 		},
@@ -1586,7 +1587,7 @@ func (s *Service) takeReportBatch() *reportBatch {
 }
 
 func (s *Service) fillReportStatus(payload *controlplane.ReportPayload) {
-	status := monitor.Collect()
+	status := s.collectStatus()
 	metrics := s.buildMetrics(status)
 	metrics["kernel_status"] = s.kernel.IsRunning()
 	payload.CPU = status.CPU
@@ -1786,6 +1787,16 @@ func (s *Service) trackRelayAlive(ctx context.Context) {
 
 // trackConnectionCounts 采集内核真实连接数；内核不支持时不使用在线来源数代替。
 func (s *Service) trackConnectionCounts(ctx context.Context) {
+	var ipCounts map[int]map[string]int
+	if reader, ok := s.kernel.(kernel.IPConnectionSnapshotReader); ok {
+		var err error
+		ipCounts, err = reader.GetIPConnectionSnapshot(ctx)
+		if err != nil {
+			s.logger().Debug("get IP connection snapshot failed", "error", err)
+			ipCounts = nil
+		}
+	}
+	s.tracker.ProcessIPConnectionCounts(ipCounts)
 	reader, ok := s.kernel.(kernel.ConnectionSnapshotReader)
 	if !ok {
 		return
@@ -1898,14 +1909,16 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	m["outbound_speed"] = s.tracker.OutboundSpeed()
 
 	// Per-core CPU usage (if available).
-	if len(status.CPUPerCore) > 0 {
+	if !status.HostSkipped && len(status.CPUPerCore) > 0 {
 		m["cpu_per_core"] = status.CPUPerCore
 	}
 
-	m["load"] = map[string]interface{}{
-		"load1":  status.Load1,
-		"load5":  status.Load5,
-		"load15": status.Load15,
+	if !status.HostSkipped {
+		m["load"] = map[string]interface{}{
+			"load1":  status.Load1,
+			"load5":  status.Load5,
+			"load15": status.Load15,
+		}
 	}
 
 	// Speed Limiter metrics

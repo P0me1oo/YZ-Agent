@@ -13,7 +13,7 @@ func (o *Orchestrator) publishRuntimeState(ctx context.Context) {
 		return
 	}
 	var load map[string]interface{}
-	if details, _ := o.client.TelemetryNeeds(); details {
+	if details, _ := o.client.TelemetryNeeds(); details && o.client.HostMonitoringEnabled() {
 		status := monitor.Collect()
 		load = map[string]interface{}{
 			"cpu":  status.CPU,

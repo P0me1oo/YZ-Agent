@@ -18,6 +18,7 @@ const realtimeFallbackInterval = 10 * time.Second
 
 // StatePayload 只含当前状态，不含会累计结算的流量或超限事件。
 type StatePayload struct {
+	IPConnectionCounts    map[int]map[string]int   `json:"ip_connection_counts,omitempty"`
 	Operations            any                      `json:"operations,omitempty"`
 	Alive                 map[int][]string         `json:"alive,omitempty"`
 	Online                map[int]int              `json:"online,omitempty"`
@@ -32,6 +33,9 @@ type StatePayload struct {
 // mapValue 保留非 nil 的空快照，空状态与不支持该采样不是一回事。
 func (s StatePayload) mapValue() map[string]interface{} {
 	out := make(map[string]interface{})
+	if s.IPConnectionCounts != nil {
+		out["ip_connection_counts"] = s.IPConnectionCounts
+	}
 	if s.Operations != nil {
 		out["operations"] = s.Operations
 	}
@@ -160,6 +164,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 	}
 	c.realtime.version.Sequence++
 	version := c.realtime.version
+	state = c.filterHostState(state)
 	payload := map[string]interface{}{"epoch": version.Epoch, "sequence": version.Sequence, "state": state.mapValue(), "telemetry_mode": 1}
 	if ws != nil {
 		event := "runtime.state"
@@ -171,6 +176,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 		cancel()
 		if err == nil && receipt.Epoch == version.Epoch && receipt.Sequence >= version.Sequence {
 			c.acceptTelemetry(receipt.Telemetry, state)
+			c.applyHostMonitoring(receipt.HostMonitoring)
 			confirmed = true
 			c.realtime.lastFallback = time.Time{}
 			return nil
@@ -193,6 +199,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 		return fmt.Errorf("panel did not confirm the state version")
 	}
 	c.acceptTelemetry(response.Data.Telemetry, state)
+	c.applyHostMonitoring(response.Data.HostMonitoring)
 	confirmed = true
 	return nil
 }
