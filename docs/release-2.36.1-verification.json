@@ -1,0 +1,302 @@
+{
+  "version": "v2.36.1",
+  "source": "70dfd6deb7d52891eaffb5c98eee004364d26840",
+  "release_id": 438797606,
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.36.1",
+  "published_at": "2026-11-09T06:27:20Z",
+  "latest": true,
+  "assets": [
+    {
+      "name": "install.sh",
+      "bytes": 65427,
+      "sha256": "5a2131fee6ff3c83fba37c180e0a71c2180209e2fcc39cb2bdbab43725a9c23d",
+      "public_download_verified": true
+    },
+    {
+      "name": "SHA256SUMS",
+      "bytes": 997,
+      "sha256": "d1efcc3698f67c850de3c67fa04e60542c2d93af2595367528ae931891b0174a",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "bytes": 33108128,
+      "sha256": "e85980c736558f4fe9a813e0cd4a3d1a2dbabce7b575a14d544129010492d9f3",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "bytes": 4887,
+      "sha256": "3dd066f9b725e7eb895715ad4f4e487d812f856e5b8f476e9644b086a97c439c",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "bytes": 30867616,
+      "sha256": "e333e1854b602d8784250450cb900b2746db26e973b6c397f470ad6d02eb5cf0",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "bytes": 4889,
+      "sha256": "4a78ca12f79a3344865fb5c411e8d4a8944475be229d841233cdcf06c5213c90",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "bytes": 78913696,
+      "sha256": "3ed6bc4ae6433bae457673bb3a931fe135f54b81f86d4fb1c05a5cf5d8e26e00",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "bytes": 72876192,
+      "sha256": "98bdc4025db6a71c19cbb1a6075813419791b1fcee586f95237cd06449a29739",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "bytes": 78913696,
+      "sha256": "3ed6bc4ae6433bae457673bb3a931fe135f54b81f86d4fb1c05a5cf5d8e26e00",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "bytes": 18454,
+      "sha256": "fd867b736f3f7430688b37dae79b2d0e475f93a5466ea7f52b7b7e0597905ef5",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "bytes": 72876192,
+      "sha256": "98bdc4025db6a71c19cbb1a6075813419791b1fcee586f95237cd06449a29739",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "bytes": 18456,
+      "sha256": "5e389b796d9d15f6f1e5e2b29c717ddf4dec4a4a01f1d68ed47937635ff8b04b",
+      "public_download_verified": true
+    }
+  ],
+  "verified_at": "2026-11-09T06:35:42.518062+00:00",
+  "build_time": "2026-11-09T06:07:22Z",
+  "go": "1.27.3",
+  "cgo_enabled": false,
+  "vcs_modified": false,
+  "architectures": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "workflows": [
+    {
+      "url": "https://github.com/P0me1oo/YZ-Agent/actions/runs/42571562699",
+      "status": "not_started",
+      "reason": "account_locked_billing",
+      "executed_steps": 0
+    },
+    {
+      "url": "https://github.com/P0me1oo/YZ-Agent/actions/runs/42572507992",
+      "status": "not_started",
+      "reason": "account_locked_billing",
+      "executed_steps": 0
+    }
+  ],
+  "validation": {
+    "go-full": {
+      "counts": {
+        "skip_pkg": 8,
+        "pass_test": 985,
+        "pass_pkg": 39,
+        "skip_test": 6,
+        "fail_test": 1,
+        "fail_pkg": 1
+      },
+      "failed": [
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/systemwg",
+          "TestStartFailureClosesNamespaceAndCanRecover"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/systemwg",
+          null
+        ]
+      ],
+      "skipped": [
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeClientProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeSourceFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+          "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSRuntime"
+        ]
+      ],
+      "race_detected": false
+    },
+    "go-deps": {
+      "counts": {
+        "pass_test": 43,
+        "pass_pkg": 8
+      },
+      "failed": [],
+      "skipped": [],
+      "race_detected": false
+    },
+    "go-mihomo": {
+      "counts": {
+        "pass_test": 2,
+        "pass_pkg": 2
+      },
+      "failed": [],
+      "skipped": [],
+      "race_detected": false
+    },
+    "go-systemwg-isolated": {
+      "counts": {
+        "pass_test": 1,
+        "pass_pkg": 1
+      },
+      "failed": [],
+      "skipped": [],
+      "race_detected": false
+    },
+    "go-systemwg-repeat": {
+      "counts": {
+        "pass_test": 50,
+        "pass_pkg": 1
+      },
+      "failed": [],
+      "skipped": [],
+      "race_detected": false
+    }
+  },
+  "native_firewall": [
+    {
+      "backend": "ufw",
+      "redirect": "nftables",
+      "mode": "backend",
+      "passed": true
+    },
+    {
+      "backend": "ufw",
+      "redirect": "nftables",
+      "mode": "source",
+      "passed": true
+    },
+    {
+      "backend": "ufw",
+      "redirect": "nftables",
+      "mode": "source-node",
+      "passed": true
+    },
+    {
+      "backend": "ufw",
+      "redirect": "iptables",
+      "mode": "backend",
+      "passed": true
+    },
+    {
+      "backend": "ufw",
+      "redirect": "iptables",
+      "mode": "source",
+      "passed": true
+    },
+    {
+      "backend": "ufw",
+      "redirect": "iptables",
+      "mode": "source-node",
+      "passed": true
+    },
+    {
+      "backend": "firewalld",
+      "redirect": "nftables",
+      "mode": "backend",
+      "passed": true
+    },
+    {
+      "backend": "firewalld",
+      "redirect": "nftables",
+      "mode": "source",
+      "passed": true
+    },
+    {
+      "backend": "firewalld",
+      "redirect": "nftables",
+      "mode": "source-node",
+      "passed": true
+    },
+    {
+      "backend": "firewalld",
+      "redirect": "iptables",
+      "mode": "backend",
+      "passed": true
+    },
+    {
+      "backend": "firewalld",
+      "redirect": "iptables",
+      "mode": "source",
+      "passed": true
+    },
+    {
+      "backend": "firewalld",
+      "redirect": "iptables",
+      "mode": "source-node",
+      "passed": true
+    }
+  ],
+  "installer": [
+    {
+      "test": "tests/upgrade_version_test.sh",
+      "exit_code": 0
+    },
+    {
+      "test": "tests/download_mirrors_test.sh",
+      "exit_code": 0
+    },
+    {
+      "test": "tests/install_service_manager_test.sh",
+      "exit_code": 0
+    },
+    {
+      "test": "tests/install_health_test.sh",
+      "exit_code": 0
+    },
+    {
+      "test": "tests/install_kernel_defaults_test.sh",
+      "exit_code": 0
+    },
+    {
+      "test": "tests/install_privacy_test.sh",
+      "exit_code": 0
+    },
+    {
+      "test": "tests/install_paths_test.sh",
+      "exit_code": 0
+    },
+    {
+      "test": "tests/install_name_migration_test.sh",
+      "exit_code": 0
+    }
+  ],
+  "initial_failure_note": "首轮系统 WG 端口占用恢复用例失败；同一提交单项复验通过，全包重复 10 次共 50 项通过。未复现首轮原因，未修改断言或代码。",
+  "deployed": false,
+  "docker_published": false,
+  "rollback": "v2.36.0"
+}
