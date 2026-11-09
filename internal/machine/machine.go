@@ -19,6 +19,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/machinetraffic"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/monitor"
+	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/P0me1oo/YZ-Agent/internal/realityscan"
 	"github.com/P0me1oo/YZ-Agent/internal/service"
@@ -40,6 +41,7 @@ type nodeHandle struct {
 //   - maintains a shared WS connection that demuxes events by node_id
 //   - reports machine-level load via POST /machine/status
 type Orchestrator struct {
+	failures     nlog.Failures
 	agentVersion string
 	bootID       string
 	cfg          *config.Config
@@ -162,10 +164,9 @@ func (o *Orchestrator) controlLoop(ctx context.Context) {
 			return
 		default:
 		}
+		o.failures.Report(o.logger(), "machine control exchange failed", err)
 		if err == nil && command != nil {
-			if err := agentcli.StartRemote(key, *command); err != nil {
-				o.logger().Warn("machine operation could not start")
-			}
+			o.failures.Report(o.logger(), "machine operation could not start", agentcli.StartRemote(key, *command))
 		}
 		if err == nil {
 			scanner.Accept(ctx, scan)

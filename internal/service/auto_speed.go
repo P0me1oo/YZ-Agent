@@ -35,13 +35,15 @@ func (s *Service) updateAutoSpeed(now time.Time) {
 		if path := s.autoSpeedPath(); path != "" {
 			if data, err := privacy.ReadFile(path); err == nil {
 				var saved map[int]autospeed.Penalty
-				if json.Unmarshal(data, &saved) == nil {
+				if err := json.Unmarshal(data, &saved); err == nil {
 					s.autoSpeed.manager.Restore(saved, rules, now)
 				} else {
+					s.failures.Report(s.logger(), "临时限速状态解析失败，保留原文件", err)
 					s.autoSpeed.readFailed = true
 					s.autoSpeed.error = "临时限速状态损坏，已保留原文件"
 				}
 			} else if !os.IsNotExist(err) {
+				s.failures.Report(s.logger(), "临时限速状态读取失败", err)
 				s.autoSpeed.error = "读取临时限速状态失败"
 				s.autoSpeed.readFailed = true
 			}
@@ -61,9 +63,16 @@ func (s *Service) updateAutoSpeed(now time.Time) {
 	}
 	s.autoSpeed.active = active
 	if path := s.autoSpeedPath(); path != "" && !s.autoSpeed.readFailed {
-		_ = os.MkdirAll(filepath.Dir(path), 0700)
-		data, _ := json.Marshal(active)
-		if err := privacy.WriteFile(path, data, 0600); err != nil {
+		err := os.MkdirAll(filepath.Dir(path), 0700)
+		if err == nil {
+			var data []byte
+			data, err = json.Marshal(active)
+			if err == nil {
+				err = privacy.WriteFile(path, data, 0600)
+			}
+		}
+		s.failures.Report(s.logger(), "临时限速状态保存失败", err)
+		if err != nil {
 			s.autoSpeed.error = "保存临时限速状态失败"
 		} else {
 			s.autoSpeed.error = ""

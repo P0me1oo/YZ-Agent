@@ -38,10 +38,12 @@ var (
 	defaultNode string
 	nodeLoggers = make(map[string]*NodeLog)
 
-	logMu     sync.RWMutex
-	logWriter io.Writer = os.Stdout
-	logMin              = slog.LevelInfo
-	logColor            = true
+	logMu           sync.RWMutex
+	logWriter       io.Writer = os.Stdout
+	logMin                    = slog.LevelInfo
+	logColor                  = true
+	writerFailureMu sync.Mutex
+	writerFailureAt time.Time
 )
 
 // Init configures process-wide log output (called from config.InitLogger).
@@ -239,7 +241,8 @@ func logWithColor(level slog.Level, prefix, msg string, args ...any) {
 	}
 
 	if !color {
-		fmt.Fprintf(out, "%s %s [%s] %s\n", now, strings.TrimSpace(levelStr), prefix, fullMsg)
+		_, err := fmt.Fprintf(out, "%s %s [%s] %s\n", now, strings.TrimSpace(levelStr), prefix, fullMsg)
+		reportWriterFailure(err)
 		return
 	}
 
@@ -262,12 +265,29 @@ func logWithColor(level slog.Level, prefix, msg string, args ...any) {
 		prefixColor = ColorBlue
 	}
 
-	fmt.Fprintf(out, "%s%s%s %s%s%s %s[%s]%s %s\n",
+	_, err := fmt.Fprintf(out, "%s%s%s %s%s%s %s[%s]%s %s\n",
 		ColorGray, now, ColorReset,
 		levelColor, levelStr, ColorReset,
 		prefixColor, prefix, ColorReset,
 		fullMsg,
 	)
+	reportWriterFailure(err)
+}
+
+// Called with logMu held: privacy cannot change between the failed write and
+// this independent diagnostic. Do not include the record or failing file path.
+func reportWriterFailure(err error) {
+	writerFailureMu.Lock()
+	defer writerFailureMu.Unlock()
+	if err == nil {
+		writerFailureAt = time.Time{}
+		return
+	}
+	if time.Since(writerFailureAt) < time.Minute {
+		return
+	}
+	writerFailureAt = time.Now()
+	fmt.Fprintf(os.Stderr, "[logging] log output failed error_type=%T\n", err)
 }
 
 // ─── Startup Summary ────────────────────────────────────────────────────────

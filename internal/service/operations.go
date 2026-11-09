@@ -64,6 +64,7 @@ func (s *Service) updateOperations(ctx context.Context) {
 	if s.operations.run == "" {
 		var token [16]byte
 		if _, err := rand.Read(token[:]); err != nil {
+			s.failures.Report(s.logger(), "运行检查标识生成失败", err)
 			return
 		}
 		s.operations.run = fmt.Sprintf("%x", token)
@@ -75,7 +76,7 @@ func (s *Service) updateOperations(ctx context.Context) {
 			data, err := privacy.ReadFile(path)
 			if err == nil {
 				var previous renewResult
-				if json.Unmarshal(data, &previous) == nil {
+				if err := json.Unmarshal(data, &previous); err == nil {
 					if previous.Status == "running" {
 						previous.Status = "failed"
 						previous.Error = "上次续期被中断，请重新提交"
@@ -83,9 +84,11 @@ func (s *Service) updateOperations(ctx context.Context) {
 					s.operations.renewID = previous.ID
 					s.operations.renewDone.Store(&previous)
 				} else {
+					s.failures.Report(s.logger(), "证书续期记录解析失败，保留原文件", err)
 					s.operations.requestLoadFailed = true
 				}
 			} else if !os.IsNotExist(err) {
+				s.failures.Report(s.logger(), "证书续期记录读取失败，保留原文件", err)
 				s.operations.requestLoadFailed = true
 			}
 		}
@@ -94,6 +97,7 @@ func (s *Service) updateOperations(ctx context.Context) {
 		s.operations.renewID = request
 		initial := &renewResult{ID: request, Status: "running"}
 		if err := s.saveRenewal(initial); err != nil {
+			s.failures.Report(s.logger(), "证书续期请求保存失败", err)
 			initial.Status = "failed"
 			initial.Error = "无法保存续期请求，未执行续期"
 			s.operations.renewDone.Store(initial)
@@ -107,10 +111,11 @@ func (s *Service) updateOperations(ctx context.Context) {
 			defer cancel()
 			result := &renewResult{ID: request, Status: "succeeded"}
 			if err := s.cert.Renew(job); err != nil {
+				s.failures.Report(s.logger(), "证书续期失败", err)
 				result.Status = "failed"
 				result.Error = "证书续期失败，请检查验证设置与节点日志"
 			}
-			_ = s.saveRenewal(result)
+			s.failures.Report(s.logger(), "证书续期结果保存失败", s.saveRenewal(result))
 			s.operations.renewDone.Store(result)
 		}()
 	}

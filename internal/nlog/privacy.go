@@ -58,7 +58,7 @@ func LogsDisabled() bool { return logsDisabled.Load() }
 
 // sing-box 的原始输出统一经过此出口，运行中停用也能立即阻止输出。
 func WriteRuntime(message string) {
-	WithRuntimeOutput(func() { fmt.Fprintln(logWriter, message) })
+	WithRuntimeOutput(func() { _, err := fmt.Fprintln(logWriter, message); reportWriterFailure(err) })
 }
 
 func WithRuntimeOutput(write func()) {

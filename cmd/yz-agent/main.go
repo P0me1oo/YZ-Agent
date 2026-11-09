@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	version       = "v2.36.0"
+	version       = "v2.36.1"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -75,6 +75,7 @@ func main() {
 	privacyCtx, stopPrivacy := context.WithTimeout(context.Background(), 45*time.Second)
 	if err := config.PreparePrivacy(privacyCtx, *configPath, rootCfg); err != nil {
 		stopPrivacy()
+		startupFailure(rootCfg, "failed to prepare file protection", err)
 		os.Exit(1)
 	}
 	stopPrivacy()
@@ -125,14 +126,14 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 	var healthSrv *http.Server
 	var healthPort int
 	health := newHealthTracker()
-	startHealth := func(port int) {
+	startHealth := func(port int, root *config.RootConfig) {
 		healthPort = port
 		if port <= 0 {
 			return
 		}
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 		if err != nil {
-			nlog.Core().Error("failed to start health check listener", "port", port, "error", err)
+			startupFailure(root, "failed to start health check listener", err)
 			os.Exit(1)
 		}
 		mux := http.NewServeMux()
@@ -149,10 +150,10 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 
 	initialInstances, err := initialRoot.NormalizeInstances()
 	if err != nil {
-		nlog.Core().Error("failed to normalize initial config", "error", err)
+		startupFailure(initialRoot, "failed to normalize initial config", err)
 		os.Exit(1)
 	}
-	startHealth(initialInstances[0].HealthPort)
+	startHealth(initialInstances[0].HealthPort, initialRoot)
 	defer func() {
 		if healthSrv != nil {
 			healthSrv.Close()
@@ -201,6 +202,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			stop()
 			if err != nil {
 				cancel()
+				startupFailure(root, "failed to prepare file protection during reload", err)
 				return
 			}
 		}
@@ -208,17 +210,17 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 
 		instances, err := root.NormalizeInstances()
 		if err != nil {
-			nlog.Core().Error("failed to normalize config", "error", err)
+			startupFailure(root, "failed to normalize config", err)
 			os.Exit(1)
 		}
 		if err := config.ValidateStartupLayout(instances); err != nil {
-			nlog.Core().Error("startup layout validation failed", "error", err)
+			startupFailure(root, "startup layout validation failed", err)
 			os.Exit(1)
 		}
 		timeManager := timesync.New(instances[0].TimeSync)
 		firewallManager, err := firewall.New(instances[0].Firewall, configPath)
 		if err != nil {
-			nlog.Core().Error("防火墙管理器初始化失败", "error", err)
+			startupFailure(root, "防火墙管理器初始化失败", err)
 			os.Exit(1)
 		}
 		var firewallInstances []string
@@ -251,10 +253,16 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 				healthSrv.Close()
 				healthSrv = nil
 			}
-			startHealth(instances[0].HealthPort)
+			startHealth(instances[0].HealthPort, root)
 		}
 
 		instanceHealthIDs, allHealthIDs := healthComponentIDs(instances)
+		for _, instance := range instances {
+			if instance.PrivacyError != nil {
+				startupFailure(root, "instance file protection initialization failed", instance.PrivacyError)
+				break
+			}
+		}
 		// 多个面板或独立身份共享进程时，全局日志不能可靠归属，保留本地输出。
 		nlog.SetGlobalScope("")
 		if len(instances) == 1 && instances[0].IsMachineMode() {

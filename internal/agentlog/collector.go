@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
@@ -21,12 +22,14 @@ import (
 const capacity = 4096
 
 type collector struct {
-	mu      sync.Mutex
-	queue   []nlog.Event
-	pending *panel.AgentLogBatch
-	path    string
-	enabled bool
-	dropped uint64
+	mu       sync.Mutex
+	queue    []nlog.Event
+	pending  *panel.AgentLogBatch
+	path     string
+	enabled  bool
+	dropped  uint64
+	failures nlog.Failures
+	logger   *nlog.NodeLog
 }
 
 func (c *collector) add(event nlog.Event) {
@@ -164,16 +167,29 @@ func (c *collector) flush(ctx context.Context, client *panel.Client) {
 		return
 	}
 	batch := c.next()
-	if batch == nil || c.save() != nil {
+	if batch == nil {
 		return
 	}
-	if client.ReportAgentLog(ctx, batch) != nil {
+	if err := c.save(); err != nil {
+		c.failures.Local(c.logger, "Agent 日志缓存保存失败", err)
+		return
+	}
+	c.failures.Local(c.logger, "Agent 日志缓存保存失败", nil)
+	err := client.ReportAgentLog(ctx, batch)
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		c.failures.Local(c.logger, "Agent 日志上报未确认", err)
+	}
+	if err != nil {
 		return
 	}
 	c.mu.Lock()
 	c.pending = nil
 	c.mu.Unlock()
-	_ = c.save()
+	c.saveWithDiagnostic()
+}
+
+func (c *collector) saveWithDiagnostic() {
+	c.failures.Local(c.logger, "Agent 日志缓存保存失败", c.save())
 }
 func Start(ctx context.Context, cfg *config.Config) func() {
 	if cfg.IsStandalone() {
@@ -186,15 +202,19 @@ func Start(ctx context.Context, cfg *config.Config) func() {
 		panelCfg.NodeID = 0
 	}
 	client := panel.NewClient(panelCfg)
-	c := &collector{}
+	prefix := fmt.Sprintf("agent-log:node:%d", panelCfg.NodeID)
+	if panelCfg.MachineID > 0 {
+		prefix = fmt.Sprintf("agent-log:machine:%d", panelCfg.MachineID)
+	}
+	c := &collector{logger: nlog.Scoped(cfg.LogScope(), panelCfg.NodeID, prefix)}
 	if cfg.Kernel.ConfigDir != "" {
 		c.path = filepath.Join(cfg.Kernel.ConfigDir, fmt.Sprintf("pending-agent-%x.json", sha256.Sum256([]byte(cfg.LogScope()))))
 	}
-	if err := c.restore(); err != nil {
-		nlog.Core().Warn("Agent 日志缓存恢复失败，保留原文件")
-		return func() {}
+	restoreErr := c.restore()
+	unsubscribe := func() {}
+	if restoreErr == nil {
+		unsubscribe = nlog.Subscribe(cfg.LogScope(), c.add)
 	}
-	unsubscribe := nlog.Subscribe(cfg.LogScope(), c.add)
 	run, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -206,17 +226,25 @@ func Start(ctx context.Context, cfg *config.Config) func() {
 			if time.Since(lastHandshake) >= time.Minute {
 				handshake, stop := context.WithTimeout(run, 10*time.Second)
 				_, err := client.HandshakeContext(handshake)
+				if run.Err() == nil {
+					c.failures.Local(c.logger, "Agent 日志握手失败", err)
+				}
 				stop()
 				c.enabled = err == nil && client.AgentLogEnabled()
 				lastHandshake = time.Now()
 			}
-			if c.enabled {
+			if restoreErr != nil {
+				// 恢复失败通常早于首次策略确认；握手后才能输出且不能覆盖原文件。
+				c.failures.Local(c.logger, "Agent 日志缓存恢复失败，保留原文件", restoreErr)
+			} else if c.enabled {
 				flush, stop := context.WithTimeout(run, 10*time.Second)
 				c.flush(flush, client)
 				stop()
 			}
 			// 即使面板暂时不可用也保存队列，不能等网络恢复后才落盘。
-			_ = c.save()
+			if restoreErr == nil {
+				c.saveWithDiagnostic()
+			}
 			select {
 			case <-run.Done():
 				return
@@ -228,11 +256,14 @@ func Start(ctx context.Context, cfg *config.Config) func() {
 		cancel()
 		<-done
 		unsubscribe()
+		if restoreErr != nil {
+			return
+		}
 		if c.enabled {
 			flush, stop := context.WithTimeout(context.Background(), 3*time.Second)
 			c.flush(flush, client)
 			stop()
 		}
-		_ = c.save()
+		c.saveWithDiagnostic()
 	}
 }

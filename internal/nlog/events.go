@@ -35,6 +35,8 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)-----BEGIN [^-]*(?:PRIVATE KEY|CERTIFICATE)-----[\s\S]*`),
 	regexp.MustCompile(`(?i)-----BEGIN [^-]*(?:PRIVATE KEY|CERTIFICATE)-----[\s\S]*?(?:-----END [^-]+-----|$)`),
 	regexp.MustCompile(`(?i)(?:https?|wss?|ss|vmess|vless|trojan|hysteria2?|tuic)://[^\s"'<>]+`),
+	regexp.MustCompile(`(?i)(?:proxy-)?authorization["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n}]+)`),
+	regexp.MustCompile(`(?i)\b(?:Basic|Digest)\s+[^\r\n}]+`),
 	regexp.MustCompile(`(?i)\bBearer\s+[^\s,"'}]+`),
 	regexp.MustCompile(`(?i)\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b`),
 	regexp.MustCompile(`\b[A-Za-z0-9+/_=-]{32,}`),

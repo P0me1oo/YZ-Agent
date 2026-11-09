@@ -39,6 +39,7 @@ import (
 )
 
 type Service struct {
+	failures            nlog.Failures
 	autoSpeed           autoSpeedState
 	operations          operationsState
 	accessLog           *accesslog.Recorder
@@ -1763,10 +1764,11 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 	}
 	relay, err := reader.GetRelayTraffic(ctx)
 	if err != nil {
-		s.logger().Debug("get relay traffic failed", "error", err)
+		s.failures.Report(s.logger(), "get relay traffic failed", err)
 		return
 	}
 	s.tracker.ProcessRelay(relay)
+	s.failures.Report(s.logger(), "get relay traffic failed", nil)
 
 	userReader, ok := s.kernel.(kernel.RelayUserTrafficReader)
 	if !ok {
@@ -1774,10 +1776,11 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 	}
 	relayUser, err := userReader.GetRelayUserTraffic(ctx)
 	if err != nil {
-		s.logger().Debug("get per-user relay traffic failed", "error", err)
+		s.failures.Report(s.logger(), "get per-user relay traffic failed", err)
 		return
 	}
 	s.tracker.ProcessRelayUser(relayUser)
+	s.failures.Report(s.logger(), "get per-user relay traffic failed", nil)
 }
 
 // trackRelayAlive 采样中转入口按实际出网节点拆分的在线来源；不支持该能力的内核跳过。
@@ -1788,10 +1791,11 @@ func (s *Service) trackRelayAlive(ctx context.Context) {
 	}
 	alive, err := reader.GetRelayUserAlive(ctx)
 	if err != nil {
-		s.logger().Debug("get per-node relay alive failed", "error", err)
+		s.failures.Report(s.logger(), "get per-node relay alive failed", err)
 		return
 	}
 	s.tracker.ProcessRelayAlive(alive)
+	s.failures.Report(s.logger(), "get per-node relay alive failed", nil)
 }
 
 // trackConnectionCounts 采集内核真实连接数；内核不支持时不使用在线来源数代替。
@@ -1800,8 +1804,8 @@ func (s *Service) trackConnectionCounts(ctx context.Context) {
 	if reader, ok := s.kernel.(kernel.IPConnectionSnapshotReader); ok {
 		var err error
 		ipCounts, err = reader.GetIPConnectionSnapshot(ctx)
+		s.failures.Report(s.logger(), "get IP connection snapshot failed", err)
 		if err != nil {
-			s.logger().Debug("get IP connection snapshot failed", "error", err)
 			ipCounts = nil
 		}
 	}
@@ -1811,8 +1815,8 @@ func (s *Service) trackConnectionCounts(ctx context.Context) {
 		return
 	}
 	users, relay, err := reader.GetConnectionSnapshot(ctx)
+	s.failures.Report(s.logger(), "get connection snapshot failed", err)
 	if err != nil {
-		s.logger().Debug("get connection snapshot failed", "error", err)
 		return
 	}
 	s.tracker.ProcessConnectionCounts(users, relay)
