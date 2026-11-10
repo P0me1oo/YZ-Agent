@@ -458,11 +458,12 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	if covered {
 		return nil
 	}
-	snapshot := m.Snapshot()
-	wire := snapshot
 	m.mu.Lock()
 	admissionRevision, admissionsInFlight := m.admissionRevision, m.admissionsInFlight
 	m.mu.Unlock()
+	// 先记录准入代数再采样；采样间隙完成的准入也必须使本轮确认失效。
+	snapshot := m.Snapshot()
+	wire := snapshot
 	if capability, ok := m.remote.(RenewalRemote); ok && capability.DeviceRenewalSupported() && m.baseSequence > 0 &&
 		admissionsInFlight == 0 && admissionRevision == m.confirmedAdmission && sameSnapshot(m.confirmed, snapshot) {
 		wire = Snapshot{Run: snapshot.Run, Sequence: snapshot.Sequence, Unchanged: true, BaseSequence: m.baseSequence}
