@@ -1,0 +1,310 @@
+{
+  "version": "v2.36.2",
+  "source": "18ec8feeddec48f408cb81aec34edbdbafa31be1",
+  "release_id": 439807569,
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.36.2",
+  "published_at": "2026-11-10T00:43:39Z",
+  "latest": true,
+  "verified_at": "2026-11-10T00:44:07.807678+00:00",
+  "build_time": "2026-11-10T00:30:42Z",
+  "go": "1.27.3",
+  "vcs_modified": false,
+  "architectures": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "assets": [
+    {
+      "name": "install.sh",
+      "bytes": 65427,
+      "sha256": "5a2131fee6ff3c83fba37c180e0a71c2180209e2fcc39cb2bdbab43725a9c23d",
+      "public_download_verified": true
+    },
+    {
+      "name": "SHA256SUMS",
+      "bytes": 997,
+      "sha256": "47a185d477b3a20d285c37f8b3600aede2c6bc1642dd678caa289a8cc2f0c005",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "bytes": 33108128,
+      "sha256": "800c5858603571a1c8c8eb5b64f9cf933dd8405a4fb4a7a9b4433902813bb41d",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "bytes": 4895,
+      "sha256": "1d79fbcec1320c5d8717e5656829ce31cde05ab616e7568fcad1a80573975898",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "bytes": 30867616,
+      "sha256": "05b9be8670469923a70e1498700cc8936e7ec06ebc59f80d56675fa438a12caa",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "bytes": 4897,
+      "sha256": "33808675c54f5a9d416044b5c33cfd71fe8ae7ba643a2d2228b35042aea1b659",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "bytes": 78913696,
+      "sha256": "c21b5fe3bfb8f232006ca7f60b820b087be05676ddd216f1754746b5bc761ecb",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "bytes": 72876192,
+      "sha256": "6560c83837d69c9c605e50682400e2ce4e87de23e607303c6122f9c2e2585dd3",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "bytes": 78913696,
+      "sha256": "c21b5fe3bfb8f232006ca7f60b820b087be05676ddd216f1754746b5bc761ecb",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "bytes": 18462,
+      "sha256": "092d35770c8536cb6ace91ccb181224d6396ea6c9fa8f2aa5ea21dd67bd24b7a",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "bytes": 72876192,
+      "sha256": "6560c83837d69c9c605e50682400e2ce4e87de23e607303c6122f9c2e2585dd3",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "bytes": 18464,
+      "sha256": "22dfe411a479fb7fdedf11ef84c9b30965e3093afb8b70cfaca6ad32f0eefbc6",
+      "public_download_verified": true
+    }
+  ],
+  "validation": {
+    "go-full-final-summary": {
+      "source": "18ec8feeddec48f408cb81aec34edbdbafa31be1",
+      "exit_code": 0,
+      "seconds": 856.46,
+      "counts": {
+        "skip_pkg": 8,
+        "pass_test": 989,
+        "pass_pkg": 40,
+        "skip_test": 6
+      },
+      "failed": [],
+      "skipped": [
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeClientProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeSourceFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+          "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSRuntime"
+        ]
+      ]
+    },
+    "dependency-final-summary": {
+      "source": "18ec8feeddec48f408cb81aec34edbdbafa31be1",
+      "counts": {
+        "pass_test": 43,
+        "pass_pkg": 8
+      },
+      "failed": [],
+      "skipped": []
+    },
+    "mihomo-summary": {
+      "source": "18ec8feeddec48f408cb81aec34edbdbafa31be1",
+      "counts": {
+        "pass_test": 2,
+        "pass_pkg": 2
+      },
+      "failed": [],
+      "skipped": []
+    },
+    "installers-final-summary": {
+      "source": "18ec8feeddec48f408cb81aec34edbdbafa31be1",
+      "tests": [
+        {
+          "name": "upgrade_version",
+          "exit_code": 0
+        },
+        {
+          "name": "download_mirrors",
+          "exit_code": 0
+        },
+        {
+          "name": "install_service_manager",
+          "exit_code": 0
+        },
+        {
+          "name": "install_health",
+          "exit_code": 0
+        },
+        {
+          "name": "install_kernel_defaults",
+          "exit_code": 0
+        },
+        {
+          "name": "install_privacy",
+          "exit_code": 0
+        },
+        {
+          "name": "install_paths",
+          "exit_code": 0
+        },
+        {
+          "name": "install_name_migration",
+          "exit_code": 0
+        }
+      ],
+      "syntax": true,
+      "path_test_isolated_from_host_services": true
+    },
+    "firewall-summary": [
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 58.89
+      },
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 31.19
+      },
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 23.46
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 58.65
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 32.59
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 24.97
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 29.73
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 24.52
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 21.61
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 28.58
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 26.37
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 21.06
+      }
+    ],
+    "workflows": [
+      {
+        "run_id": 42728449343,
+        "url": "https://github.com/P0me1oo/YZ-Agent/actions/runs/42728449343",
+        "source": "18ec8feeddec48f408cb81aec34edbdbafa31be1",
+        "status": "completed",
+        "conclusion": "failure",
+        "executed_steps": 0,
+        "reasons": [
+          "The job was not started because your account is locked due to a billing issue."
+        ]
+      },
+      {
+        "run_id": 42729238765,
+        "url": "https://github.com/P0me1oo/YZ-Agent/actions/runs/42729238765",
+        "source": "18ec8feeddec48f408cb81aec34edbdbafa31be1",
+        "status": "completed",
+        "conclusion": "failure",
+        "executed_steps": 0,
+        "reasons": [
+          "The job was not started because your account is locked due to a billing issue."
+        ]
+      }
+    ]
+  },
+  "nodes_updated": false,
+  "docker_published": false,
+  "limitations": [
+    "GitHub Actions did not start because the account is locked due to a billing issue.",
+    "One existing random loopback port range test skipped under its environment condition.",
+    "Earlier system WG port occupation test failed intermittently; final fixed-source isolated and full suites passed without modifying that module."
+  ],
+  "installer_initial_failure": {
+    "test": "install_paths",
+    "cause": "Host yz-agent service discovered by test using default service paths",
+    "resolution": "Unmodified test passed with systemd and init directories hidden in isolated mount namespace",
+    "production_services_modified": false
+  }
+}
