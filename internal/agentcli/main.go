@@ -1788,7 +1788,10 @@ func runConfigInitWithInput(args []string, input io.Reader) error {
 	root := &config.RootConfig{}
 	hasExisting := false
 	if configIn != "" {
-		if loaded, loadErr := loadWritableRootConfig(configIn); loadErr == nil {
+		probeCtx, stopProbe := context.WithTimeout(context.Background(), 10*time.Second)
+		loaded, loadErr := config.LoadWritableBindingRoot(probeCtx, configIn)
+		stopProbe()
+		if loadErr == nil {
 			root = loaded
 			hasExisting = len(root.Instances) > 0 || root.Config.Panel.URL != "" || root.Config.Kernel.Type != ""
 		} else if !errors.Is(loadErr, os.ErrNotExist) {
@@ -1881,6 +1884,7 @@ func runConfigInitWithInput(args []string, input io.Reader) error {
 		instances = append(instances, inst)
 	}
 	root.Instances = instances
+	root.BindingIdle = false
 	root.ExportLegacy = legacyOutput
 
 	// Write config.
@@ -1897,6 +1901,9 @@ func runConfigInitWithInput(args []string, input io.Reader) error {
 	// Write credentials.
 	if token != "" && credentialsOut != "" {
 		if err := mergeCredentials(credentialsIn, credentialsOut, envKey, token); err != nil {
+			return err
+		}
+		if err := root.PruneDeletedCredentials(credentialsOut, configOut); err != nil {
 			return err
 		}
 	}

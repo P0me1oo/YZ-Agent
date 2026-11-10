@@ -364,13 +364,15 @@ type LogConfig struct {
 }
 
 type RootConfig struct {
-	ExportLegacy bool `yaml:"-"`
-	PrivacyReady bool `yaml:"-"`
-	sourceHash   [32]byte
-	sourcePath   string
-	wrapped      bool
-	Instances    []Config `yaml:"instances,omitempty"`
-	Config       `yaml:",inline"`
+	BindingIdle     bool `yaml:"binding_idle,omitempty"`
+	ExportLegacy    bool `yaml:"-"`
+	PrivacyReady    bool `yaml:"-"`
+	sourceHash      [32]byte
+	sourcePath      string
+	deletedBindings []deletedBinding
+	wrapped         bool
+	Instances       []Config `yaml:"instances,omitempty"`
+	Config          `yaml:",inline"`
 }
 
 func LoadRoot(path string) (*RootConfig, error) {
@@ -396,6 +398,11 @@ func LoadRoot(path string) (*RootConfig, error) {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
+	if rc.IsBindingIdle() {
+		rc.Config.setDefaultsFrom(configBaseDir(path))
+		rc.PrivacyReady = true
+		return rc, nil
+	}
 	if err := rc.openProtected(path, false); err != nil {
 		return nil, err
 	}
@@ -542,6 +549,9 @@ func (rc *RootConfig) validateRoot() error {
 }
 
 func (rc *RootConfig) NormalizeInstances() ([]*Config, error) {
+	if rc.IsBindingIdle() {
+		return nil, nil
+	}
 	if len(rc.Instances) == 0 {
 		id, err := rc.Config.AutoInstanceID()
 		if err != nil {
@@ -563,6 +573,12 @@ func (rc *RootConfig) NormalizeInstances() ([]*Config, error) {
 		out = append(out, &cfg)
 	}
 	return out, nil
+}
+
+// Only an explicit empty binding document enters idle mode. Broken legacy
+// configs still fail validation instead of silently becoming an idle service.
+func (rc *RootConfig) IsBindingIdle() bool {
+	return rc.BindingIdle && len(rc.Instances) == 0 && rc.Panel.URL == "" && rc.Machine == nil && rc.Standalone == nil && len(rc.Nodes) == 0 && rc.Protected == ""
 }
 
 // Load reads configuration from a YAML file, then applies environment variable

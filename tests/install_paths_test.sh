@@ -45,6 +45,9 @@ DEFAULT_BIN_DIR="$CASE_ROOT/original"
 BIN_DIR="$CASE_ROOT/target"
 CLI_SYMLINK_PATH="$CASE_ROOT/entry/xbctl"
 SERVICE_PATH="$CASE_ROOT/xboard-node"
+# 服务发现也限定在夹具目录，避免宿主机已有 Agent 改变测试的旧服务身份。
+SYSTEMD_SERVICE_PATH="$CASE_ROOT/yz-agent.service"
+OPENRC_SERVICE_PATH="$CASE_ROOT/yz-agent"
 SERVICE_NAME=xboard-node
 APP_NAME=xboard-node
 INSTALLER_COPY_PATH="$INSTALL_ROOT/install.sh"

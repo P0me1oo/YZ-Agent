@@ -1,0 +1,103 @@
+{
+  "date": "2026-11-10",
+  "status": "local-development-only",
+  "versions": {
+    "agent": "v2.37.0",
+    "panel": "2.14.0"
+  },
+  "source": {
+    "agent": {
+      "base_commit": "9f59ffd687b7bf0f8fdbd647370fb9372e41a26f",
+      "state": "uncommitted",
+      "sha256": {
+        "cmd/yz-agent/main.go": "1833b9744145ad5f8d4cba4f5fdf6c79470a0029a1768b77a52507ed7070e19c",
+        "cmd/yz-agent/health.go": "34b9c8a4f2faa4db5fb57bb8c711abaabb66f7529a1e21c9710806d60e5b4185",
+        "cmd/yz-agent/binding_deletion.go": "f900c26fa8aa8c8b0165658716b98d81efe0b17b04854f7aa801b78a83981192",
+        "cmd/yz-agent/binding_deletion_test.go": "4a3e217ce29173665ee0375dba02253f2a8bd637592b8d21801e37408f9cab3b",
+        "cmd/xbctl/main.go": "412fc9c7bb793b3bbf9c415697125a4169864049359fd0daa15d7e778a2580b7",
+        "internal/binding/deletion.go": "edf55778999926d389d90b0832dfd0c25d7f4de5d5cc42b98abe8cec3007df63",
+        "internal/binding/deletion_test.go": "ddccd36b553df3d595e8d9b417bf9c400ec34f29eddd95facfe2efe16ed92d47",
+        "internal/config/binding_deletion.go": "1e647d95b88cdb9ef69c12bc662417fcaa45ea708fa23ad43b5351ed93c135bf",
+        "internal/config/binding_deletion_test.go": "73d08d1ddc617e12d98e5e2c7a9cedd6f0272c57cf59d54bad53642c1bf962cf",
+        "internal/config/config.go": "6cc1d4af2b54c1c0790f9a640a71e814e15264effef273d7a4094f7c6f8e0e44",
+        "internal/config/privacy.go": "80ae963aacb70a50fd4600164fd42d5020f2ed97b4eddf20abe6d1e0b701694d",
+        "internal/agentcli/main.go": "92a2c022aea7de89704511f0ad4b28211a0ce6503da95484ad756668c3cad98b",
+        "internal/agentcli/binding_deletion_test.go": "1f97f7eb86960ba56ba1df1e636a761473330d9d93965533471c7fb5d1c63557",
+        "tests/install_paths_test.sh": "f48e245ed675dd97c589cbbc2c26361f1cb3e726cba5e8fdf194737e8078e9ff",
+        "Makefile": "007c843f6f71c7476cda6f28bd276dc88c7823ec4d652be4a89c7c44657b01d7"
+      }
+    },
+    "panel": {
+      "base_commit": "9a00af20ad6f5c830d94ed05918204635802d9c2",
+      "state": "uncommitted",
+      "sha256": {
+        "app/Services/MachineBindingService.php": "b15c8493b1a0a21b630fb1ba02715381849fb78129052a13d3f0c9fb5abf4bbc",
+        "app/Http/Controllers/V2/Admin/Server/MachineController.php": "96d8e96a889d8f721bd33635bc57756a4adfdfd0c88c60cefb4d1c792a9e05f3",
+        "app/Http/Controllers/V2/Server/MachineController.php": "d430379059fd788c8c7119df1f821127fea1361dca2eb233b52271f32d545510",
+        "app/Http/Routes/V2/ServerRoute.php": "423d87b912b42dfc8eccf99e6944b722b7050af0fdb6d760230b68f44849cff1",
+        "database/migrations/2026_11_10_000001_create_machine_binding_deletions.php": "769412a82b39f4c3b24807116186758f07298b08d36a575a001399855e5b0498",
+        "tests/Feature/Server/MachineBindingDeletionTest.php": "407f9f84d4cef3019af157554c104fdd208f8e49aa4820160d375b4a12ddc88b",
+        "config/app.php": "be91be33aec57b56e387c28dd820aa10daff999caf19cd70ee5d84c505206618"
+      }
+    }
+  },
+  "validation": {
+    "go": {
+      "version": "1.27.3",
+      "platform": "linux/amd64",
+      "race": true,
+      "tags": "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api",
+      "packages": [
+        "internal/binding",
+        "internal/config",
+        "internal/privacy",
+        "internal/panel",
+        "internal/agentcli",
+        "internal/machine",
+        "internal/controlplane",
+        "internal/service",
+        "cmd/yz-agent"
+      ],
+      "result": "passed",
+      "final_config_guard_subset": "passed"
+    },
+    "php": {
+      "version": "8.4.27",
+      "sqlite": {
+        "tests": 51,
+        "assertions": 572,
+        "result": "passed"
+      },
+      "mariadb": {
+        "version": "11.8.6",
+        "only_full_group_by": true,
+        "tests": 51,
+        "assertions": 572,
+        "result": "passed"
+      }
+    },
+    "installer": {
+      "health": "passed",
+      "privacy": "passed",
+      "kernel_defaults": "passed",
+      "directory_scenarios": 20,
+      "name_migration_and_recovery_scenarios": 72,
+      "result": "passed"
+    },
+    "build": {
+      "platform": "linux/amd64",
+      "CGO_ENABLED": "0",
+      "vcs_modified": true,
+      "sha256": "048b73a6689a3256979c3c0ab0ca894afbe7fccefbf24464ff6ef3f253f36e6a",
+      "result": "passed"
+    }
+  },
+  "limits": [
+    "No full release regression",
+    "Production MariaDB 11.4 not tested",
+    "No commit, push, release, image publication or production deployment",
+    "Pre-upgrade deletion without retained proof requires manual unbinding",
+    "Legacy whole-file encrypted recovery envelopes are retained",
+    "Runtime cleanup uses existing process-wide configuration reload"
+  ]
+}

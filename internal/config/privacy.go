@@ -177,6 +177,10 @@ func LoadWritableRoot(path string) (*RootConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	return loadWritableRootData(path, data)
+}
+
+func loadWritableRootData(path string, data []byte) (*RootConfig, error) {
 	var root RootConfig
 	if err := yaml.Unmarshal(data, &root); err != nil {
 		return nil, errors.New("配置格式无效")
@@ -508,6 +512,10 @@ func pathForBootstrap(b privacy.Bootstrap) string {
 }
 
 func PreparePrivacy(ctx context.Context, path string, root *RootConfig) error {
+	if root.IsBindingIdle() {
+		root.PrivacyReady = true
+		return nil
+	}
 	unlock, err := privacy.ConfigLock(ctx, path)
 	if err != nil {
 		return err

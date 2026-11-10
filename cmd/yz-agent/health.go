@@ -13,6 +13,7 @@ type healthTracker struct {
 	mu         sync.RWMutex
 	components map[string]service.RuntimeStatus
 	clock      *timesync.Manager
+	idle       bool
 }
 
 type healthSnapshot struct {
@@ -33,9 +34,17 @@ func newHealthTracker() *healthTracker {
 func (h *healthTracker) reset(componentIDs []string) {
 	h.mu.Lock()
 	h.components = make(map[string]service.RuntimeStatus, len(componentIDs))
+	h.idle = false
 	for _, id := range componentIDs {
 		h.components[id] = service.RuntimeStarting
 	}
+	h.mu.Unlock()
+}
+
+func (h *healthTracker) waitForBinding() {
+	h.mu.Lock()
+	h.components = make(map[string]service.RuntimeStatus)
+	h.idle = true
 	h.mu.Unlock()
 }
 
@@ -73,6 +82,8 @@ func (h *healthTracker) snapshot() healthSnapshot {
 	}
 	snapshot.componentsReady = snapshot.Total > 0 && snapshot.Running == snapshot.Total
 	switch {
+	case h.idle:
+		snapshot.Status = "unbound"
 	case snapshot.Failed > 0:
 		snapshot.Status = "degraded"
 	case !snapshot.componentsReady:

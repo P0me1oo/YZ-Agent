@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	version       = "v2.36.2"
+	version       = "v2.37.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -67,6 +67,9 @@ func main() {
 		os.Exit(0)
 	}
 
+	pruneCtx, stopPrune := context.WithTimeout(context.Background(), 10*time.Second)
+	_, pruneErr := config.PruneDeletedMachines(pruneCtx, *configPath)
+	stopPrune()
 	rootCfg, err := config.LoadRoot(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
@@ -86,12 +89,16 @@ func main() {
 		os.Exit(1)
 	}
 	configureLogPolicies(instances)
-	config.InitLogger(instances[0].Log)
+	profile := runtimeProfile(rootCfg, instances)
+	config.InitLogger(profile.Log)
+	if pruneErr != nil {
+		nlog.Core().Warn("绑定清理未完成，稍后重试", "error", pruneErr)
+	}
 	// 输出写入普通文件时（OpenRC 日志或配置指定的日志文件）按大小轮转，避免占满磁盘。
-	rotator := logrotate.Start(context.Background(), logRotationPaths(instances[0].Log.Output)...)
+	rotator := logrotate.Start(context.Background(), logRotationPaths(profile.Log.Output)...)
 
 	// Apply runtime memory tuning before anything else allocates.
-	applyRuntimeConfig(instances[0].Runtime)
+	applyRuntimeConfig(profile.Runtime)
 
 	runWithReload(rootCfg, *configPath, rotator)
 }
@@ -153,7 +160,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 		startupFailure(initialRoot, "failed to normalize initial config", err)
 		os.Exit(1)
 	}
-	startHealth(initialInstances[0].HealthPort, initialRoot)
+	startHealth(runtimeProfile(initialRoot, initialInstances).HealthPort, initialRoot)
 	defer func() {
 		if healthSrv != nil {
 			healthSrv.Close()
@@ -192,8 +199,27 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 	if watcher != nil {
 		defer watcher.Stop()
 	}
+	go watchDeletedBindings(watchCtx, configPath, enqueueReload)
 
 	for root := initialRoot; ; {
+		if root.IsBindingIdle() {
+			health.waitForBinding()
+			select {
+			case root = <-reloadCh:
+				instances, err := root.NormalizeInstances()
+				if err != nil {
+					return
+				}
+				configureLogPolicies(instances)
+				profile := runtimeProfile(root, instances)
+				config.InitLogger(profile.Log)
+				rotator.Update(logRotationPaths(profile.Log.Output)...)
+				applyRuntimeConfig(profile.Runtime)
+				continue
+			case <-sigCh:
+				return
+			}
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		if !root.PrivacyReady {
 			privacy.ResetOwner(configPath)
@@ -401,9 +427,10 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			os.Exit(1)
 		}
 		configureLogPolicies(newInstances)
-		config.InitLogger(newInstances[0].Log)
-		rotator.Update(logRotationPaths(newInstances[0].Log.Output)...)
-		applyRuntimeConfig(newInstances[0].Runtime)
+		profile := runtimeProfile(newRoot, newInstances)
+		config.InitLogger(profile.Log)
+		rotator.Update(logRotationPaths(profile.Log.Output)...)
+		applyRuntimeConfig(profile.Runtime)
 		root = newRoot
 		nlog.Core().Info("reload complete, services restarting with new config")
 	}
