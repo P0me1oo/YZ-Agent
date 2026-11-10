@@ -1,0 +1,306 @@
+{
+  "version": "v2.37.0",
+  "source": "371e42710335748fa4841c8933e173bcf2ea9832",
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.37.0",
+  "build": {
+    "source": "371e42710335748fa4841c8933e173bcf2ea9832",
+    "build_time": "2026-11-10T02:00:05Z",
+    "vcs_modified": false
+  },
+  "workflows": [
+    {
+      "repo": "YZ-Agent",
+      "run_id": 42739087028,
+      "jobs": [
+        {
+          "name": "Test",
+          "steps": 0,
+          "messages": [
+            "The job was not started because your account is locked due to a billing issue.",
+            "\"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748\""
+          ]
+        }
+      ]
+    },
+    {
+      "repo": "YZ-Agent",
+      "run_id": 42740967709,
+      "jobs": [
+        {
+          "name": "Test",
+          "steps": 0,
+          "messages": [
+            "The job was not started because your account is locked due to a billing issue.",
+            "\"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748\""
+          ]
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "dependencies": {
+      "source": "371e42710335748fa4841c8933e173bcf2ea9832",
+      "counts": {
+        "pass_test": 43,
+        "pass_pkg": 8
+      },
+      "failed": [],
+      "skipped": []
+    },
+    "mihomo": {
+      "source": "371e42710335748fa4841c8933e173bcf2ea9832",
+      "counts": {
+        "pass_test": 2,
+        "pass_pkg": 2
+      },
+      "failed": [],
+      "skipped": []
+    },
+    "installers": [
+      {
+        "name": "upgrade_version",
+        "exit_code": 0
+      },
+      {
+        "name": "download_mirrors",
+        "exit_code": 0
+      },
+      {
+        "name": "install_service_manager",
+        "exit_code": 0
+      },
+      {
+        "name": "install_health",
+        "exit_code": 0
+      },
+      {
+        "name": "install_kernel_defaults",
+        "exit_code": 0
+      },
+      {
+        "name": "install_privacy",
+        "exit_code": 0
+      },
+      {
+        "name": "install_paths",
+        "exit_code": 0
+      },
+      {
+        "name": "install_name_migration",
+        "exit_code": 0
+      }
+    ],
+    "firewall": [
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 57.34
+      },
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 30.95
+      },
+      {
+        "backend": "ufw",
+        "redirect": "nftables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 25.04
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 58.99
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 32.74
+      },
+      {
+        "backend": "ufw",
+        "redirect": "iptables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 25.5
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 32.11
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 25.39
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "nftables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 23.61
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "backend",
+        "exit_code": 0,
+        "seconds": 29.81
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "source",
+        "exit_code": 0,
+        "seconds": 26.52
+      },
+      {
+        "backend": "firewalld",
+        "redirect": "iptables",
+        "mode": "source-node",
+        "exit_code": 0,
+        "seconds": 22.34
+      }
+    ],
+    "full": {
+      "source": "371e42710335748fa4841c8933e173bcf2ea9832",
+      "counts": {
+        "skip_pkg": 8,
+        "pass_test": 1001,
+        "pass_pkg": 41,
+        "skip_test": 6
+      },
+      "failed": [],
+      "skipped": [
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeClientProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/firewall",
+          "TestNativeSourceFirewallLifecycle"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+          "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSProbe"
+        ],
+        [
+          "github.com/P0me1oo/YZ-Agent/internal/service",
+          "TestNativeSourceSOCKSRuntime"
+        ]
+      ]
+    }
+  },
+  "nodes_updated": false,
+  "docker_published": false,
+  "assets": [
+    {
+      "name": "install.sh",
+      "bytes": 65427,
+      "sha256": "5a2131fee6ff3c83fba37c180e0a71c2180209e2fcc39cb2bdbab43725a9c23d",
+      "public_download_verified": true
+    },
+    {
+      "name": "SHA256SUMS",
+      "bytes": 997,
+      "sha256": "dda54b7d6333f0dc5c4a2a01d734e996de134af2caea9793a9eabee35d195d03",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "bytes": 33124512,
+      "sha256": "3f5dbf38258e66a3db3624eb7dbfd8b8c35e2fd8a04e274d3942374a150e738c",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "bytes": 4888,
+      "sha256": "2bb06923ecfcac9fc4f7aceb85a611d1ef9226b18d8a6039f865fa4dee82229f",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "bytes": 30867616,
+      "sha256": "cbab59c3164a58e219f8fd7c97b93d9b44d9d3cac050657766f2f321149e3d3a",
+      "public_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "bytes": 4890,
+      "sha256": "87bdaafec53ea1af910cbb531ad8e835d292b468695cf8bcc4cbfd3a00c0693a",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "bytes": 78954656,
+      "sha256": "304f63062a4216b9d9f9ffc170e9706603e17c3728b2923cc2bd5965eb81d91b",
+      "public_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "bytes": 72941728,
+      "sha256": "773357a2eb1052bdc4e14353c9aab30e599393a359522fc5e89942248b523ecd",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "bytes": 78954656,
+      "sha256": "304f63062a4216b9d9f9ffc170e9706603e17c3728b2923cc2bd5965eb81d91b",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "bytes": 18455,
+      "sha256": "39b4f0e2e5a35c978f11bd6f930a7882b854fc93b7cd1f4f89fdf251f5a2c575",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "bytes": 72941728,
+      "sha256": "773357a2eb1052bdc4e14353c9aab30e599393a359522fc5e89942248b523ecd",
+      "public_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "bytes": 18457,
+      "sha256": "66c974b9db5daec5a64c4dca2b3d9addc2219d875e6fd96b4f7583306f0fe222",
+      "public_download_verified": true
+    }
+  ],
+  "initial_validation_issues": [
+    "Parallel native firewall runs shared mutable UFW files; sequential isolated rerun passed all 12 cases."
+  ],
+  "tag": "v2.37.0",
+  "id": 439866020,
+  "published_at": "2026-11-10T02:11:51Z",
+  "latest": true,
+  "verified_at": "2026-11-10T02:12:24.451822+00:00",
+  "limitations": [
+    "Actions did not start: account billing lock",
+    "Native firewall auxiliary cases skipped in ordinary run were verified separately in all 12 native scenarios",
+    "One existing random loopback port range case skipped under its environment condition",
+    "No production deployment or Docker publication"
+  ]
+}
