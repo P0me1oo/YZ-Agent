@@ -244,7 +244,7 @@ func (m *Manager) cachedAttempt(ctx context.Context, request AdmissionRequest) (
 	snapshot.LeaseCache = 0 // 嵌套快照沿用原格式；能力标记位于请求外层。
 	request.Snapshot = &snapshot
 	started := time.Now()
-	reply, err := m.remote.AdmitDeviceSource(ctx, request)
+	reply, err := m.admitSnapshot(ctx, request)
 	if errors.Is(err, ErrSessionLost) {
 		m.loseSession(request.Run)
 	}

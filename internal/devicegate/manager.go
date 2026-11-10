@@ -78,6 +78,9 @@ type Manager struct {
 	synced             uint64
 	confirmed          *Snapshot // 由 syncMu 保护，只保存已经确认的来源内容。
 	baseSequence       uint64
+	confirmedAdmission uint64 // 同步确认时的准入代数，由 syncMu 保护。
+	admissionRevision  uint64 // 以下两项由 mu 保护；准入可能更新面板完整快照。
+	admissionsInFlight int
 	ctx                context.Context
 	cancel             context.CancelFunc
 	sources            map[sourceKey]*sourceState
@@ -342,7 +345,7 @@ func (m *Manager) request(ctx context.Context, request AdmissionRequest) (Admiss
 			snapshot := m.Snapshot()
 			request.Snapshot = &snapshot
 		}
-		reply, err := m.remote.AdmitDeviceSource(ctx, request)
+		reply, err := m.admitSnapshot(ctx, request)
 		if combined && errors.Is(err, ErrAdmissionSyncUnsupported) {
 			combined, request.Snapshot = false, nil
 			// 回滚后的面板必须重新确认当前完整状态，不能复用合并响应覆盖的序号。
@@ -457,7 +460,11 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 	}
 	snapshot := m.Snapshot()
 	wire := snapshot
-	if capability, ok := m.remote.(RenewalRemote); ok && capability.DeviceRenewalSupported() && m.baseSequence > 0 && sameSnapshot(m.confirmed, snapshot) {
+	m.mu.Lock()
+	admissionRevision, admissionsInFlight := m.admissionRevision, m.admissionsInFlight
+	m.mu.Unlock()
+	if capability, ok := m.remote.(RenewalRemote); ok && capability.DeviceRenewalSupported() && m.baseSequence > 0 &&
+		admissionsInFlight == 0 && admissionRevision == m.confirmedAdmission && sameSnapshot(m.confirmed, snapshot) {
 		wire = Snapshot{Run: snapshot.Run, Sequence: snapshot.Sequence, Unchanged: true, BaseSequence: m.baseSequence}
 	}
 	wire.LeaseCache = snapshot.LeaseCache
@@ -490,15 +497,43 @@ func (m *Manager) syncAtLeast(ctx context.Context, required uint64) error {
 			return err
 		}
 	}
-	m.confirmed = &snapshot
-	if !wire.Unchanged {
-		m.baseSequence = snapshot.Sequence
+	m.mu.Lock()
+	// 准入可与周期同步并行；其完整快照可能晚于本次快照生效。
+	// 只有整个同步期间没有准入影响基线，才允许下一轮使用轻量续期。
+	stable := admissionsInFlight == 0 && m.admissionsInFlight == 0 && m.admissionRevision == admissionRevision
+	m.mu.Unlock()
+	if stable {
+		m.confirmed = &snapshot
+		m.confirmedAdmission = admissionRevision
+		if !wire.Unchanged {
+			m.baseSequence = snapshot.Sequence
+		}
+	} else {
+		m.confirmed, m.baseSequence = nil, 0
 	}
 	m.confirmSnapshot(snapshot, 0)
 	if snapshot.LeaseCache != 1 {
 		m.ApplyRevocations(reply.Revoked)
 	}
 	return nil
+}
+
+// 准入回包失败也可能已写入完整快照，不能继续复用此前确认的续期基线。
+// 不持有同步锁进行网络等待，避免一个慢申请阻塞其他账号和周期同步。
+func (m *Manager) admitSnapshot(ctx context.Context, request AdmissionRequest) (AdmissionReply, error) {
+	if request.Snapshot == nil {
+		return m.remote.AdmitDeviceSource(ctx, request)
+	}
+	m.mu.Lock()
+	m.admissionRevision++
+	m.admissionsInFlight++
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.admissionsInFlight--
+		m.mu.Unlock()
+	}()
+	return m.remote.AdmitDeviceSource(ctx, request)
 }
 
 func (m *Manager) confirmSnapshot(snapshot Snapshot, userID int) {
