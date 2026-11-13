@@ -1,0 +1,37 @@
+{
+  "release": {
+    "version": "2.37.1",
+    "sha": "c9007ed74c6db568b652d3c00cb98be93c56da4e",
+    "tag": "v2.37.1",
+    "published": true,
+    "assets_verified": 12,
+    "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.37.1",
+    "assets": {
+      "install.sh": "5a2131fee6ff3c83fba37c180e0a71c2180209e2fcc39cb2bdbab43725a9c23d",
+      "xbctl-linux-amd64": "ae022129ed78e6f2cdc89f025bf24b9b591c2e5f0fc590105fe4f98ca3bf7ad2",
+      "xbctl-linux-amd64.buildinfo.txt": "cab2287a358b6bf717f5b758d5b61dea77cef202c35c29deef1dac4df6588eb9",
+      "xbctl-linux-arm64": "8345779b025f0f681c22cd51d8b7a1ccd2c6b65785eff1b908195b389eda863e",
+      "xbctl-linux-arm64.buildinfo.txt": "c9ebefff6e54a3b8c281610ba1a3a0fefff8b9e7d5d99ed607d53d1f5eff94f6",
+      "xboard-node-linux-amd64": "b2e082f272ef67ca1927ac6ab993f576f2aa9f733f5a5c5af0e506b80e0e0ee8",
+      "xboard-node-linux-arm64": "19a124e4e6ce87e24a2d534ccf687cfed9a36498ae1459cbe55486e2c235cac0",
+      "yz-agent-linux-amd64": "b2e082f272ef67ca1927ac6ab993f576f2aa9f733f5a5c5af0e506b80e0e0ee8",
+      "yz-agent-linux-amd64.buildinfo.txt": "3b323708dc2fabe91a92cd5411faf15069b2b9d921c1662631f7faca7d98e7b3",
+      "yz-agent-linux-arm64": "19a124e4e6ce87e24a2d534ccf687cfed9a36498ae1459cbe55486e2c235cac0",
+      "yz-agent-linux-arm64.buildinfo.txt": "958709f9cc8338e6950aee354dbbaa41abdfdad8d6107e426eb317d176aaa223",
+      "SHA256SUMS": "185accf0578d29d713aa409a5bb3c19a02427514ef0a5b02a1ee127a5283ea06"
+    }
+  },
+  "tests": {
+    "go": "1.27.3",
+    "packages": 41,
+    "top_level_tests": 1010,
+    "passed_after_targeted_recheck": 1004,
+    "conditional_skips": 6,
+    "native_firewall_checks": 12,
+    "dependency_packages": 8,
+    "mihomo_checks": 2,
+    "installer_groups": 8
+  },
+  "runtime_nodes_updated": false,
+  "docker_published": false
+}
