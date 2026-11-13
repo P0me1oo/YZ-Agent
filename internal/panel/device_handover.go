@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -15,6 +16,29 @@ func (c *Client) DeviceRenewalSupported() bool       { return c.deviceHandoverRe
 func (c *Client) DeviceAdmissionSyncSupported() bool { return c.deviceHandoverAdmitSync.Load() }
 
 func deviceRequest[T any](c *Client, ctx context.Context, action string, data map[string]interface{}) (T, error) {
+	// 沿用业务序号和快照重试，锁繁忙不能变成新申请或延长调用方的截止时间。
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	data["lock_retry"] = 1
+	for attempt := 0; ; attempt++ {
+		result, err := deviceRequestOnce[T](c, ctx, action, data)
+		var remote *RemoteError
+		if !errors.As(err, &remote) || remote.Code != http.StatusServiceUnavailable {
+			return result, err
+		}
+		delay := time.Duration((100<<min(attempt, 3))+rand.IntN(100)) * time.Millisecond
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			var empty T
+			return empty, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func deviceRequestOnce[T any](c *Client, ctx context.Context, action string, data map[string]interface{}) (T, error) {
 	var empty T
 	if c.deviceHandoverWS.Load() {
 		if ws := c.realtimeSocket(); ws != nil {

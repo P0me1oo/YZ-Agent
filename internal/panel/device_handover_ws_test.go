@@ -49,6 +49,64 @@ func deviceTestSocket(t *testing.T, serverURL string) *WSClient {
 	return ws
 }
 
+func TestDeviceHandoverWSBusyRetryKeepsSocketAndBusinessSequence(t *testing.T) {
+	var httpCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		httpCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	ws := NewWSClient("", "", 7, WSClientConfig{}, nil, nil, nil)
+	ws.writeCh = make(chan wsMessage, 2)
+	ws.connected.Store(true)
+	client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 7})
+	client.deviceHandoverWS.Store(true)
+	client.SetWebSocketProvider(func() *WSClient { return ws })
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.SyncDeviceSession(ctx, devicegate.Snapshot{
+			Run: strings.Repeat("a", 32), Sequence: 10, Pending: []uint64{9}, Sources: []devicegate.Source{},
+		})
+		done <- err
+	}()
+	for attempt := 0; attempt < 2; attempt++ {
+		var message wsMessage
+		select {
+		case message = <-ws.writeCh:
+		case <-ctx.Done():
+			t.Fatal("未收到长连接重试")
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal(message.Data, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if message.Event != "device.sync" || payload["sequence"] != float64(10) || payload["lock_retry"] != float64(1) {
+			t.Fatal("重试更改了操作或业务序号")
+		}
+		receipt := RPCReceipt{RequestID: payload["request_id"].(string), NodeID: 7, Code: 503}
+		event := "device.sync.error"
+		if attempt == 1 {
+			event = "device.sync.ack"
+			receipt.Accepted = true
+			receipt.Code = 0
+			receipt.Result = json.RawMessage(`{"sequence":10}`)
+		}
+		body, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ws.receiveReceipt(wsMessage{Event: event, Data: body})
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if httpCalls.Load() != 0 || !ws.connected.Load() {
+		t.Fatal("锁繁忙不应触发 HTTP 补偿或关闭正常长连接")
+	}
+}
+
 func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *testing.T) {
 	for _, lostAck := range []bool{false, true} {
 		name := "确认成功"
@@ -91,7 +149,10 @@ func TestDeviceHandoverWSUsesRPCAndFallsBackWithSameAdmissionAfterLostAck(t *tes
 							result = devicegate.SyncReply{Run: run, Sequence: uint64(payload["sequence"].(float64))}
 						case "device.admit":
 							mu.Lock()
-							admitted = map[string]interface{}{"run": payload["run"], "sequence": payload["sequence"], "user_id": payload["user_id"], "ip": payload["ip"], "snapshot": payload["snapshot"]}
+							admitted = map[string]interface{}{
+								"run": payload["run"], "sequence": payload["sequence"], "user_id": payload["user_id"],
+								"ip": payload["ip"], "snapshot": payload["snapshot"], "lock_retry": payload["lock_retry"],
+							}
 							mu.Unlock()
 							if lostAck {
 								return

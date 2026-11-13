@@ -1,16 +1,89 @@
 package panel
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 )
+
+func TestDeviceHandoverBusyRetryPreservesPayload(t *testing.T) {
+	for _, action := range []string{"begin", "admit", "sync"} {
+		t.Run(action, func(t *testing.T) {
+			var calls atomic.Int32
+			var first map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if body["lock_retry"] != float64(1) || body["token"] != "retry-test-only" {
+					t.Error("重试能力或鉴权遗漏")
+				}
+				if calls.Add(1) == 1 {
+					first = body
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				if !reflect.DeepEqual(first, body) {
+					t.Error("重试改变了业务序号或完整快照")
+				}
+				_, _ = w.Write([]byte(`{"data":{"run":"confirmed"}}`))
+			}))
+			defer server.Close()
+			client := NewClient(config.PanelConfig{URL: server.URL, Token: "retry-test-only", NodeID: 7})
+			payload := map[string]interface{}{
+				"run": strings.Repeat("a", 32), "sequence": 9,
+				"snapshot": map[string]interface{}{"sequence": 10, "pending": []int{9}, "sources": []any{}},
+			}
+			result, err := deviceRequest[devicegate.BeginReply](client, t.Context(), action, payload)
+			if err != nil || result.Run != "confirmed" || calls.Load() != 2 {
+				t.Fatalf("繁忙后未恢复：result=%+v calls=%d err=%v", result, calls.Load(), err)
+			}
+		})
+	}
+}
+
+func TestDeviceHandoverBusyRetryHonorsCancellationAndDoesNotRetryOtherErrors(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		code int
+	}{
+		{name: "busy deadline", code: http.StatusServiceUnavailable},
+		{name: "revoked", code: http.StatusForbidden},
+		{name: "session changed", code: http.StatusConflict},
+		{name: "snapshot required", code: http.StatusPreconditionFailed},
+		{name: "server error", code: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(test.code)
+			}))
+			defer server.Close()
+			client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 7})
+			ctx, cancel := context.WithTimeout(t.Context(), 75*time.Millisecond)
+			defer cancel()
+			_, err := client.BeginDeviceSession(ctx, strings.Repeat("a", 32))
+			if err == nil || calls.Load() != 1 {
+				t.Fatalf("不应确认请求或重复拒绝：calls=%d err=%v", calls.Load(), err)
+			}
+			if test.code == http.StatusServiceUnavailable && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("重试未遵守调用方截止时间：%v", err)
+			}
+		})
+	}
+}
 
 func TestDeviceHandoverHTTPPreservesMachineNodeAuthAndEmptySnapshot(t *testing.T) {
 	run, lease := strings.Repeat("a", 32), strings.Repeat("b", 32)
