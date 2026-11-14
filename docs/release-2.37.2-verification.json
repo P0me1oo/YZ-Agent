@@ -1,0 +1,72 @@
+{
+  "release": {
+    "version": "2.37.2",
+    "tag": "v2.37.2",
+    "sha": "e004d8d2199b392284d7d2006d149ed69df2b3bc",
+    "published": true,
+    "published_at": "2026-11-14T05:15:02Z",
+    "latest": true,
+    "assets_verified": 12,
+    "all_downloads_anonymous": true,
+    "checksum_entries_verified": 11,
+    "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.37.2",
+    "assets": {
+      "install.sh": "5a2131fee6ff3c83fba37c180e0a71c2180209e2fcc39cb2bdbab43725a9c23d",
+      "xbctl-linux-amd64": "6b38a8d879648292a81c8e361f822d0101bbc039019f631a87749151d5bb713a",
+      "xbctl-linux-amd64.buildinfo.txt": "af242849ebbe96e85706af8b1b0adfc6f95dd22009d7fc0a4477407d74ef3ee2",
+      "xbctl-linux-arm64": "d25e45ab99cc7bdef3ed65b7c079edbf4e9ceaa3de890843d167be93e63ac7d3",
+      "xbctl-linux-arm64.buildinfo.txt": "05f57e1d2ce36e4b1d08bc68062e00c6206a2c1c61e85dbd5f2579fed258209d",
+      "xboard-node-linux-amd64": "4c4c11a8bc076978dd9f29ea1e23f05935dbc957b9fc85443d32e508b39a9111",
+      "xboard-node-linux-arm64": "cf34777f2256f83275afcfe37539a4bd22b81171e3c1e2442a34a8140c7095ed",
+      "yz-agent-linux-amd64": "4c4c11a8bc076978dd9f29ea1e23f05935dbc957b9fc85443d32e508b39a9111",
+      "yz-agent-linux-amd64.buildinfo.txt": "8da1ab59c5ec86ce96c4e8643b3402af345d238efe09325c669811c637b051d0",
+      "yz-agent-linux-arm64": "cf34777f2256f83275afcfe37539a4bd22b81171e3c1e2442a34a8140c7095ed",
+      "yz-agent-linux-arm64.buildinfo.txt": "1935b9686deb05ea5778ff13efea18a5e6aaf84094af190b83b9b65839ca8c33",
+      "SHA256SUMS": "0269adbcdaeea44245aa41fb783adc1b8f218445a03f468ac2e54f4af05d9d3e"
+    }
+  },
+  "build": {
+    "go": "1.27.3",
+    "build_time": "2026-11-14T05:12:18Z",
+    "targets": [
+      "linux/amd64",
+      "linux/arm64"
+    ],
+    "programs": [
+      "yz-agent",
+      "xbctl"
+    ],
+    "cgo_enabled": false,
+    "vcs_modified": false,
+    "singbox_module": "github.com/P0me1oo/YZ-sing-box@v1.15.1",
+    "xray_module": "github.com/P0me1oo/YZ-Xray-core@v0.0.0-20261103192507-3c480b0c0d73"
+  },
+  "tests": {
+    "go": "1.27.3",
+    "tags": "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api",
+    "reused_same_program_source": [
+      "dual-kernel configuration",
+      "sing-box relay TCP/UDP lifecycle"
+    ],
+    "udp_listener_socket_checks": 2,
+    "old_generator_expected_failures": 2,
+    "additional_checks": [
+      "kernel build identities",
+      "latest upgrade version planning"
+    ],
+    "full_race_suite_rerun": false,
+    "mihomo_rerun": false,
+    "native_firewall_matrix_rerun": false,
+    "production_network_validation": false
+  },
+  "actions": {
+    "run_ids": [
+      43560341162,
+      43560511169
+    ],
+    "executed_steps": 0,
+    "result": "not started: account locked due to billing issue"
+  },
+  "runtime_nodes_updated": false,
+  "docker_published": false
+}

@@ -1,6 +1,8 @@
 # 变更记录
 
-## v2.37.2 - 2026-11-14
+## v2.37.2 - 2026-11-14（已发布）
+
+[正式发布与安装包核验](docs/release-2.37.2.md)：固定提交 `e004d8d2199b392284d7d2006d149ed69df2b3bc`，Linux amd64 / arm64 共 12 份附件公开下载校验通过；未升级运行节点。
 
 - sing-box 自动生成的 Shadowsocks 中转落地监听显式设置 `udp_fragment: true`，允许 UDP 分片，修复禁止分片时超出路径 MTU 报 `Message too long` 的问题；其他监听默认参数保持不变。见[中转说明](docs-relay.md#落地节点)。
 
