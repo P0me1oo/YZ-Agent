@@ -184,7 +184,8 @@ func buildRelayLandingInbound(nc *model.NodeSpec, tc kernel.TLSCert) M {
 	}
 	if landing.Protocol == "shadowsocks" {
 		return M{"type": "shadowsocks", "tag": relayLandingInboundTag, "listen": landing.ListenIP,
-			"listen_port": landing.ServerPort, "method": nc.Relay.Cipher, "password": nc.Relay.Password}
+			"listen_port": landing.ServerPort, "udp_fragment": true,
+			"method": nc.Relay.Cipher, "password": nc.Relay.Password}
 	}
 	if nc.Relay.VLESS == nil {
 		return nil

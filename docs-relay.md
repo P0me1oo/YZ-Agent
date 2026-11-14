@@ -154,6 +154,9 @@ Node 生成一个标签为 `relay-in` 的 Shadowsocks 入站，只包含这一�
 不包含任何面板用户，同时开启 `tcp,udp`。落地服务器上的 Xray 或 sing-box 直接向目标建立
 连接，不需要开启系统转发或出口地址转换。
 
+sing-box 自动生成的 Shadowsocks 落地监听设置 `udp_fragment: true`，允许 UDP 报文分片，
+避免超过路径 MTU 时因禁止分片报 `Message too long`；其他监听参数继续沿用原有默认值。
+
 VLESS 落地的 `relay` 段改为 `protocol: "vless"`，并在 `relay.vless.id` 下发同一内部 UUID。
 传输、TLS/Reality、Flow、证书和 `decryption` 继续使用落地节点顶层配置，Hysteria 额外使用
 `relay.vless.transport_auth`。Node 生成一个单用户 VLESS `relay-in` 入站，该用户没有面板
