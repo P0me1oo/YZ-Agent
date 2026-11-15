@@ -45,6 +45,8 @@ docker run -d --restart=always --network=host --stop-timeout=150 \
 `yz-agent.service`；Alpine Linux 使用 OpenRC 的 `yz-agent` 服务，并由
 `supervise-daemon` 在进程异常退出后自动拉起。
 
+安装器的中文提示、安装摘要和依赖检测说明见[安装过程说明](docs/installer-output.md)。
+
 ```bash
 # 节点模式
 curl -fsSL https://github.com/P0me1oo/YZ-Agent/releases/latest/download/install.sh | \

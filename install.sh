@@ -8,6 +8,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# 管道、日志文件和明确禁用颜色的终端使用纯文本。
+if [ ! -t 1 ] || [ "${TERM:-dumb}" = dumb ] || [ -n "${NO_COLOR+x}" ]; then
+    RED='' GREEN='' YELLOW='' CYAN='' BOLD='' NC=''
+fi
+
 APP_NAME="yz-agent"
 CURRENT_INSTALL_ROOT="/etc/yz-agent"
 LEGACY_INSTALL_ROOT="/etc/xboard-node"
@@ -106,11 +111,58 @@ NAME_CHANGED=0
 OLD_SERVICE_DISABLED=0
 OLD_SERVICE_ENABLED=0
 CLEANUP_DONE=0
+INSTALLED_VERSION=""
 
-log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-log_step()  { echo -e "${CYAN}[STEP]${NC} ${BOLD}$1${NC}"; }
+log_info()   { printf '%b[信息]%b %s\n' "$GREEN" "$NC" "$1"; }
+log_warn()   { printf '%b[警告]%b %s\n' "$YELLOW" "$NC" "$1"; }
+log_error()  { printf '%b[错误]%b %s\n' "$RED" "$NC" "$1"; }
+log_step()   { printf '%b[步骤]%b %b%s%b\n' "$CYAN" "$NC" "$BOLD" "$1" "$NC"; }
+log_config() { printf '%b[配置]%b %s\n' "$CYAN" "$NC" "$1"; }
+
+show_banner() {
+    printf '\n===========================================\n'
+    printf '%b    %s%b\n' "$BOLD" "$1" "$NC"
+    printf '===========================================\n'
+}
+
+show_install_config() {
+    local action mode version
+    case "$ACTION" in install) action=安装 ;; upgrade) action=升级 ;; uninstall) action=卸载 ;; esac
+    version="$RELEASE_VERSION"
+    [ "$version" != latest ] || version='最新正式版（latest）'
+    show_banner "YZ-Agent ${action}程序"
+    log_config "操作：${action}"
+    log_config "系统：${OS} / ${ARCH}"
+    log_config "服务：${SERVICE_NAME}（${SERVICE_MANAGER}）"
+    log_config "数据目录：${INSTALL_ROOT}"
+    log_config "程序目录：${BIN_DIR}"
+    if [ "$ACTION" = uninstall ]; then return; fi
+    log_config "目标版本：${version}"
+    if [ "$ACTION" = install ]; then
+        case "$MODE" in node) mode="节点模式（节点 ${NODE_ID}）" ;; machine) mode="机器模式（机器 ${MACHINE_ID}）" ;; esac
+        log_config "部署模式：${mode}"
+        log_config "认证令牌：***"
+        if [ "$KERNEL_EXPLICIT" -eq 1 ]; then
+            log_config "核心：${KERNEL_TYPE}"
+        else
+            log_config "核心：根据面板配置和已有实例选择"
+        fi
+    fi
+}
+
+show_completion() {
+    show_banner "YZ-Agent $1完成"
+    log_config "版本：${INSTALLED_VERSION}"
+    log_config "服务：${SERVICE_NAME}（${SERVICE_MANAGER}，已运行）"
+    log_config "程序：${BINARY_PATH}"
+    log_config "配置：${CONFIG_FILE}"
+    if [ "$HEALTH_ENABLED" -eq 1 ]; then
+        log_config "健康检查：http://127.0.0.1:${HEALTH_PORT}/healthz（已通过）"
+    else
+        log_config "健康检查：已禁用，仅确认服务运行"
+    fi
+    log_config "管理命令：${CLI_PATH}"
+}
 
 cleanup_tmp() {
     if [ "$CLEANUP_DONE" -eq 1 ]; then
@@ -127,7 +179,7 @@ cleanup_tmp() {
         [ -z "$BIN_STAGE_DIR" ] || rm -rf "$BIN_STAGE_DIR"
         [ -z "$CLI_ENTRY_BACKUP_DIR" ] || rm -rf "$CLI_ENTRY_BACKUP_DIR"
     else
-        log_error "Recovery files retained: ${BACKUP_PATH} ${BIN_STAGE_DIR} ${CLI_ENTRY_BACKUP_DIR}"
+        log_error "已保留恢复文件：${BACKUP_PATH} ${BIN_STAGE_DIR} ${CLI_ENTRY_BACKUP_DIR}"
     fi
     if [ "$LOCK_HELD" -eq 1 ]; then
         rmdir "$INSTALL_ROOT/.install-lock" || true
@@ -164,18 +216,18 @@ same_directory_entry() {
 }
 
 rollback_install() {
-    log_warn "Rolling back installation"
+    log_warn "正在恢复原安装"
     if [ -f "$SERVICE_PATH" ] || service_is_active; then
         if ! service_stop >/dev/null 2>&1; then
             ROLLBACK_FAILED=1
-            log_error "Could not stop the replacement service; recovery files retained"
+            log_error "无法停止新服务，已保留恢复文件"
             return 1
         fi
     fi
     if [ "$REPLACEMENT_SERVICE_STARTED" -eq 1 ]; then
         if ! cleanup_installation_firewall; then
             ROLLBACK_FAILED=1
-            log_error "Could not clean replacement firewall rules; recovery files retained"
+            log_error "无法清理新安装的防火墙规则，已保留恢复文件"
             return 1
         fi
     fi
@@ -190,7 +242,7 @@ rollback_install() {
         if [ -n "$BACKUP_PATH" ] && [ -d "$BACKUP_PATH" ]; then export_args+=(--backup "$BACKUP_PATH"); fi
         if ! "$BINARY_PATH" "${export_args[@]}"; then
             ROLLBACK_FAILED=1
-            log_error "Private data could not be recovered for the old release; current program and recovery files retained"
+            log_error "无法为旧版本恢复加密数据，已保留当前程序和恢复文件"
             service_start >/dev/null 2>&1 || true
             return 1
         fi
@@ -248,7 +300,7 @@ rollback_install() {
     fi
     if [ "$failed" -ne 0 ]; then
         ROLLBACK_FAILED=1
-        log_error "Rollback incomplete; recovery files will be retained"
+        log_error "恢复未完成，将保留恢复文件"
         return 1
     fi
     CLI_PATH="$PREVIOUS_CLI_PATH"
@@ -258,23 +310,23 @@ rollback_install() {
         service_reset_failed >/dev/null 2>&1 || true
         service_restart >/dev/null 2>&1 || true
         if ! wait_for_health; then
-            log_error "Original files restored but the service did not become healthy"
+            log_error "原文件已恢复，但服务未通过健康检查"
             show_recent_logs
             return 1
         fi
     else
         service_disable >/dev/null 2>&1 || true
     fi
-    log_warn "Rollback complete"
+    log_warn "原安装已恢复"
 }
 
 on_error() {
     local exit_code=$?
-    local line_no=${1:-unknown}
+    local line_no=${1:-未知}
     trap - ERR
     trap '' INT TERM
     if [ "$exit_code" -ne 0 ]; then
-        log_error "Install failed at line ${line_no} (exit=${exit_code})"
+        log_error "操作失败：脚本第 ${line_no} 行，退出码 ${exit_code}"
         if [ -n "$BACKUP_PATH" ] && [ "$INSTALL_COMMITTED" -eq 0 ]; then
             rollback_install || true
         fi
@@ -302,44 +354,44 @@ trap 'on_signal 143' TERM
 usage() {
     cat <<'HELP'
 
-  yz-agent Installer
+  YZ-Agent 安装程序
 
-  ACTIONS:
-    install      Install or reconcile the configured deployment (default)
-    upgrade      Upgrade binary and restart service
-    uninstall    Remove installed service and binary (config kept unless --purge)
-    status       Show current installation status
-    help         Show this help
+  操作：
+    install      安装或合并已有部署配置（默认）
+    upgrade      升级程序并重启服务
+    uninstall    卸载服务和程序；默认保留配置，--purge 同时删除数据
+    status       查看当前安装状态
+    help         显示帮助
 
-  MODES (auto-detected from --node-id or --machine-id if omitted):
-    --mode node      Panel single-node mode (default)
-    --mode machine   Panel machine mode
+  部署模式（省略时根据节点或机器编号自动选择）：
+    --mode node      面板单节点模式（默认）
+    --mode machine   面板机器模式
 
-  REQUIRED FOR NODE MODE:
-    --panel, -a      Panel URL
-    --token, -t      Panel server token
-    --node-id, -n    Node ID
+  节点模式必填：
+    --panel, -a      面板地址
+    --token, -t      节点认证令牌
+    --node-id, -n    节点编号
 
-  REQUIRED FOR MACHINE MODE:
-    --panel, -a       Panel URL
-    --token, -t       Machine token
-    --machine-id      Machine ID
+  机器模式必填：
+    --panel, -a       面板地址
+    --token, -t       机器认证令牌
+    --machine-id      机器编号
 
-  OPTIONAL:
-    --node-type, -T     Explicit node type for node mode
+  可选参数：
+    --node-type, -T     指定节点协议类型
     --kernel, -k        xray 或 singbox；新建默认 singbox，VLESS 默认 xray，已有实例保留原内核
-    --version           Release version or latest (default: latest)
-    --binary            Use a local yz-agent binary path instead of downloading
-    --xbctl-binary      Use a local management binary for historical releases
+    --version           正式发布版本或 latest（默认：latest）
+    --binary            使用本地 yz-agent 程序，跳过下载
+    --xbctl-binary      为历史版本指定本地管理程序
     --bin-dir           程序目录，默认 /usr/local/bin；升级时可迁移已有安装
-    --health-port       Local health port (default: 65530, use 0 to disable)
-    --gomemlimit        Runtime GOMEMLIMIT value, e.g. 256MiB
-    --gogc              Runtime GOGC value, e.g. 50
-    --force-reconfigure Overwrite an existing install even if mode/target changed
-    --purge             With uninstall, delete the installation data directory too
-    --yes, -y           Non-interactive confirmation for destructive operations
+    --health-port       本机健康检查端口（默认：65530，0 表示禁用）
+    --gomemlimit        Go 运行时内存限制，例如 256MiB
+    --gogc              Go 垃圾回收目标百分比，例如 50
+    --force-reconfigure 历史兼容参数；安装默认合并已有绑定
+    --purge             卸载时同时删除安装数据目录
+    --yes, -y           跳过卸载确认
 
-  EXAMPLES:
+  示例：
     sudo bash install.sh --panel https://panel.example.com --token TOKEN --node-id 1
     sudo bash install.sh --panel https://panel.example.com --token TOKEN --machine-id 1
     sudo bash install.sh upgrade
@@ -349,9 +401,20 @@ usage() {
 HELP
 }
 
+require_option_value() {
+    if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* || "$2" == -[atnTkhy] ]]; then
+        log_error "参数 $1 缺少值；请使用 --help 查看用法" >&2
+        return 1
+    fi
+}
+
 parse_args() {
-    local positional=()
     while [ $# -gt 0 ]; do
+        case "$1" in
+            --mode|--panel|-a|--api|--token|-t|--node-id|-n|--node-type|-T|--machine-id|--kernel|-k|--version|--binary|--xbctl-binary|--bin-dir|--health-port|--gomemlimit|--gogc)
+                require_option_value "$@" || return 1
+                ;;
+        esac
         case "$1" in
             install|upgrade|uninstall|status|help)
                 ACTION="$1"
@@ -400,7 +463,7 @@ parse_args() {
                 ;;
             --bin-dir)
                 if [ $# -lt 2 ] || [ -z "$2" ]; then
-                    log_error "--bin-dir requires an absolute directory" >&2
+                    log_error "--bin-dir 需要指定绝对路径" >&2
                     return 1
                 fi
                 BIN_DIR="$2"
@@ -435,15 +498,11 @@ parse_args() {
                 shift
                 ;;
             *)
-                positional+=("$1")
-                shift
+                log_error "存在未知参数或操作；请使用 --help 查看用法" >&2
+                return 1
                 ;;
         esac
     done
-
-    if [ ${#positional[@]} -gt 0 ] && [ "$ACTION" = "install" ]; then
-        ACTION="${positional[0]}"
-    fi
 
     case "$KERNEL_TYPE" in
         singbox|SingBox|SINGBOX) KERNEL_TYPE="singbox" ;;
@@ -472,7 +531,7 @@ parse_args() {
     case "$MODE" in
         node|machine) ;;
         *)
-            log_error "Unsupported mode: $MODE"
+            log_error "不支持的部署模式：$MODE"
             usage
             exit 1
             ;;
@@ -481,7 +540,7 @@ parse_args() {
 
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        log_error "Please run as root or with sudo"
+        log_error "请以 root 用户运行，或使用 sudo"
         exit 1
     fi
 }
@@ -493,7 +552,7 @@ detect_arch() {
         x86_64|amd64) ARCH="amd64" ;;
         aarch64|arm64) ARCH="arm64" ;;
         *)
-            log_error "Unsupported architecture: $raw"
+            log_error "不支持的处理器架构：$raw"
             exit 1
             ;;
     esac
@@ -522,7 +581,7 @@ detect_service_manager() {
         SERVICE_PATH="$OPENRC_SERVICE_PATH"
         return
     fi
-    log_error "A running systemd or OpenRC service manager is required"
+    log_error "需要正在运行的 systemd 或 OpenRC 服务管理器"
     exit 1
 }
 
@@ -531,7 +590,7 @@ normalize_bin_dir() {
     while [[ "$dir" == */ ]] && [ "$dir" != / ]; do dir="${dir%/}"; done
     if ! [[ "$dir" =~ ^/[A-Za-z0-9._/-]+$ ]] || [ "$dir" = / ] ||
        [[ "$dir/" == *'//'* || "$dir/" == *'/./'* || "$dir/" == *'/../'* ]]; then
-        log_error "Binary directory must be an absolute path using letters, numbers, /, ., _ and -, without . or .. components" >&2
+        log_error "程序目录必须是绝对路径，仅允许字母、数字和 /._-，不能包含 . 或 .. 路径段" >&2
         return 1
     fi
     printf '%s\n' "$dir"
@@ -552,7 +611,7 @@ set_install_root() {
 select_install_root() {
     if { [ -e "$CURRENT_INSTALL_ROOT" ] || [ -L "$CURRENT_INSTALL_ROOT" ]; } &&
        { [ -e "$LEGACY_INSTALL_ROOT" ] || [ -L "$LEGACY_INSTALL_ROOT" ]; }; then
-        log_error "Both installation directories exist; resolve the directory conflict first"
+        log_error "新旧安装目录同时存在，请先解决目录冲突"
         return 1
     fi
     if [ -e "$LEGACY_INSTALL_ROOT" ] || [ -L "$LEGACY_INSTALL_ROOT" ]; then
@@ -568,7 +627,7 @@ load_install_paths() {
         if [ -e "$(dirname "$SYSTEMD_SERVICE_PATH")/$name.service" ] ||
            [ -e "$(dirname "$OPENRC_SERVICE_PATH")/$name" ]; then
             if [ -n "$installed_service" ]; then
-                log_error "Multiple installation service names exist; resolve the service conflict first"
+                log_error "发现多个安装服务名称，请先解决服务冲突"
                 return 1
             fi
             installed_service="$name"
@@ -579,7 +638,7 @@ load_install_paths() {
         local saved_lines=()
         mapfile -t saved_lines <"$BIN_DIR_FILE"
         if [ "${#saved_lines[@]}" -ne 1 ]; then
-            log_error "Invalid binary directory record: $BIN_DIR_FILE" >&2
+            log_error "程序目录记录无效：$BIN_DIR_FILE" >&2
             return 1
         fi
         saved="${saved_lines[0]}"
@@ -610,7 +669,7 @@ load_install_paths() {
     BINARY_PATH="$BIN_DIR/$APP_NAME"
     CLI_PATH="$BIN_DIR/$CLI_NAME"
     if [ "$ACTION" != install ] && [ "$ACTION" != upgrade ] && [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
-        log_error "Use install or upgrade to change --bin-dir" >&2
+        log_error "修改程序目录（--bin-dir）需要使用 install 或 upgrade" >&2
         return 1
     fi
 }
@@ -621,7 +680,7 @@ lock_installation() {
         return
     fi
     if ! mkdir "$INSTALL_ROOT/.install-lock"; then
-        log_error "Another installer may be running; check $INSTALL_ROOT/.install-lock before retrying" >&2
+        log_error "可能有其他安装程序正在运行，重试前请检查 $INSTALL_ROOT/.install-lock" >&2
         return 1
     fi
     LOCK_HELD=1
@@ -654,7 +713,7 @@ select_target_name() {
         # 同名目标必须由当前安装拥有，不能覆盖其他程序或服务。
         if [ -e "$SERVICE_PATH" ] || [ -L "$SERVICE_PATH" ] ||
            [ -e "$BIN_DIR/$target" ] || [ -L "$BIN_DIR/$target" ]; then
-            log_error "Name migration destination already exists: $SERVICE_PATH or $BIN_DIR/$target"
+            log_error "改名目标已存在：$SERVICE_PATH 或 $BIN_DIR/$target"
             return 1
         fi
         NAME_CHANGED=1
@@ -668,11 +727,11 @@ select_target_name() {
     if [ "$CLI_SYMLINK_PATH" != "$PREVIOUS_CLI_ENTRY_PATH" ] &&
        [ "$CLI_SYMLINK_PATH" != "$CLI_PATH" ] &&
        { [ -e "$CLI_SYMLINK_PATH" ] || [ -L "$CLI_SYMLINK_PATH" ]; }; then
-        log_error "Command entry already exists: $CLI_SYMLINK_PATH"
+        log_error "命令入口已存在：$CLI_SYMLINK_PATH"
         return 1
     fi
     if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ] && { [ -e "$BINARY_PATH" ] || [ -L "$BINARY_PATH" ]; }; then
-        log_error "Destination already exists: $BINARY_PATH"
+        log_error "目标文件已存在：$BINARY_PATH"
         return 1
     fi
 }
@@ -691,18 +750,18 @@ select_target_root() {
     [ "$APP_NAME" = yz-agent ] || TARGET_INSTALL_ROOT="$LEGACY_INSTALL_ROOT"
     if [ "$TARGET_INSTALL_ROOT" = "$INSTALL_ROOT" ]; then return; fi
     if [ -e "$TARGET_INSTALL_ROOT" ] || [ -L "$TARGET_INSTALL_ROOT" ]; then
-        log_error "Installation directory destination already exists: $TARGET_INSTALL_ROOT"
+        log_error "目标安装目录已存在：$TARGET_INSTALL_ROOT"
         return 1
     fi
     if [ -L "$INSTALL_ROOT" ] ||
        [ "$(stat -c %d "$INSTALL_ROOT")" != "$(stat -c %d "$(dirname "$TARGET_INSTALL_ROOT")")" ]; then
-        log_error "Installation directory migration requires a regular directory on the same filesystem"
+        log_error "安装目录迁移要求原目录不是符号链接，且位于同一文件系统"
         return 1
     fi
     local program_dir
     for program_dir in "$BIN_DIR" "$PREVIOUS_BIN_DIR"; do
         if [ "$program_dir" = "$INSTALL_ROOT" ] || [[ "$program_dir" == "$INSTALL_ROOT/"* ]]; then
-            log_error "Move the program directory outside the installation data directory before renaming"
+            log_error "改名前请先将程序目录移到安装数据目录之外"
             return 1
         fi
     done
@@ -754,7 +813,7 @@ restore_install_root() {
     if [ -L "$PREVIOUS_INSTALL_ROOT" ] && [ "$(readlink "$PREVIOUS_INSTALL_ROOT")" = "$TARGET_INSTALL_ROOT" ]; then
         rm "$PREVIOUS_INSTALL_ROOT" || return 1
     elif [ -e "$PREVIOUS_INSTALL_ROOT" ] || [ -L "$PREVIOUS_INSTALL_ROOT" ]; then
-        log_error "Original installation path is occupied; retaining the migrated directory for recovery"
+        log_error "原安装路径已被占用，保留迁移后的目录用于恢复"
         return 1
     fi
     mv -T "$TARGET_INSTALL_ROOT" "$PREVIOUS_INSTALL_ROOT" || return 1
@@ -857,7 +916,7 @@ run_with_retry() {
             return 0
         fi
         if [ "$i" -lt "$attempts" ]; then
-            log_warn "Command failed, retrying in ${delay}s: $*"
+            log_warn "命令执行失败，${delay} 秒后重试：$*"
             sleep "$delay"
         fi
         i=$((i + 1))
@@ -866,25 +925,63 @@ run_with_retry() {
 }
 
 install_dependencies() {
+    log_step "检查安装依赖"
+    local packages=()
+    mapfile -t packages < <(missing_dependency_packages)
+    if [ "${#packages[@]}" -eq 0 ]; then
+        log_info "依赖已满足，跳过安装"
+        return 0
+    fi
+    log_info "安装缺少的依赖：${packages[*]}"
     case "$OS" in
         ubuntu|debian)
-            DEBIAN_FRONTEND=noninteractive run_with_retry 10 3 apt-get update -qq
-            DEBIAN_FRONTEND=noninteractive run_with_retry 10 3 apt-get install -y -qq curl wget ca-certificates coreutils >/dev/null 2>&1
+            DEBIAN_FRONTEND=noninteractive run_with_retry 10 3 apt-get update -qq || return $?
+            DEBIAN_FRONTEND=noninteractive run_with_retry 10 3 apt-get install -y -qq "${packages[@]}" >/dev/null || return $?
             ;;
         centos|rhel|rocky|almalinux|fedora)
             if command -v dnf >/dev/null 2>&1; then
-                run_with_retry 5 3 dnf install -y -q curl wget ca-certificates coreutils >/dev/null 2>&1
+                run_with_retry 5 3 dnf install -y -q "${packages[@]}" >/dev/null || return $?
             else
-                run_with_retry 5 3 yum install -y -q curl wget ca-certificates coreutils >/dev/null 2>&1
+                run_with_retry 5 3 yum install -y -q "${packages[@]}" >/dev/null || return $?
             fi
             ;;
         alpine)
-            run_with_retry 5 3 apk add --no-cache curl wget ca-certificates coreutils openrc >/dev/null 2>&1
+            run_with_retry 5 3 apk add --no-cache "${packages[@]}" >/dev/null || return $?
             ;;
         *)
-            log_warn "OS ${OS} is not in the official support set; continuing best-effort"
+            log_error "系统 ${OS} 暂不支持自动安装依赖，请手动安装：${packages[*]}"
+            return 1
             ;;
     esac
+    mapfile -t packages < <(missing_dependency_packages)
+    if [ "${#packages[@]}" -gt 0 ]; then
+        log_error "安装后仍缺少依赖：${packages[*]}"
+        return 1
+    fi
+    log_info "依赖安装完成"
+}
+
+has_ca_certificates() {
+    local bundle
+    for bundle in "${CURL_CA_BUNDLE:-}" "${SSL_CERT_FILE:-}" \
+        /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
+        /etc/ssl/ca-bundle.pem /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem; do
+        if [ -n "$bundle" ] && [ -r "$bundle" ] && [ -s "$bundle" ]; then return 0; fi
+    done
+    return 1
+}
+
+missing_dependency_packages() {
+    command -v curl >/dev/null 2>&1 || printf 'curl\n'
+    has_ca_certificates || printf 'ca-certificates\n'
+    local tool needs_coreutils=0
+    for tool in stat mktemp install realpath sha256sum sort mv cp ln; do
+        if ! command -v "$tool" >/dev/null 2>&1; then needs_coreutils=1; break; fi
+    done
+    # 目录迁移使用 mv -T，不能仅凭存在 BusyBox 同名命令就跳过 coreutils。
+    if [ "$needs_coreutils" -eq 1 ] || ! mv --version >/dev/null 2>&1; then
+        printf 'coreutils\n'
+    fi
 }
 
 ensure_dirs() {
@@ -899,7 +996,7 @@ ensure_dirs() {
         if [ -e "$target" ] || [ -L "$target" ]; then
             if [ "$target" = "$BINARY_PATH" ] && [ "$APP_NAME" = yz-agent ] &&
                [ ! -f "$CONFIG_FILE" ] && [ ! -f "$INSTALL_META" ]; then
-                log_error "Existing yz-agent binary has no installation record: $target"
+                log_error "已有 yz-agent 程序缺少安装记录：$target"
                 return 1
             fi
             if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
@@ -908,11 +1005,11 @@ ensure_dirs() {
                    [ "$(readlink "$target")" = "$PREVIOUS_CLI_PATH" ]; then
                     continue
                 fi
-                log_error "Destination already exists: $target"
+                log_error "目标文件已存在：$target"
                 return 1
             fi
             if [ ! -f "$target" ] && [ ! -L "$target" ]; then
-                log_error "Binary path is not a regular file or symlink: $target"
+                log_error "程序路径不是普通文件或符号链接：$target"
                 return 1
             fi
         fi
@@ -925,22 +1022,22 @@ validate_positive_int() {
     local label="$1"
     local value="$2"
     if ! [[ "$value" =~ ^[0-9]+$ ]] || [ "$value" -le 0 ]; then
-        log_error "${label} must be a positive integer, got: ${value}"
+        log_error "${label}必须是正整数"
         exit 1
     fi
 }
 
 validate_install_request() {
     if [ -z "$PANEL_URL" ]; then
-        log_error "Panel URL is required"
+        log_error "请提供面板地址（--panel）"
         exit 1
     fi
     if [ -z "$TOKEN" ]; then
-        log_error "Token is required"
+        log_error "请提供认证令牌（--token）"
         exit 1
     fi
     if ! [[ "$HEALTH_PORT" =~ ^[0-9]+$ ]]; then
-        log_error "health-port must be a non-negative integer"
+        log_error "健康检查端口（--health-port）必须是非负整数"
         exit 1
     fi
     if [ "$HEALTH_PORT" -eq 0 ]; then
@@ -949,16 +1046,16 @@ validate_install_request() {
     case "$KERNEL_TYPE" in
         singbox|xray) ;;
         *)
-            log_error "Kernel must be singbox or xray"
+            log_error "核心（--kernel）必须是 singbox 或 xray"
             exit 1
             ;;
     esac
     case "$MODE" in
         node)
-            validate_positive_int "Node ID" "$NODE_ID"
+            validate_positive_int "节点编号（--node-id）" "$NODE_ID"
             ;;
         machine)
-            validate_positive_int "Machine ID" "$MACHINE_ID"
+            validate_positive_int "机器编号（--machine-id）" "$MACHINE_ID"
             ;;
     esac
 }
@@ -985,7 +1082,7 @@ require_reconfigure_confirmation() {
 select_binary_source() {
     if [ -n "$BINARY_SOURCE" ]; then
         if [ ! -f "$BINARY_SOURCE" ]; then
-            log_error "Binary source not found: $BINARY_SOURCE"
+            log_error "未找到本地程序：$BINARY_SOURCE" >&2
             exit 1
         fi
         echo "$BINARY_SOURCE"
@@ -1178,7 +1275,7 @@ download_release_checksums() {
             [[ "$LATEST_RELEASE_URL" = */tag/* ]] && upgrade_version_key "$RELEASE_VERSION" >/dev/null || return 1
         fi
         resolve_download_url "SHA256SUMS"
-        log_step "Downloading release checksums: ${DOWNLOAD_URL}"
+        log_step "下载发布校验清单：${DOWNLOAD_URL}"
         if download_release_file "$DOWNLOAD_URL" "$checksums"; then
             return 0
         else
@@ -1189,7 +1286,7 @@ download_release_checksums() {
             log_warn "所有来源均无法获取校验清单，跳过 SHA-256 校验并继续安装或升级。" >&2
             return 0
         fi
-        log_error "Failed to save release checksums from ${DOWNLOAD_URL}"
+        log_error "无法保存发布校验清单：${DOWNLOAD_URL}"
         return "$status"
     fi
 }
@@ -1202,26 +1299,26 @@ verify_release_checksum() {
     local actual
     expected=$(awk -v name="$artifact" '$2 == name || $2 == "*" name { print $1; exit }' "$checksums")
     if [ -z "$expected" ]; then
-        log_error "No checksum found for ${artifact}"
+        log_error "校验清单中没有 ${artifact} 的记录"
         exit 1
     fi
     actual=$(sha256sum "$file" | awk '{ print $1 }')
     if [ "$actual" != "$expected" ]; then
-        log_error "Checksum mismatch for ${artifact}"
+        log_error "SHA-256 校验不匹配：${artifact}"
         exit 1
     fi
-    log_info "Checksum verified: ${artifact}"
+    log_info "SHA-256 校验通过：${artifact}"
 }
 
 validate_staged_version() {
     local report="$1" program actual rest actual_key target_key
     read -r program actual rest <<< "$report"
-    case "$program" in yz-agent|agent|xboard-node|xbctl) ;; *) log_error "Invalid binary version output"; return 1 ;; esac
-    actual_key=$(upgrade_version_key "$actual") || { log_error "Invalid binary version output"; return 1; }
+    case "$program" in yz-agent|agent|xboard-node|xbctl) ;; *) log_error "程序版本信息无效"; return 1 ;; esac
+    actual_key=$(upgrade_version_key "$actual") || { log_error "程序版本信息无效"; return 1; }
     if [ "$RELEASE_VERSION" != latest ] && [ -n "$RELEASE_VERSION" ]; then
         target_key=$(upgrade_version_key "$RELEASE_VERSION") || return 1
         if [ "$actual_key" != "$target_key" ]; then
-            log_error "Binary version $actual does not match requested $RELEASE_VERSION"
+            log_error "程序版本 $actual 与指定版本 $RELEASE_VERSION 不一致"
             return 1
         fi
     fi
@@ -1235,7 +1332,7 @@ stage_binary() {
         local_src=$(select_binary_source)
     fi
     if [ -n "$local_src" ]; then
-        log_step "Using local binary: ${local_src}"
+        log_info "使用本地程序：${local_src}"
         if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ]; then
             ln "$local_src" "$staged"
         else
@@ -1255,16 +1352,16 @@ stage_binary() {
             fi
         done
         if [ "${#candidates[@]}" -eq 0 ]; then
-            log_error "Release checksums contain no supported node artifact"
+            log_error "发布校验清单中没有受支持的节点安装包"
             return 1
         fi
         for artifact in "${candidates[@]}"; do
             resolve_download_url "$artifact"
-            log_step "Downloading binary: ${DOWNLOAD_URL}"
+            log_step "下载节点程序：${DOWNLOAD_URL}"
             if download_release_file "$DOWNLOAD_URL" "$staged"; then downloaded=1; break; fi
         done
         if [ "$downloaded" -eq 0 ]; then
-            log_error "Failed to download binary from ${DOWNLOAD_URL}"
+            log_error "节点程序下载失败：${DOWNLOAD_URL}"
             exit 1
         fi
         verify_release_checksum "$staged" "$artifact"
@@ -1272,10 +1369,12 @@ stage_binary() {
     chmod 755 "$staged"
     local report
     if ! report=$("$staged" -v); then
-        log_error "Downloaded binary failed version check"
+        log_error "节点程序版本检查失败"
         exit 1
     fi
     validate_staged_version "$report" || return 1
+    read -r _ INSTALLED_VERSION _ <<< "$report"
+    log_info "程序版本检查通过：${INSTALLED_VERSION}"
     select_target_name "$report"
 }
 
@@ -1292,7 +1391,7 @@ stage_xbctl() {
         local_src=""
     elif [ -n "$CLI_BINARY_SOURCE" ]; then
         if [ ! -f "$CLI_BINARY_SOURCE" ]; then
-            log_error "xbctl binary source not found: $CLI_BINARY_SOURCE"
+            log_error "未找到历史版管理程序：$CLI_BINARY_SOURCE"
             exit 1
         fi
         local_src="$CLI_BINARY_SOURCE"
@@ -1302,7 +1401,7 @@ stage_xbctl() {
         local_src="./xbctl-linux-${ARCH}"
     fi
     if [ -n "$local_src" ]; then
-        log_step "Using local xbctl binary: ${local_src}"
+        log_info "使用本地历史版管理程序：${local_src}"
         if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ]; then
             ln "$local_src" "$staged"
         else
@@ -1311,9 +1410,9 @@ stage_xbctl() {
     else
         local artifact="xbctl-linux-${ARCH}"
         resolve_download_url "$artifact"
-        log_step "Downloading xbctl: ${DOWNLOAD_URL}"
+        log_step "下载历史版管理程序：${DOWNLOAD_URL}"
         if ! download_release_file "$DOWNLOAD_URL" "$staged"; then
-            log_error "Failed to download xbctl from ${DOWNLOAD_URL}"
+            log_error "历史版管理程序下载失败：${DOWNLOAD_URL}"
             exit 1
         fi
         verify_release_checksum "$staged" "$artifact"
@@ -1321,12 +1420,12 @@ stage_xbctl() {
     chmod 755 "$staged"
     local report
     if ! report=$("$staged" version); then
-        log_error "Downloaded xbctl failed version check"
+        log_error "历史版管理程序版本检查失败"
         exit 1
     fi
     validate_staged_version "$report" || return 1
     if [ "$BIN_DIR" != "$DEFAULT_BIN_DIR" ] && ! "$staged" config bin-dir >/dev/null 2>&1; then
-        log_error "This release does not support --bin-dir; migrate to $DEFAULT_BIN_DIR before downgrading"
+        log_error "该版本不支持自定义程序目录，请先迁回 $DEFAULT_BIN_DIR 再降级"
         exit 1
     fi
 }
@@ -1386,7 +1485,7 @@ render_config() {
     fi
     local output
     output=$("$config_helper" "${init_args[@]}" <<<"$TOKEN") || {
-        log_error "xbctl config init failed"
+        log_error "生成安装配置失败"
         exit 1
     }
 
@@ -1429,12 +1528,12 @@ start_pre() {
             esac
             key=\${line%%=*}
             if [ "\$key" = "\$line" ]; then
-                eerror "Invalid credentials entry: missing '='"
+                eerror "凭据记录无效：缺少等号"
                 return 1
             fi
             case "\$key" in
                 ""|[0-9]*|*[!A-Za-z0-9_]*)
-                    eerror "Invalid credentials key: \$key"
+                    eerror "凭据名称无效：\$key"
                     return 1
                     ;;
             esac
@@ -1556,28 +1655,28 @@ finish_install() {
     INSTALL_COMMITTED=1
     if [ "$PREVIOUS_CLI_ENTRY_PATH" != "$CLI_SYMLINK_PATH" ] && [ -L "$PREVIOUS_CLI_ENTRY_PATH" ] &&
        [ "$(readlink "$PREVIOUS_CLI_ENTRY_PATH")" = "$PREVIOUS_CLI_PATH" ]; then
-        rm -f "$PREVIOUS_CLI_ENTRY_PATH" || log_warn "Could not remove old command entry"
+        rm -f "$PREVIOUS_CLI_ENTRY_PATH" || log_warn "无法移除旧命令入口"
     fi
     if [ "$PREVIOUS_CLI_PATH" != "$CLI_PATH" ] && [ "$PREVIOUS_CLI_PATH" != "$BINARY_PATH" ] &&
        [ "$PREVIOUS_CLI_PATH" != "$CLI_SYMLINK_PATH" ]; then
-        rm -f "$PREVIOUS_CLI_PATH" || log_warn "Could not remove old management program"
+        rm -f "$PREVIOUS_CLI_PATH" || log_warn "无法移除旧管理程序"
     fi
     if [ "$BINARY_PATH" != "$PREVIOUS_BINARY_PATH" ] && [ "$BIN_DIR" = "$PREVIOUS_BIN_DIR" ]; then
-        rm -f "$PREVIOUS_BINARY_PATH" || log_warn "Could not remove $PREVIOUS_BINARY_PATH"
+        rm -f "$PREVIOUS_BINARY_PATH" || log_warn "无法移除旧程序：$PREVIOUS_BINARY_PATH"
     fi
     if [ "$BIN_DIR" != "$PREVIOUS_BIN_DIR" ]; then
         if [ "$PREVIOUS_BINARY_PATH" != "$CLI_SYMLINK_PATH" ]; then
             if ! rm -f "$PREVIOUS_BINARY_PATH"; then
-                log_warn "New installation is active; could not remove $PREVIOUS_BINARY_PATH"
+                log_warn "新安装已运行，但无法移除旧程序：$PREVIOUS_BINARY_PATH"
             fi
         fi
         if [ "$PREVIOUS_CLI_PATH" != "$CLI_SYMLINK_PATH" ] && [ "$PREVIOUS_CLI_PATH" != "$BINARY_PATH" ]; then
             if ! rm -f "$PREVIOUS_CLI_PATH"; then
-                log_warn "New installation is active; could not remove $PREVIOUS_CLI_PATH"
+                log_warn "新安装已运行，但无法移除旧管理程序：$PREVIOUS_CLI_PATH"
             fi
         fi
     fi
-    log_info "Binary directory: $BIN_DIR"
+    log_info "程序已安装到：$BIN_DIR"
 }
 
 stop_existing_service() {
@@ -1651,7 +1750,7 @@ start_service() {
         service_start
     fi
     if ! wait_for_health; then
-        log_error "Service failed health check"
+        log_error "服务未通过健康检查"
         show_recent_logs
         return 1
     fi
@@ -1663,25 +1762,22 @@ perform_install() {
     require_reconfigure_confirmation
     TMP_DIR=$(mktemp -d)
     ensure_dirs
+    log_step "准备安装程序"
     stage_binary
     stage_xbctl
     select_target_root
+    log_step "生成配置和服务文件"
     render_config
     prepare_root_config
     render_service
+    log_step "保存恢复文件并安装"
     backup_existing_state
     install_staged_files
+    log_step "启动服务并检查运行状态"
     start_service
     finish_install
 
-    log_info "Installation succeeded"
-    log_info "Service: ${SERVICE_NAME} (${SERVICE_MANAGER})"
-    log_info "Config: ${CONFIG_FILE}"
-    log_info "Credentials: ${CREDENTIALS_FILE}"
-    if [ "$HEALTH_ENABLED" -eq 1 ]; then
-        log_info "Health: http://127.0.0.1:${HEALTH_PORT}/healthz"
-    fi
-    log_info "CLI: ${CLI_PATH}  (run '${CLI_PATH} list' if ${CLI_NAME} is not in PATH)"
+    show_completion "安装"
 }
 
 # 与 Go 升级入口保持一致：历史两段版本补零，yz 修订按数字排序。
@@ -1750,11 +1846,14 @@ perform_upgrade() {
     load_health_port_from_config "$CONFIG_FILE"
     TMP_DIR=$(mktemp -d)
     ensure_dirs
+    log_step "准备升级程序"
     stage_binary
     stage_xbctl
     select_target_root
+    log_step "生成服务文件"
     prepare_root_config
     render_service
+    log_step "保存恢复文件并替换程序"
     backup_existing_state
     stop_previous_service
     stop_existing_service
@@ -1765,9 +1864,10 @@ perform_upgrade() {
     service_reload
     if [ "$NAME_CHANGED" -eq 1 ] && [ "$OLD_SERVICE_ENABLED" -eq 1 ]; then service_enable; fi
     REPLACEMENT_SERVICE_STARTED=1
+    log_step "重启服务并检查运行状态"
     service_restart
     if ! wait_for_health; then
-        log_error "Upgrade health check failed"
+        log_error "升级后服务未通过健康检查"
         show_recent_logs
         return 1
     fi
@@ -1776,7 +1876,7 @@ perform_upgrade() {
         --meta "$INSTALL_META" \
         --version "$RELEASE_VERSION"
     finish_install
-    log_info "Upgrade succeeded"
+    show_completion "升级"
 }
 
 confirm_uninstall() {
@@ -1784,15 +1884,16 @@ confirm_uninstall() {
         return
     fi
     echo
-    read -r -p "Proceed with uninstall? [y/N]: " answer
+    read -r -p "确认卸载？[y/N]：" answer
     if ! [[ "$answer" =~ ^[Yy]$ ]]; then
-        log_warn "Uninstall cancelled"
+        log_warn "已取消卸载"
         exit 0
     fi
 }
 
 perform_uninstall() {
     confirm_uninstall
+    log_step "停止服务并移除程序"
     if [ -f "$SERVICE_PATH" ]; then
         service_stop >/dev/null 2>&1 || true
         service_disable >/dev/null 2>&1 || true
@@ -1805,37 +1906,44 @@ perform_uninstall() {
     rm -f "$BIN_DIR_FILE"
     if [ "$PURGE" -eq 1 ]; then
         rm -rf "$INSTALL_ROOT"
-        log_info "Removed ${INSTALL_ROOT}"
+        log_info "已删除安装数据目录：${INSTALL_ROOT}"
     else
         rm -f "$INSTALL_META"
-        log_info "Config preserved under ${INSTALL_ROOT}"
+        log_info "配置已保留在：${INSTALL_ROOT}"
     fi
-    log_info "Uninstall complete"
+    show_banner "YZ-Agent 卸载完成"
 }
 
 perform_status() {
     detect_current_state
-    echo
-    echo -e "${BOLD}${SERVICE_NAME} install status${NC}"
-    echo "  state:   ${CURRENT_STATE}"
-    echo "  bin-dir: ${BIN_DIR}"
+    local state label key val
+    case "$CURRENT_STATE" in fresh) state=未安装 ;; installed) state=已安装 ;; partial) state=安装不完整 ;; esac
+    show_banner "YZ-Agent 安装状态"
+    log_config "状态：${state}"
+    log_config "程序目录：${BIN_DIR}"
     if [ -f "$INSTALL_META" ]; then
-        echo "  meta:    ${INSTALL_META}"
+        log_config "安装记录：${INSTALL_META}"
         if [ -x "$CLI_PATH" ]; then
             "$CLI_PATH" list 2>/dev/null || true
         else
             # Simple key extraction from JSON (no Python needed)
-            local val
             for key in config_mode version latest_instance_id instance_count updated_at; do
+                case "$key" in
+                    config_mode) label=部署模式 ;;
+                    version) label=版本 ;;
+                    latest_instance_id) label=最近实例 ;;
+                    instance_count) label=实例数量 ;;
+                    updated_at) label=更新时间 ;;
+                esac
                 val=$(sed -n "s/.*\"${key}\": *\"\{0,1\}\([^\"]*\)\"\{0,1\}.*/\1/p" "$INSTALL_META" | head -1)
                 val="${val%,}"  # strip trailing comma from numeric JSON values
-                [ -n "$val" ] && echo "  ${key}: ${val}"
+                [ -n "$val" ] && log_config "${label}：${val}"
             done
         fi
     fi
     if [ -f "$SERVICE_PATH" ]; then
-        echo "  service: ${SERVICE_NAME}"
-        echo "  manager: ${SERVICE_MANAGER}"
+        log_config "服务：${SERVICE_NAME}"
+        log_config "服务管理器：${SERVICE_MANAGER}"
         service_status || true
     fi
 }
@@ -1856,6 +1964,8 @@ main() {
             ;;
     esac
 
+    # 无效安装请求在创建锁、安装依赖等系统操作之前报错。
+    if [ "$ACTION" = install ]; then validate_install_request; fi
     check_root
     select_install_root
     lock_installation
@@ -1863,7 +1973,11 @@ main() {
     detect_arch
     detect_os
     detect_service_manager
-    if [ "${YZ_INSTALL_PARENT_LOCK:-}" != 1 ] && { [ "$ACTION" != upgrade ] || [ "$RELEASE_VERSION" != latest ]; }; then install_dependencies; fi
+    show_install_config
+    if [ "${YZ_INSTALL_PARENT_LOCK:-}" != 1 ] && \
+       { [ "$ACTION" = install ] || { [ "$ACTION" = upgrade ] && [ "$RELEASE_VERSION" != latest ]; }; }; then
+        install_dependencies
+    fi
 
     case "$ACTION" in
         install)
@@ -1876,7 +1990,7 @@ main() {
             perform_uninstall
             ;;
         *)
-            log_error "Unknown action: $ACTION"
+            log_error "不支持的操作；请使用 --help 查看用法"
             usage
             exit 1
             ;;

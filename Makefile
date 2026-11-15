@@ -1,4 +1,4 @@
-VERSION ?= v2.37.2
+VERSION ?= v2.37.3
 TEST_EXEC ?=
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -29,6 +29,8 @@ build-all: build-linux build-linux-arm64
 
 # Run tests
 test:
+	bash tests/install_output_test.sh
+	bash tests/install_dependencies_test.sh
 	bash tests/upgrade_version_test.sh
 	bash tests/download_mirrors_test.sh
 	bash tests/install_service_manager_test.sh
