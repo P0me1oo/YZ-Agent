@@ -1,0 +1,141 @@
+{
+  "version": "v2.37.3",
+  "source_commit": "416ca5385c9764e135cbe877dfa3c6cc96e6bbb4",
+  "go_version": "go1.27.3",
+  "verified_at": "2026-11-16T00:00:21.043334+00:00",
+  "release_url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.37.3",
+  "published_at": "2026-11-15T23:59:59Z",
+  "asset_count": 12,
+  "checksum_entries": 11,
+  "checksums_verified": true,
+  "compatibility_files_identical": true,
+  "embedded_installer_verified": true,
+  "version_outputs": {
+    "yz-agent-linux-amd64": "yz-agent v2.37.3 (built 2026-11-15T23:56:20Z, commit 416ca5385c9764e135cbe877dfa3c6cc96e6bbb4)\nxray-core: fork v26.11.1 (upstream v26.10.31 @ a4a3dff5b20c2faae567b742c172c7b95e75c083; fork commit 3c480b0c0d736157547f80036c0eb4687d3f1586; module github.com/P0me1oo/YZ-Xray-core@v0.0.0-20261103192507-3c480b0c0d73)\nsing-box: requested v1.14.0, resolved v1.15.1 (upstream commit 0b8995879f29a9b98ee027bc17b75e101445b238; fork commit 560816cb3343a9081eff758d988c7fbef767f92b; module github.com/P0me1oo/YZ-sing-box@v1.15.1)\nsing-shadowsocks: upstream v0.2.8 @ e0612494bafdd1429e9632bc52fd278585d28690; Node compatibility source ./compat/sing-shadowsocks@(devel)\nanytls: upstream v0.0.11 @ 130d2e61b8895727bfed4942c535e91b246a9603; Node compatibility source ./compat/sing-anytls@(devel)",
+    "xbctl-linux-amd64": "xbctl v2.37.3 (built 2026-11-15T23:56:20Z, commit 416ca5385c9764e135cbe877dfa3c6cc96e6bbb4)\nxray-core: fork v26.11.1 (upstream v26.10.31 @ a4a3dff5b20c2faae567b742c172c7b95e75c083; fork commit 3c480b0c0d736157547f80036c0eb4687d3f1586; module github.com/P0me1oo/YZ-Xray-core@v0.0.0-20261103192507-3c480b0c0d73)\nsing-box: requested v1.14.0, resolved v1.15.1 (upstream commit 0b8995879f29a9b98ee027bc17b75e101445b238; fork commit 560816cb3343a9081eff758d988c7fbef767f92b; module not-linked)\nsing-shadowsocks: upstream v0.2.8 @ e0612494bafdd1429e9632bc52fd278585d28690; Node compatibility source not-linked\nanytls: upstream v0.0.11 @ 130d2e61b8895727bfed4942c535e91b246a9603; Node compatibility source not-linked"
+  },
+  "assets": [
+    {
+      "name": "SHA256SUMS",
+      "size": 997,
+      "sha256": "4de4955b7be51607eefd22e1f1ad71c0edf5d1c5d14bc87e3bdd45edb70a51eb",
+      "uploaded_digest": "sha256:4de4955b7be51607eefd22e1f1ad71c0edf5d1c5d14bc87e3bdd45edb70a51eb",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/SHA256SUMS",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "install.sh",
+      "size": 70173,
+      "sha256": "9cee3cbf340991e9ba1d9ac7f012e4234f6e274cc0ca1f7947eef8cc0faa40b3",
+      "uploaded_digest": "sha256:9cee3cbf340991e9ba1d9ac7f012e4234f6e274cc0ca1f7947eef8cc0faa40b3",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/install.sh",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "size": 33128608,
+      "sha256": "3ee04c3a7e1a10fc0d18f64c2bd82e3549cc1321e1e46fbc75770c71b944eb81",
+      "uploaded_digest": "sha256:3ee04c3a7e1a10fc0d18f64c2bd82e3549cc1321e1e46fbc75770c71b944eb81",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/xbctl-linux-amd64",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "size": 4885,
+      "sha256": "25906fbec93ba9ceb28490877759f5b93dc5cf9a0c184b9b89fd0889c9daefdc",
+      "uploaded_digest": "sha256:25906fbec93ba9ceb28490877759f5b93dc5cf9a0c184b9b89fd0889c9daefdc",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/xbctl-linux-amd64.buildinfo.txt",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "size": 30867616,
+      "sha256": "f57702c1e0ff52c22ea9291e955ea3bf2a35d1f952b4f0b5464f9de8a97744e2",
+      "uploaded_digest": "sha256:f57702c1e0ff52c22ea9291e955ea3bf2a35d1f952b4f0b5464f9de8a97744e2",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/xbctl-linux-arm64",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "size": 4887,
+      "sha256": "39522268255efd7999cd4bd2d8ab5cc932887394b7600e3bf75760d5add1166e",
+      "uploaded_digest": "sha256:39522268255efd7999cd4bd2d8ab5cc932887394b7600e3bf75760d5add1166e",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/xbctl-linux-arm64.buildinfo.txt",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "size": 78962848,
+      "sha256": "4f4d0d0035a848d0ea656c454d1a023263b7f5b2a8590539aaaaf773c7244571",
+      "uploaded_digest": "sha256:4f4d0d0035a848d0ea656c454d1a023263b7f5b2a8590539aaaaf773c7244571",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/xboard-node-linux-amd64",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "size": 72941728,
+      "sha256": "de58e4233cb8f0c2b48387997e0b3bc1f759af2178978bb5a03cdeab7edc015c",
+      "uploaded_digest": "sha256:de58e4233cb8f0c2b48387997e0b3bc1f759af2178978bb5a03cdeab7edc015c",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/xboard-node-linux-arm64",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "size": 78962848,
+      "sha256": "4f4d0d0035a848d0ea656c454d1a023263b7f5b2a8590539aaaaf773c7244571",
+      "uploaded_digest": "sha256:4f4d0d0035a848d0ea656c454d1a023263b7f5b2a8590539aaaaf773c7244571",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/yz-agent-linux-amd64",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "size": 18452,
+      "sha256": "ab9a4a2eb2dfbf2a8a6cad34978821a218852db660bed9cf79ed1e42ca47ee79",
+      "uploaded_digest": "sha256:ab9a4a2eb2dfbf2a8a6cad34978821a218852db660bed9cf79ed1e42ca47ee79",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/yz-agent-linux-amd64.buildinfo.txt",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "size": 72941728,
+      "sha256": "de58e4233cb8f0c2b48387997e0b3bc1f759af2178978bb5a03cdeab7edc015c",
+      "uploaded_digest": "sha256:de58e4233cb8f0c2b48387997e0b3bc1f759af2178978bb5a03cdeab7edc015c",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/yz-agent-linux-arm64",
+      "anonymous_download_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "size": 18454,
+      "sha256": "1c855b6cdc3150ace46dc10956e842e8f10f503ff172a9826657bb9e2d31e15c",
+      "uploaded_digest": "sha256:1c855b6cdc3150ace46dc10956e842e8f10f503ff172a9826657bb9e2d31e15c",
+      "url": "https://github.com/P0me1oo/YZ-Agent/releases/download/v2.37.3/yz-agent-linux-arm64.buildinfo.txt",
+      "anonymous_download_verified": true
+    }
+  ],
+  "validation": {
+    "installer_script_suites": 10,
+    "installer_syntax": "passed",
+    "agentcli_go_tests": "passed; CGO_ENABLED=0; release build tags",
+    "full_repository_race_tests": "not rerun for installer-only change",
+    "mihomo_integration": "not rerun",
+    "native_firewall_matrix": "not rerun",
+    "server_updates": false,
+    "docker_publication": false
+  },
+  "tag_verified": true,
+  "latest_verified": true,
+  "workflow_runs": [
+    {
+      "id": 43777497199,
+      "event": "branch_push",
+      "status": "failed_before_steps",
+      "reason": "account locked due to billing issue"
+    },
+    {
+      "id": 43777600793,
+      "event": "tag_push",
+      "status": "failed_before_steps",
+      "reason": "account locked due to billing issue"
+    }
+  ]
+}
