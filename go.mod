@@ -295,7 +295,7 @@ require (
 	zombiezen.com/go/capnproto2 v2.18.2+incompatible // indirect
 )
 
-replace github.com/sagernet/sing-box => github.com/P0me1oo/YZ-sing-box v1.15.1
+replace github.com/sagernet/sing-box => github.com/P0me1oo/YZ-sing-box v1.16.0
 
 // 上游 v0.0.11 的流关闭状态存在数据竞争；兼容补丁随 Node 固定提交构建。
 replace github.com/anytls/sing-anytls => ./compat/sing-anytls
@@ -308,4 +308,4 @@ replace github.com/sagernet/sing-vmess => ./compat/sing-vmess
 
 // 上游 v26.10.31 没有对应的 Go module Tag；保留兼容的 require 版本，
 // 并将实际依赖固定到 YZ fork 的发布提交，避免解析到移动分支。
-replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261103192507-3c480b0c0d73
+replace github.com/xtls/xray-core => github.com/P0me1oo/YZ-Xray-core v0.0.0-20261116081756-36f4516090e3

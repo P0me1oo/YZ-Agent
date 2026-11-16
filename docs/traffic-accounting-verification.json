@@ -1,0 +1,97 @@
+{
+  "version": "v2.38.0",
+  "environment": {
+    "go": "1.27.3",
+    "os": "linux",
+    "arch": "amd64",
+    "race": true,
+    "cc": "Zig 0.15.2"
+  },
+  "full_regression": {
+    "returncode": 0,
+    "counts": {
+      "tests": 1018,
+      "subtests": 962,
+      "packages": 41
+    },
+    "fail": [],
+    "skip": [
+      {
+        "Package": "github.com/P0me1oo/YZ-Agent/internal/firewall",
+        "Test": "TestNativeClientProbe"
+      },
+      {
+        "Package": "github.com/P0me1oo/YZ-Agent/internal/firewall",
+        "Test": "TestNativeFirewallLifecycle"
+      },
+      {
+        "Package": "github.com/P0me1oo/YZ-Agent/internal/firewall",
+        "Test": "TestNativeSourceFirewallLifecycle"
+      },
+      {
+        "Package": "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+        "Test": "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+      },
+      {
+        "Package": "github.com/P0me1oo/YZ-Agent/internal/service",
+        "Test": "TestNativeSourceSOCKSProbe"
+      },
+      {
+        "Package": "github.com/P0me1oo/YZ-Agent/internal/service",
+        "Test": "TestNativeSourceSOCKSRuntime"
+      }
+    ]
+  },
+  "dependency_packages": 8,
+  "installer_scripts": 10,
+  "core_sources": {
+    "sing_box": {
+      "version": "v1.16.0",
+      "commit": "ad0c0cfbc7c3827f3058aa666d9f1a3b0e0fd085"
+    },
+    "xray": {
+      "version": "v26.12.0",
+      "commit": "36f4516090e3e2fe88dcbe0840126582cd6fb795"
+    }
+  },
+  "integration": {
+    "seconds": 59.448,
+    "coverage": [
+      "DHT",
+      "revocation",
+      "DNS accounting",
+      "connection tracking",
+      "protocol switching"
+    ],
+    "source_mode": "local fixed core content matches final module source"
+  },
+  "source_files": {
+    "Makefile": "7f44379e7ad882c2a07b972ca380f266317bcacb23569718b82753deb84e9ba1",
+    "cmd/xbctl/main.go": "203452ff7ba4a76072cfc851909843b3c2a5ffab83e044867b25160e8b052605",
+    "cmd/yz-agent/main.go": "961058f4181d56be277bec9138a3d6ab50f015239cb23e9327758bf9e59e3666",
+    "go.mod": "50be7d32e370c91fc61a17ced9991f67498066134645026bbd4fe654af1e25ca",
+    "go.sum": "7226fa15913a3675035d5ac268f81693f81f39764cbc97fefe9268eb4ddb1680",
+    "internal/buildinfo/buildinfo.go": "d5ad92b6da29cec4df7a87868e474e5240b31727e9bacc394d633f6a5cbe3ed0",
+    "internal/buildinfo/buildinfo_test.go": "5253a3e267683a7f95e95afd344f3e4c3ce2f247231c1f71b918300a48c64bb3",
+    "internal/directwg/connection.go": "91b351b851fdc73193ad82733c6c17f4a8444a4f82e69a0627cf202457f1dda4",
+    "internal/directwg/kernel.go": "4a460e2a9de0fc9b28bbf3cd818289c7db394ba6bffdea04287d997216963a6c",
+    "internal/directwg/state.go": "cbe79d5e06107f3245cda0570ad648fc5bbfd6a7155c08bf2a3ef791ffb36360",
+    "internal/kernel/singbox/access_log.go": "838e629e59dceb81e0c06c3b3f11031a2d7708c7d3481729fe0194d5061a54f8",
+    "internal/kernel/singbox/config.go": "b62fe6dc50b7f777d7ff04015b5762afc21ef92bda830aafca6e8950110f55d8",
+    "internal/kernel/singbox/conntracker.go": "d5b27e0a779fb857ac73018bcf45f74f4660d7b81d25bd94f9c20b5d6d18fc12",
+    "internal/kernel/singbox/direct_outbound_source.go": "aeb7c98c7aa6f95fec4aff8dfb9d07ee04c1ceb9969c1aeeb84fdcbee5e523b5",
+    "internal/kernel/singbox/relay.go": "4f56bd5761b352c2ac9ae68169f08cdb31583e2344c924cbaa5a9a9e0fc1a563",
+    "internal/kernel/singbox/route_conditions_runtime_test.go": "d806bca8af1dbba0975eed8e500df704c8957b534fa9fa52b34d2c8ba81dd8a3",
+    "internal/kernel/xray/access_log.go": "7cbe8b9df58b4d6c3abd715f827cd1e30402c4693b61ad997af21f641a01b8ec",
+    "internal/directwg/connection_test.go": "b8144fd1f206d6e79294c23ff56b55f0d528ee9abacd0369b72cbdba67485732",
+    "internal/directwg/kernel_test.go": "f09928c27ab9384bc9ae6dd4f5d6f19aa78775732e44018c83ec7360515bfcf3",
+    "internal/kernel/singbox/conntracker_revocation_runtime_test.go": "c8287c0ad2491ce1aff54803f222c36e1e4202e5a9e54014c8cd9eb7fe19492f",
+    "internal/kernel/singbox/conntracker_revocation_test.go": "4a7e49b10247e5d01527e135592431816849d2f2316b96c70e327f84dbd1046e",
+    "internal/kernel/singbox/dht_revocation_runtime_test.go": "c6dc59dd6ebb0d4d9ce626d14e5bfdf3029034124f52b325120ab9078b08a328",
+    "internal/kernel/singbox/dht_runtime_test.go": "2b6038c642b2864c142ed62c590abf44b9f1d4aba35b9819759bbc4fd66a3c86",
+    "internal/kernel/singbox/dns_accounting.go": "cdbd2edaabcd6e9903af79976313b24a36842d239325b2c55050f70af91bea61",
+    "internal/kernel/singbox/dns_accounting_runtime_test.go": "c333f39bb79aa5d26cb0f2cf1ed6d13af329dc20b6e5ac4ab61cb7ef485bb555",
+    "internal/kernel/singbox/dns_accounting_test.go": "aaca093d0ab57a681d0d6480f396e8d80dab68c86c4bd23dfad15607cb94ee2f",
+    "internal/kernel/singbox/singbox_traffic_runtime_test.go": "a2f05c0aa5e459a2db74db6e2b28338cd3575c206d7948ebd95761be35952392"
+  }
+}

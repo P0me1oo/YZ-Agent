@@ -150,6 +150,7 @@ systemd 日志由 journal 提供；OpenRC 的 `yz-agent` 日志写入 `/var/log/
 ## 扩展说明
 
 - 节点运行检查、证书状态与套餐临时限速：[docs/node-operations.md](docs/node-operations.md)
+- 用户流量口径、DNS 接管与权限撤销：[docs/traffic-accounting.md](docs/traffic-accounting.md)
 
 - 自动防火墙和 HY2 端口跳跃：[docs/firewall-port-hopping.md](docs/firewall-port-hopping.md)
 - Xray REALITY 最低客户端版本: [docs-xray-reality.md](docs-xray-reality.md)

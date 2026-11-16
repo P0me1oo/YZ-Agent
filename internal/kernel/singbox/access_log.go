@@ -11,6 +11,22 @@ import (
 func (s *SingBox) SetAccessLog(recorder *accesslog.Recorder) { s.accessLog = recorder }
 func (s *SingBox) SetBlockLog(recorder *accesslog.Recorder)  { s.blockLog = recorder }
 
+// 后续 UDP 报文的拦截来自核心观察接口；沿用已认证会话的身份，不重复登记连接。
+func (t *ConnTracker) BlockedDHTPacket(
+	ctx context.Context,
+	metadata adapter.InboundContext,
+	_ adapter.Rule,
+	outbound adapter.Outbound,
+) {
+	user := accesslog.ContextUser(ctx)
+	if user <= 0 {
+		t.usersMu.RLock()
+		user = t.uuidMap[metadata.User]
+		t.usersMu.RUnlock()
+	}
+	t.recordBlock(ctx, user, metadata, outbound, "udp")
+}
+
 func (t *ConnTracker) recordBlock(ctx context.Context, user int, metadata adapter.InboundContext, outbound adapter.Outbound, network string) {
 	if outbound == nil {
 		return

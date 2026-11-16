@@ -105,10 +105,16 @@ func routeTestClient(t *testing.T, node *model.NodeSpec, user model.UserSpec) ad
 	if node.Protocol != "vless" {
 		return runtimeClient(t, node, user)
 	}
-	data, err := json.Marshal(map[string]any{"log": map[string]any{"disabled": true}, "outbounds": []any{map[string]any{
+	outboundOptions := map[string]any{
 		"type": "vless", "tag": "probe", "server": "127.0.0.1", "server_port": node.ServerPort,
 		"uuid": user.UUID, "packet_encoding": "xudp", "connect_timeout": "5s",
-	}}})
+	}
+	if node.Multiplex != nil && node.Multiplex.Enabled {
+		outboundOptions["multiplex"] = map[string]any{
+			"enabled": true, "protocol": "smux", "max_connections": 1,
+		}
+	}
+	data, err := json.Marshal(map[string]any{"log": map[string]any{"disabled": true}, "outbounds": []any{outboundOptions}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -78,6 +78,23 @@ func (h *accessLogOutbound) Dispatch(ctx context.Context, link *transport.Link) 
 	h.Handler.Dispatch(ctx, link)
 }
 
+// 后续报文检查调用实际命中的拦截出站，不重复登记连接或写入首次访问日志。
+// 可选接口只使用原有核心类型，正式固定依赖和开发联调都能构建。
+func (h *accessLogOutbound) BlockedDHTPacket(ctx context.Context, target net.Destination) {
+	request, _ := ctx.Value(accessLogRequestKey{}).(*accessLogRequest)
+	rule := model.PanelBlockID(h.Tag())
+	if request == nil || rule <= 0 {
+		return
+	}
+	domain, address := "", ""
+	if target.Address.Family().IsDomain() {
+		domain = target.Address.Domain()
+	} else {
+		address = target.Address.IP().String()
+	}
+	h.blockLog.AddBlock(request.user, rule, domain, address, uint16(target.Port), "udp")
+}
+
 // 仅在启动前注入；每个核心实例通过自己的上下文取得队列。
 func (x *Xray) SetAccessLog(recorder *accesslog.Recorder) { x.accessLog = recorder }
 func (x *Xray) SetBlockLog(recorder *accesslog.Recorder)  { x.blockLog = recorder }
@@ -95,5 +112,9 @@ func (d *LimitDispatcher) accessContext(ctx context.Context, user int, dest net.
 	if user <= 0 {
 		user = accesslog.ContextUser(ctx)
 	}
-	return context.WithValue(ctx, accessLogRequestKey{}, &accessLogRequest{user: user, dest: dest, landing: inbound.Tag == relayLandingInboundTag || accesslog.ContextUser(ctx) > 0})
+	ctx = context.WithValue(ctx, accessLogRequestKey{}, &accessLogRequest{
+		user: user, dest: dest,
+		landing: inbound.Tag == relayLandingInboundTag || accesslog.ContextUser(ctx) > 0,
+	})
+	return ctx
 }

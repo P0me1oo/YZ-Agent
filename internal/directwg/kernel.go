@@ -29,20 +29,46 @@ func Wrap(base kernel.Kernel) kernel.Kernel { return &Managed{Kernel: base, stat
 func (m *Managed) RetireTraffic(candidates model.TrafficCounters) model.TrafficCounters {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.direct {
+	// 两份账本共享合并后的采样基线，不能只回收其中一份。
+	// Managed 锁排除切换，状态锁保留 WG 写入与回收之间的顺序；内核回收不执行网络 I/O。
+	m.state.mu.Lock()
+	defer m.state.mu.Unlock()
+	if len(m.state.totals) == 0 && len(m.state.users) == 0 {
 		if retire, ok := m.Kernel.(kernel.TrafficRetirer); ok {
 			return retire.RetireTraffic(candidates)
 		}
 		return model.TrafficCounters{}
 	}
-	m.state.mu.Lock()
-	defer m.state.mu.Unlock()
-	out := model.TrafficCounters{Users: make(map[int][2]int64)}
+	base, _, _, err := m.Kernel.GetUserTraffic(context.Background())
+	if err != nil {
+		return model.TrafficCounters{}
+	}
+	eligible := make(map[int][2]int64)
+	parts := model.TrafficCounters{
+		Users: make(map[int][2]int64), Relay: candidates.Relay, RelayUsers: candidates.RelayUsers,
+	}
 	for id, value := range candidates.Users {
-		if current, ok := m.state.totals[id]; ok && current == value && m.state.users[id] == nil {
-			delete(m.state.totals, id)
-			out.Users[id] = value
+		wg := m.state.totals[id]
+		current := [2]int64{base[id][0] + wg[0], base[id][1] + wg[1]}
+		if current == value && m.state.users[id] == nil {
+			eligible[id] = value
+			parts.Users[id] = base[id]
 		}
+	}
+	out := model.TrafficCounters{Users: make(map[int][2]int64)}
+	if retire, ok := m.Kernel.(kernel.TrafficRetirer); ok {
+		out = retire.RetireTraffic(parts)
+		if out.Users == nil {
+			out.Users = make(map[int][2]int64)
+		}
+	}
+	for id, value := range eligible {
+		_, removed := out.Users[id]
+		if base[id] != [2]int64{} && !removed {
+			continue
+		}
+		delete(m.state.totals, id)
+		out.Users[id] = value
 	}
 	return out
 }
@@ -184,13 +210,23 @@ func (m *Managed) RemoveUsers(users []model.UserSpec) (int, error) {
 }
 func (m *Managed) GetUserTraffic(ctx context.Context) (map[int][2]int64, map[int]map[string]bool, int, error) {
 	m.mu.Lock()
-	direct := m.direct
-	m.mu.Unlock()
-	if !direct {
-		return m.Kernel.GetUserTraffic(ctx)
+	defer m.mu.Unlock()
+	traffic, alive, count, err := m.Kernel.GetUserTraffic(ctx)
+	if err != nil {
+		return nil, nil, 0, err
 	}
-	a, b, c := m.state.snapshot()
-	return a, b, c, nil
+	wgTraffic, wgAlive, wgCount := m.state.snapshot()
+	if traffic == nil {
+		traffic = make(map[int][2]int64, len(wgTraffic))
+	}
+	for id, value := range wgTraffic {
+		current := traffic[id]
+		traffic[id] = [2]int64{current[0] + value[0], current[1] + value[1]}
+	}
+	if m.direct {
+		alive, count = wgAlive, wgCount
+	}
+	return traffic, alive, count, nil
 }
 func (m *Managed) CloseUserConnections(ctx context.Context, uuid string) error {
 	m.mu.Lock()

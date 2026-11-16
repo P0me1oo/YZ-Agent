@@ -194,10 +194,25 @@ func (s *State) transfer(id, direction, size int, expected *userState) bool {
 	if !validAt(u, time.Now()) || (expected != nil && expected != u) || u.ctx.Err() != nil {
 		return false
 	}
+	s.addTrafficLocked(id, direction, size)
+	return true
+}
+
+// 下载已成功写出后只结算字节，不再以当前授权判断是否计费。
+// 撤权、到期和历史账本回收都不能抹掉已完成写入的尾部流量。
+func (s *State) recordDownload(id, size int) {
+	if id <= 0 || size <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.addTrafficLocked(id, 1, size)
+	s.mu.Unlock()
+}
+
+func (s *State) addTrafficLocked(id, direction, size int) {
 	total := s.totals[id]
 	total[direction] += int64(size)
 	s.totals[id] = total
-	return true
 }
 
 // 等待只发生在该用户的连接中，不阻塞所有用户共用的 WG 收发队列。

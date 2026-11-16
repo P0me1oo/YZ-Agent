@@ -38,6 +38,7 @@ func directOutboundContext(ctx context.Context, custom []model.OutboundConfig) (
 		}
 	}
 	registry := include.OutboundRegistry()
+	registerDNSAccounting(registry)
 	if len(bindings) > 0 {
 		outbound.Register[option.DirectOutboundOptions](registry, C.TypeDirect,
 			func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.DirectOutboundOptions) (adapter.Outbound, error) {

@@ -394,6 +394,7 @@ func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpe
 	t.usersMu.Lock()
 	t.uuidMap, t.identities, t.relayNodes = userMap, identities, nodes
 	t.relayEntry = nc.IsRelayEntry()
+	t.anonymous = nc.IsDirectWireGuard() || nc.IsRelayLanding()
 	for _, uid := range userMap {
 		if t.users[uid] == nil {
 			t.users[uid] = &userStats{userTraffic: t.traffic.user(uid), ips: make(map[string]int)}
@@ -423,8 +424,8 @@ func (t *ConnTracker) resolveUser(name string, outbound adapter.Outbound) (strin
 	if outbound != nil {
 		nodeID = t.relayNodes[outbound.Tag()]
 	}
-	// HY2 旧 QUIC 会话保留认证时的名称；删除或轮换后的新请求必须拒绝，不能回退到默认出站。
-	allowed := !t.relayEntry || uid > 0
+	// 旧 QUIC 会话保留原认证名称；普通节点也必须拒绝已删除或轮换的身份。
+	allowed := uid > 0 || t.anonymous
 	t.usersMu.RUnlock()
 	return canonical, uid, user, t.traffic.relayCounters(uid, nodeID), allowed
 }

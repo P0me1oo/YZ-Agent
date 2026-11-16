@@ -10,14 +10,14 @@ const (
 	// Xray 上游和 YZ fork 的发布标识必须指向固定引用，不能使用移动分支。
 	XrayUpstreamTag    = "v26.10.31"
 	XrayUpstreamCommit = "a4a3dff5b20c2faae567b742c172c7b95e75c083"
-	XrayForkVersion    = "v26.11.1"
-	XrayForkCommit     = "3c480b0c0d736157547f80036c0eb4687d3f1586"
+	XrayForkVersion    = "v26.12.0"
+	XrayForkCommit     = "36f4516090e3e2fe88dcbe0840126582cd6fb795"
 
 	// sing-box 的 require 版本和 replace 后实际使用的版本需要同时记录。
 	SingBoxRequestedVersion = "v1.14.0"
-	SingBoxResolvedVersion  = "v1.15.1"
+	SingBoxResolvedVersion  = "v1.16.0"
 	SingBoxUpstreamCommit   = "0b8995879f29a9b98ee027bc17b75e101445b238"
-	SingBoxForkCommit       = "560816cb3343a9081eff758d988c7fbef767f92b"
+	SingBoxForkCommit       = "ad0c0cfbc7c3827f3058aa666d9f1a3b0e0fd085"
 
 	// SS2022 关闭补丁与 Node 同一提交发布，上游来源保持独立可查。
 	ShadowsocksUpstreamVersion = "v0.2.8"

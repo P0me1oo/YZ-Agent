@@ -33,7 +33,7 @@ func (c *limitedConn) Write(p []byte) (int, error) {
 	}
 	n, err := c.Conn.Write(p)
 	if n > 0 {
-		c.state.transfer(c.id, 1, n, c.owner)
+		c.state.recordDownload(c.id, n)
 	}
 	return n, err
 }
@@ -63,7 +63,7 @@ func (c *limitedPacketConn) WritePacket(p *buf.Buffer, dest M.Socksaddr) error {
 	}
 	err := c.PacketConn.WritePacket(p, dest)
 	if err == nil {
-		c.state.transfer(c.id, 1, n, c.owner)
+		c.state.recordDownload(c.id, n)
 	}
 	return err
 }

@@ -154,6 +154,7 @@ type ConnTracker struct {
 	identities   map[string]relayIdentity
 	relayNodes   map[string]int
 	relayEntry   bool
+	anonymous    bool // 普通 WG 和私有中转落地由外层认证，不具有面板用户名称。
 
 	// relaySources 按用户和实际出网节点登记来源 IP 引用计数，只在中转入口使用。
 	relaySourceMu sync.Mutex
@@ -420,6 +421,14 @@ func (t *ConnTracker) RoutedPacketConnection(
 	if err != nil {
 		_ = conn.Close()
 		return conn
+	}
+	// 可选核心接口只保存本次会话的日志身份，撤权后仍能归属已有连接。
+	if capture, ok := conn.(interface{ SetDHTBlockContext(context.Context) }); ok {
+		blockCtx := ctx
+		if uid > 0 {
+			blockCtx = accesslog.ContextWithUser(ctx, uid)
+		}
+		capture.SetDHTBlockContext(blockCtx)
 	}
 	connID := t.nextID()
 
