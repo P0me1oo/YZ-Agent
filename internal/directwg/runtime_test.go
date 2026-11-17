@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,6 +156,12 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 			}
 			k := directwg.Wrap(base)
 			recorder := &accesslog.Recorder{NodeID: 5}
+			var policy atomic.Uint64
+			policy.Store(1)
+			recorder.SetPolicy(func() (bool, uint64) {
+				value := policy.Load()
+				return value&1 != 0, value >> 1
+			})
 			recorder.Enable(true)
 			k.(interface{ SetAccessLog(*accesslog.Recorder) }).SetAccessLog(recorder)
 			t.Cleanup(k.Stop)
@@ -200,6 +207,20 @@ func TestDirectWireGuardTCPUDPAndUsers(t *testing.T) {
 			if !alive[1]["127.0.0.1"] || alive[1]["10.0.0.2"] {
 				t.Fatal("在线来源必须是隧道外地址")
 			}
+			policy.Store(2)
+			exchange(t, client, "tcp", tcp)
+			exchange(t, client, "udp", udp)
+			if batch, _ := recorder.Next(); batch != nil {
+				t.Fatal("关闭后普通 WG 仍采集访问记录")
+			}
+			policy.Store(3)
+			exchange(t, client, "tcp", tcp)
+			exchange(t, client, "udp", udp)
+			batch, _ = recorder.Next()
+			if batch == nil || len(batch.Records) != 2 {
+				t.Fatal("重新开启后普通 WG 未恢复新记录")
+			}
+			recorder.Ack(batch.ID)
 			if _, _, e = k.UpdateUsers(users); e != nil {
 				t.Fatal(e)
 			}

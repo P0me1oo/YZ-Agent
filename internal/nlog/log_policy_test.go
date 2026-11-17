@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestLogPolicySilencesAndRestoresAllOutputsFromPanel(t *testing.T) {
+func TestLogPolicyFailsClosedWithoutKeysAndRestoresFromPanel(t *testing.T) {
 	logMu.RLock()
 	writer, min, color := logWriter, logMin, logColor
 	logMu.RUnlock()

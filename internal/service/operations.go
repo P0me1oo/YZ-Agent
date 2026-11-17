@@ -176,14 +176,19 @@ func (s *Service) updateOperations(ctx context.Context) {
 				})
 				if !ok {
 					result.Status = "unsupported"
-				} else if u, address, err := healthcheck.Target(job, target); err != nil {
+				} else if u, addresses, err := healthcheck.Target(job, target); err != nil {
 					result.Status = "failed"
 					result.Steps = append(result.Steps, healthcheck.Step{Name: "target", Status: "failed", Error: err.Error()})
 				} else {
 					result.Routes = healthcheck.CheckRoutes(job, routes, func(ctx context.Context, tag string) (int64, error) {
-						return healthcheck.Request(ctx, u, address, func(ctx context.Context, network, address string) (net.Conn, error) {
-							return dialer.ProbeDial(ctx, tag, network, address)
-						})
+						return healthcheck.Request(
+							ctx,
+							u,
+							addresses,
+							func(ctx context.Context, network, address string) (net.Conn, error) {
+								return dialer.ProbeDial(ctx, tag, network, address)
+							},
+						)
 					})
 					for _, route := range result.Routes {
 						if route.Status == "failed" {

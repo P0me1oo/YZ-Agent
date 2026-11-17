@@ -68,14 +68,12 @@ func Sanitize(message string) string {
 func Publish(scope string, event Event) {
 	logMu.RLock()
 	defer logMu.RUnlock()
-	if LogsDisabled() {
+	scope = effectiveScope(scope)
+	if !logsReadyLocked(scope) {
 		return
 	}
 	eventMu.RLock()
 	defer eventMu.RUnlock()
-	if scope == "" {
-		scope = globalScope
-	}
 	if callback := subscriptions[scope]; callback != nil {
 		event.Message = Sanitize(event.Message)
 		if event.OccurredAt == 0 {

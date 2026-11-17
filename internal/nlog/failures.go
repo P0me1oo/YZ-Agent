@@ -30,7 +30,10 @@ func (f *Failures) report(logger *NodeLog, operation string, err error, local bo
 		f.mu.Unlock()
 		return
 	}
-	if LogsDisabled() || time.Since(f.last[operation]) < time.Minute {
+	if logger == nil {
+		logger = Core()
+	}
+	if !LogsReady(logger.scope) || time.Since(f.last[operation]) < time.Minute {
 		f.mu.Unlock()
 		return
 	}
@@ -44,7 +47,7 @@ func (f *Failures) report(logger *NodeLog, operation string, err error, local bo
 	}
 	args := []any{"error_type", fmt.Sprintf("%T", err), "error", Sanitize(err.Error())}
 	if local {
-		logWithColor(slog.LevelWarn, logger.prefix, operation, args...)
+		logScopedWithColor(logger.scope, slog.LevelWarn, logger.prefix, operation, args...)
 	} else {
 		logger.Warn(operation, args...)
 	}

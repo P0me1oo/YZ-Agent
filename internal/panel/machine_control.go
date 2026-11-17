@@ -57,6 +57,7 @@ func (c *Client) exchangeMachineControl(version, bootID string, manageable bool,
 		return nil, nil, fmt.Errorf("machine control status %d", resp.StatusCode)
 	}
 	var result struct {
+		AccessLog      *AccessLogPolicy  `json:"access_log,omitempty"`
 		HostMonitoring *bool             `json:"host_monitoring"`
 		LogPolicy      *LogPolicy        `json:"log_policy,omitempty"`
 		Command        *MachineOperation `json:"command"`
@@ -67,5 +68,6 @@ func (c *Client) exchangeMachineControl(version, bootID string, manageable bool,
 	}
 	c.applyLogPolicy(result.LogPolicy)
 	c.applyHostMonitoring(result.HostMonitoring)
+	c.applyAccessLog(result.AccessLog)
 	return result.Command, result.RealityScan, nil
 }

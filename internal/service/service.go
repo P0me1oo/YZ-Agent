@@ -39,6 +39,8 @@ import (
 )
 
 type Service struct {
+	accessLogFailureRevision uint64
+
 	failures            nlog.Failures
 	autoSpeed           autoSpeedState
 	operations          operationsState

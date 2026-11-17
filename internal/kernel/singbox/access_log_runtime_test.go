@@ -8,6 +8,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	singM "github.com/sagernet/sing/common/metadata"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -133,6 +134,12 @@ func TestAccessLogBothCoresTCPUDPAndReload(t *testing.T) {
 		for _, protocol := range []string{"vless", "shadowsocks", "trojan"} {
 			t.Run(kind+"/"+protocol, func(t *testing.T) {
 				r := &accesslog.Recorder{}
+				var policy atomic.Uint64
+				policy.Store(1)
+				r.SetPolicy(func() (bool, uint64) {
+					value := policy.Load()
+					return value&1 != 0, value >> 1
+				})
 				r.Enable(true)
 				node, user, cert := runtimeNode(t, protocol), runtimeUser(t, 941), runtimeCertificate(t)
 				core := relayStartCore(t, kind, node, []model.UserSpec{user}, cert, relayMarkerEcho(t, "access"), r)
@@ -167,6 +174,14 @@ func TestAccessLogBothCoresTCPUDPAndReload(t *testing.T) {
 					if counts["example.test"] != 2 || counts["198.51.100.10"] != 2 {
 						t.Fatalf("目标信息错误：%v", counts)
 					}
+					policy.Store(uint64(2 + run*2))
+					for _, network := range []string{"tcp", "udp"} {
+						relayMarkerExchange(t, client, "access", network, singM.ParseSocksaddr("203.0.113.20:443"))
+					}
+					if batch, _ := r.Next(); batch != nil {
+						t.Fatal("关闭访问记录后仍采集；代理请求应继续成功")
+					}
+					policy.Store(uint64(3 + run*2))
 				}
 			})
 		}

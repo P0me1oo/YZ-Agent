@@ -177,6 +177,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 		if err == nil && receipt.Epoch == version.Epoch && receipt.Sequence >= version.Sequence {
 			c.acceptTelemetry(receipt.Telemetry, state)
 			c.applyHostMonitoring(receipt.HostMonitoring)
+			c.applyAccessLog(receipt.AccessLog)
 			confirmed = true
 			c.realtime.lastFallback = time.Time{}
 			return nil
@@ -200,6 +201,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 	}
 	c.acceptTelemetry(response.Data.Telemetry, state)
 	c.applyHostMonitoring(response.Data.HostMonitoring)
+	c.applyAccessLog(response.Data.AccessLog)
 	confirmed = true
 	return nil
 }

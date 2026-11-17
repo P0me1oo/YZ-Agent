@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	version       = "v2.38.0"
+	version       = "v2.39.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -66,13 +66,15 @@ func main() {
 		fmt.Println(buildinfo.Report("yz-agent", version, buildTime, commit))
 		os.Exit(0)
 	}
+	nlog.ConfigureLogPolicies([]string{"startup"})
 
 	pruneCtx, stopPrune := context.WithTimeout(context.Background(), 10*time.Second)
 	_, pruneErr := config.PruneDeletedMachines(pruneCtx, *configPath)
 	stopPrune()
 	rootCfg, err := config.LoadRoot(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		// 配置不可读时无法认证领取密钥，只返回固定启动失败阶段。
+		fmt.Fprintln(os.Stderr, "failed to load config: configuration unavailable")
 		os.Exit(1)
 	}
 	privacyCtx, stopPrivacy := context.WithTimeout(context.Background(), 45*time.Second)
@@ -85,7 +87,7 @@ func main() {
 
 	instances, err := rootCfg.NormalizeInstances()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to normalize config: %v\n", err)
+		startupFailure(rootCfg, "failed to normalize config", err)
 		os.Exit(1)
 	}
 	configureLogPolicies(instances)
@@ -126,6 +128,19 @@ func configureLogPolicies(instances []*config.Config) {
 		}
 	}
 	nlog.ConfigureLogPolicies(keys)
+	registerRuntimeLogs(instances)
+}
+
+func registerRuntimeLogs(instances []*config.Config) {
+	for _, instance := range instances {
+		if instance.IsMachineMode() {
+			instance.RegisterRuntimeLogs()
+		} else {
+			for _, node := range instance.ExpandNodes() {
+				node.RegisterRuntimeLogs()
+			}
+		}
+	}
 }
 
 // runWithReload restarts all node services when the config file changes.
@@ -243,6 +258,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			startupFailure(root, "startup layout validation failed", err)
 			os.Exit(1)
 		}
+		registerRuntimeLogs(instances)
 		timeManager := timesync.New(instances[0].TimeSync)
 		firewallManager, err := firewall.New(instances[0].Firewall, configPath)
 		if err != nil {

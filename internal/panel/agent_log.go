@@ -15,7 +15,10 @@ type AgentLogBatch struct {
 	Records []nlog.Event `json:"records"`
 }
 
-func (c *Client) AgentLogEnabled() bool { return c.agentLog.Load() && !nlog.LogsDisabled() }
+func (c *Client) AgentLogEnabled() bool { return c.agentLog.Load() && c.runtimeLogsReady() }
+func (c *Client) runtimeLogsReady() bool {
+	return nlog.PolicyReady(nlog.LogPolicyKey(c.baseURL, c.machineID, c.nodeID))
+}
 func containsXrayCrash(events []string) bool {
 	for _, event := range events {
 		if event == "xray.crash" {
@@ -25,7 +28,7 @@ func containsXrayCrash(events []string) bool {
 	return false
 }
 func (c *Client) ReportAgentLog(ctx context.Context, batch *AgentLogBatch) error {
-	if nlog.LogsDisabled() {
+	if !c.runtimeLogsReady() {
 		return errors.New("运行日志已停用")
 	}
 	records := batch.Records

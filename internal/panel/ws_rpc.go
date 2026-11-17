@@ -18,6 +18,7 @@ type StateVersion struct {
 
 type RPCReceipt struct {
 	StateVersion
+	AccessLog      *AccessLogPolicy `json:"access_log,omitempty"`
 	HostMonitoring *bool            `json:"host_monitoring"`
 	RequestID      string           `json:"request_id"`
 	ReportID       string           `json:"report_id"`

@@ -1,0 +1,121 @@
+{
+  "version": "v2.38.1",
+  "status": "local_unreleased",
+  "base_commit": "eaed060c4fe642c28ca79ce42ae539dfcca7855f",
+  "working_tree_modified": true,
+  "environment": {
+    "go": "1.27.3",
+    "os": "linux",
+    "arch": "amd64",
+    "cc": "Zig 0.15.2 -target x86_64-linux-gnu.2.36",
+    "race": true
+  },
+  "healthcheck_and_service": {
+    "passed_top_level_tests": 122,
+    "skipped": [
+      {
+        "package": "github.com/P0me1oo/YZ-Agent/internal/service",
+        "test": "TestNativeSourceSOCKSProbe"
+      },
+      {
+        "package": "github.com/P0me1oo/YZ-Agent/internal/service",
+        "test": "TestNativeSourceSOCKSRuntime"
+      }
+    ],
+    "failed": []
+  },
+  "both_core_probes": {
+    "passed_top_level_tests": 1,
+    "skipped": [],
+    "failed": []
+  },
+  "scope": [
+    "validated address retention and deduplication",
+    "IPv4/IPv6 alternation and network/TLS fallback",
+    "shared eight-second budget and cancellation",
+    "certificate trust and hostname verification",
+    "HTTP failures and redirects",
+    "operations state and both-core user accounting isolation"
+  ],
+  "source_sha256": {
+    "internal/healthcheck/probe.go": "f45a40f9f60bfe044b3ecd73383f6c3fe8a4118dfaa10f38bd46904a937ca819",
+    "internal/healthcheck/probe_test.go": "2c52d1eac5fba35c37aa0c946f0248452556e733b99c6a5e98ce80120a0856ff",
+    "internal/service/operations.go": "570dd075581814de3e81eaf7aaac1adf1fa1d9900cc42b0aab4fcc7503ad0072",
+    "cmd/yz-agent/main.go": "0259288fc3a31bae203589362ad2d779a84f329f107778aa570023ed09a232cb",
+    "cmd/xbctl/main.go": "399453e7a593d0490ee4ad3e48b67234755de9d709c4fe85cf9c149a0e5a68ce",
+    "Makefile": "95313c143cd0d646cbfc7bb986ea89c05cc99c44eed9562f14bc7385e529659e",
+    "go.mod": "50be7d32e370c91fc61a17ced9991f67498066134645026bbd4fe654af1e25ca",
+    "go.sum": "7226fa15913a3675035d5ac268f81693f81f39764cbc97fefe9268eb4ddb1680"
+  },
+  "builds": [
+    {
+      "file": "yz-agent-linux-amd64",
+      "sha256": "954f767ead60b1ae599a13c3bf9102ce72c4096482a582772342dc3bd4d93dc1",
+      "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-tags": "with_quic,with_utls,with_wireguard,with_gvisor,with_acme,with_clash_api",
+        "-trimpath": "true",
+        "DefaultGODEBUG": "multipathtcp=0",
+        "CGO_ENABLED": "0",
+        "GOARCH": "amd64",
+        "GOOS": "linux",
+        "GOAMD64": "v1",
+        "vcs": "git",
+        "vcs.revision": "eaed060c4fe642c28ca79ce42ae539dfcca7855f",
+        "vcs.time": "2026-11-16T09:39:06Z",
+        "vcs.modified": "true"
+      },
+      "core_modules": [
+        "=>\tgithub.com/P0me1oo/YZ-sing-box\tv1.16.0\th1:Yi9H0sUYMKJIGxfT08DhpgffyhWp5dKM9LSpHISsn/Q=",
+        "=>\tgithub.com/P0me1oo/YZ-Xray-core\tv0.0.0-20261116081756-36f4516090e3\th1:mgMjDxgmEVcMw6Jg/96l9EHWWwla9elWSdzQ5EcCLB4="
+      ]
+    },
+    {
+      "file": "yz-agent-linux-arm64",
+      "sha256": "6637230e40f3f90400b181bb26f0e94c245ee88174346a64367cd95065d78fbf",
+      "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-tags": "with_quic,with_utls,with_wireguard,with_gvisor,with_acme,with_clash_api",
+        "-trimpath": "true",
+        "DefaultGODEBUG": "multipathtcp=0",
+        "CGO_ENABLED": "0",
+        "GOARCH": "arm64",
+        "GOOS": "linux",
+        "GOARM64": "v8.0",
+        "vcs": "git",
+        "vcs.revision": "eaed060c4fe642c28ca79ce42ae539dfcca7855f",
+        "vcs.time": "2026-11-16T09:39:06Z",
+        "vcs.modified": "true"
+      },
+      "core_modules": [
+        "=>\tgithub.com/P0me1oo/YZ-sing-box\tv1.16.0\th1:Yi9H0sUYMKJIGxfT08DhpgffyhWp5dKM9LSpHISsn/Q=",
+        "=>\tgithub.com/P0me1oo/YZ-Xray-core\tv0.0.0-20261116081756-36f4516090e3\th1:mgMjDxgmEVcMw6Jg/96l9EHWWwla9elWSdzQ5EcCLB4="
+      ]
+    },
+    {
+      "file": "xbctl",
+      "sha256": "8d7bbff80994c37dc69f2c3b24e614ffec008400f5886c8f00f6e243fdcf8faf",
+      "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "DefaultGODEBUG": "multipathtcp=0",
+        "CGO_ENABLED": "0",
+        "GOARCH": "amd64",
+        "GOOS": "linux",
+        "GOAMD64": "v1",
+        "vcs": "git",
+        "vcs.revision": "eaed060c4fe642c28ca79ce42ae539dfcca7855f",
+        "vcs.time": "2026-11-16T09:39:06Z",
+        "vcs.modified": "true"
+      },
+      "core_modules": [
+        "=>\tgithub.com/P0me1oo/YZ-Xray-core\tv0.0.0-20261116081756-36f4516090e3\th1:mgMjDxgmEVcMw6Jg/96l9EHWWwla9elWSdzQ5EcCLB4="
+      ]
+    }
+  ],
+  "production_deployed": false,
+  "temporary_toolchain_and_builds_retained": false
+}

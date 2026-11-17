@@ -63,6 +63,14 @@ func deletionFixture(t *testing.T, beforeResponse func()) (string, *atomic.Bool)
 
 func TestDeletedBindingCleanupPreservesOtherInstancesAndPendingData(t *testing.T) {
 	path, deleted := deletionFixture(t, nil)
+	// 普通扩展配置及面板地址可以包含相同数字，不能当作遗留绑定。
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append([]byte("external_reference: 117\n"), data...), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	before, _ := os.ReadFile(path)
 	if changed, err := PruneDeletedMachines(context.Background(), path); err != nil || changed {
 		t.Fatal("active binding changed", err)
@@ -78,7 +86,16 @@ func TestDeletedBindingCleanupPreservesOtherInstancesAndPendingData(t *testing.T
 		t.Fatal("deleted binding retained", err)
 	}
 	after, _ := os.ReadFile(path)
-	if strings.Contains(string(after), "117") || strings.Contains(string(after), "deleted-machine-ciphertext") || !strings.Contains(string(after), "extra_field: retain") || !strings.Contains(string(after), "custom_field: keep") {
+	var remaining RootConfig
+	if err := yaml.Unmarshal(after, &remaining); err != nil {
+		t.Fatal(err)
+	}
+	for _, instance := range remaining.Instances {
+		if instance.Machine != nil && instance.Machine.MachineID == 117 {
+			t.Fatal("deleted machine binding retained")
+		}
+	}
+	if strings.Contains(string(after), "deleted-machine-ciphertext") || !strings.Contains(string(after), "extra_field: retain") || !strings.Contains(string(after), "custom_field: keep") || !strings.Contains(string(after), "external_reference: 117") {
 		t.Fatal("wrong entries removed")
 	}
 	creds, _ := os.ReadFile(filepath.Join(filepath.Dir(path), "credentials.env"))

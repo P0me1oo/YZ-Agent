@@ -203,23 +203,35 @@ func (nl *NodeLog) Error(msg string, args ...any) {
 }
 
 func (nl *NodeLog) log(level slog.Level, msg string, args []any) {
-	if LogsDisabled() {
+	if !LogsReady(nl.scope) {
 		return
 	}
 	nl.emit(level, msg, args)
-	logWithColor(level, nl.prefix, msg, args...)
+	logScopedWithColor(nl.scope, level, nl.prefix, msg, args...)
 }
 
 // logWithColor writes one line to the configured writer (see Init).
 // Format: HH:MM:SS.mmm LEVEL [prefix] message [key=value ...]
 func logWithColor(level slog.Level, prefix, msg string, args ...any) {
+	logScopedWithColor("", level, prefix, msg, args...)
+}
+
+func logScopedWithColor(scope string, level slog.Level, prefix, msg string, args ...any) {
 	logMu.RLock()
 	defer logMu.RUnlock()
 	out := logWriter
 	min := logMin
 	color := logColor
 
-	if level < min || LogsDisabled() {
+	if level < min {
+		return
+	}
+	scope = effectiveScope(scope)
+	if private := privateWriterLocked(scope); private != nil {
+		_, _ = fmt.Fprintf(private, "%s %s [%s] %s\n", time.Now().Format(time.RFC3339Nano), level.String(), prefix, formatMsg(msg, args))
+		return
+	}
+	if !logsReadyLocked(scope) {
 		return
 	}
 

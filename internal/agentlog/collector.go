@@ -30,6 +30,8 @@ type collector struct {
 	dropped  uint64
 	failures nlog.Failures
 	logger   *nlog.NodeLog
+	scope    string
+	key      *privacy.State
 }
 
 func (c *collector) add(event nlog.Event) {
@@ -70,6 +72,8 @@ type saved struct {
 }
 
 func (c *collector) save() error {
+	private, unlockPolicy := nlog.LockLogPolicy(c.scope)
+	defer unlockPolicy()
 	release := privacy.LockFileWrite(c.path)
 	defer release()
 	if c.path == "" {
@@ -82,7 +86,26 @@ func (c *collector) save() error {
 	if err != nil {
 		return err
 	}
-	data, err = privacy.Protect(c.path, data)
+	if private {
+		if c.key == nil {
+			return errors.New("运行日志密钥尚未取得")
+		}
+		if info, statErr := os.Stat(c.path); statErr == nil && info.Size() > 24<<20 {
+			return errors.New("日志缓存大小无效")
+		}
+		if old, readErr := os.ReadFile(c.path); readErr == nil && privacy.IsEncrypted(old) {
+			plain, openErr := c.key.Open(old)
+			clear(plain)
+			if openErr != nil {
+				return openErr
+			}
+		} else if readErr != nil && !os.IsNotExist(readErr) {
+			return readErr
+		}
+		data, err = c.key.Seal(data, nil)
+	} else {
+		data, err = privacy.Protect(c.path, data)
+	}
 	if err != nil {
 		return err
 	}
@@ -115,12 +138,25 @@ func (c *collector) restore() error {
 	if c.path == "" {
 		return nil
 	}
-	data, err := privacy.ReadFile(c.path)
+	if info, err := os.Stat(c.path); err == nil && info.Size() > 24<<20 {
+		return errors.New("日志缓存大小无效")
+	}
+	data, err := os.ReadFile(c.path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if privacy.IsEncrypted(data) {
+		if c.key != nil {
+			data, err = c.key.Open(data)
+		} else {
+			data, err = privacy.OpenFor(c.path, data)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if len(data) > 12*1024*1024 {
 		return fmt.Errorf("日志缓存大小无效")
@@ -163,9 +199,6 @@ func (c *collector) restore() error {
 	return nil
 }
 func (c *collector) flush(ctx context.Context, client *panel.Client) {
-	if nlog.LogsDisabled() {
-		return
-	}
 	batch := c.next()
 	if batch == nil {
 		return
@@ -206,7 +239,7 @@ func Start(ctx context.Context, cfg *config.Config) func() {
 	if panelCfg.MachineID > 0 {
 		prefix = fmt.Sprintf("agent-log:machine:%d", panelCfg.MachineID)
 	}
-	c := &collector{logger: nlog.Scoped(cfg.LogScope(), panelCfg.NodeID, prefix)}
+	c := &collector{logger: nlog.Scoped(cfg.LogScope(), panelCfg.NodeID, prefix), scope: cfg.LogScope(), key: cfg.RuntimeLogState()}
 	if cfg.Kernel.ConfigDir != "" {
 		c.path = filepath.Join(cfg.Kernel.ConfigDir, fmt.Sprintf("pending-agent-%x.json", sha256.Sum256([]byte(cfg.LogScope()))))
 	}

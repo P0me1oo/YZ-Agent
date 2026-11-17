@@ -1,5 +1,30 @@
 # YZ-Agent 兼容矩阵
 
+## v2.39.0 隐私运行日志加密（2026-11-17，本地未发布）
+
+本地审查修复：访问记录缓存和上报批次核对面板持久保存的停用代次，清理前崩溃或离线期间切换不会恢复旧记录；节点重建初始化当前连接的编号基线，保留有效待报批次。七包完整并发检测、双核心及普通 WireGuard 实连专项、五包静态检查和 Linux amd64 构建通过；面板 SQLite 相关 150 项通过、1 项按环境跳过，MariaDB 11.4.8 同组 151 项全部通过。来源和命令见[审查修复验证](../YZboard/docs/access-policy-verification.md)。
+
+配套面板 2.22.0、管理端 0.104.0。复用已认证机器的内存密钥，Agent、Xray、sing-box 日志逐条加密保存，密钥接口确认的策略同时用于启动出口；原始记录不进入终端或系统服务日志。运行日志队列继续加密、按原批次重试，关闭模式后保留历史日志密文。访问记录开关通过握手、机器控制及 HTTP/WebSocket 状态回执更新，停用时停止采集、缓存和上报，并清理旧队列。
+
+访问记录联动补充：四包 212 个顶层竞态用例通过，2 项既有原生来源 SOCKS 环境检查跳过；双核心及普通 WireGuard 的 6 个实连专项通过，无数据竞争。覆盖关闭期间继续转发、快速重新开启丢弃旧队列、失败与损坏缓存、退出不恢复采集。相关静态检查及 Linux amd64 Agent 构建通过，面板契约与具体复验记录见[联动验证](../YZboard/docs/access-policy-verification.md)。
+
+Go 1.27.3 / 临时 Zig 0.15.2：最终九包 300 个顶层用例通过、两个原生来源隔离用例按条件跳过，无数据竞争；双核心日志并发专项、九包静态检查及 Linux amd64 / arm64 构建通过。正式固定依赖仍为 YZ-sing-box v1.16.0、YZ-Xray-core v26.12.0。源码状态、范围及跳过说明见[验证记录](../YZboard/docs/privacy-log-verification.md)，机制见[隐私日志](docs/log-privacy.md)。未提交、推送、发布或部署。
+
+## v2.38.1 健康检查地址回退（2026-11-16，本地未发布）
+
+基于 `eaed060c4fe642c28ca79ce42ae539dfcca7855f` 加本次工作区修改。修复在 Agent 层完成，面板通信与 YZ-sing-box v1.16.0、YZ-Xray-core v26.12.0 的固定依赖不变。保留全部已校验的 DNS 答案，去重并交替尝试 IPv4、IPv6；连接或 TLS 请求失败后回退，任一地址返回 HTTPS 2xx 即为成功。HTTP 错误直接保留，不跟随重定向。单条出站共享八秒预算，延迟包含回退耗时；机制见[节点运行检查](docs/node-operations.md)。
+
+新用例在旧首地址逻辑下复现失败，修复后 Go 1.27.3 / Linux amd64 / 临时 Zig 0.15.2、正式功能标签的健康检查及服务层竞态回归通过，122 个顶层用例成功，无数据竞争。两项既有原生来源 SOCKS 用例因缺少专用 rootfs、隔离客户端及网络命名空间按条件跳过，不属于本次健康检查验证。双核心真实探测及用户计费隔离的一个顶层用例、Xray/sing-box 两个子场景均通过。
+
+验证命令如下，使用 `CC` 指向临时 Zig 的 `cc -target x86_64-linux-gnu.2.36`；单元超时验证使用 `testing/synctest`，HTTPS 用独立本地证书与测试服务，不访问生产身份。
+
+```sh
+go test -mod=readonly -race -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./internal/healthcheck ./internal/service -count=1 -timeout 5m
+go test -mod=readonly -race -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./internal/kernel/singbox -run '^TestOperationsProbeBothCoresExcludesUserAccounting$' -count=1 -timeout 1m
+```
+
+Linux amd64、arm64 Agent 和 amd64 兼容管理程序构建通过，实际候选版本为 v2.38.1。构建元数据确认 `CGO_ENABLED=0`、工作区基线提交及 `vcs.modified=true`，两个 Agent 架构的核心模块来源与固定依赖一致。源码与构建摘要、跳过清单见[验证记录](docs/health-address-fallback-verification.json)。本次未执行整仓回归、提交、推送、发布或生产部署；临时工具链、测试日志和验证程序在交付前清理。
+
 ## v2.38.0 固定双核心与发布验证（2026-11-16）
 
 正式依赖为 YZ-sing-box `v1.16.0` / `ad0c0cfbc7c3827f3058aa666d9f1a3b0e0fd085` 与 YZ-Xray-core `v26.12.0` / `36f4516090e3e2fe88dcbe0840126582cd6fb795`，Xray 模块使用对应完整提交的伪版本；不保留本地核心路径。包括所有下述 DHT、日志与用户流量计量修复，及旧 UDP 会话撤权后捕获日志身份的回归。

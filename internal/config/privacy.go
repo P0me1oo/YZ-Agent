@@ -218,6 +218,8 @@ func resolvePrivacy(ctx context.Context, path string, root *RootConfig) map[int]
 			c.PrivacyError = err
 			continue
 		}
+		c.logState = state
+		c.logPrivate = enabled
 		if !enabled {
 			if state == nil && (c.Protected != "" || root.wrapped) {
 				c.PrivacyError = errors.New("面板没有提供已有加密数据的密钥")

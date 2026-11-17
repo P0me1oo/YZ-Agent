@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"golang.org/x/net/idna"
 )
 
@@ -35,26 +35,83 @@ type Record struct {
 }
 
 type Batch struct {
-	ID      string   `json:"batch_id"`
-	Records []Record `json:"records"`
-	sealed  bool
+	ID         string   `json:"batch_id"`
+	Records    []Record `json:"records"`
+	Generation string   `json:"-"`
+	sealed     bool
 }
 
 type savedState struct {
-	Version int      `json:"version"`
-	Pending *Batch   `json:"pending,omitempty"`
-	Queue   []*Batch `json:"queue,omitempty"`
+	Version    int      `json:"version"`
+	Pending    *Batch   `json:"pending,omitempty"`
+	Queue      []*Batch `json:"queue,omitempty"`
+	Generation string   `json:"generation,omitempty"`
 }
 
 type Recorder struct {
 	// 创建后不再改变；中转出站可为单条记录指定实际落地。
-	NodeID  int
-	enabled atomic.Bool
-	dropped atomic.Uint64
-	mu      sync.Mutex
-	queue   []*Batch
-	pending *Batch
-	count   int
+	NodeID          int
+	enabled         atomic.Bool
+	dropped         atomic.Uint64
+	mu              sync.Mutex
+	queue           []*Batch
+	pending         *Batch
+	count           int
+	policy          atomic.Pointer[func() (bool, uint64)]
+	discardRevision uint64
+	generation      atomic.Pointer[func() string]
+	generationValue string
+}
+
+// 策略只读取内存状态；连接回调不发请求。停用编号用于识别两次刷盘之间的关闭再开启。
+func (r *Recorder) SetPolicy(policy func() (bool, uint64)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// 新记录器以当前连接的停用编号为基线，不能把节点重建当成再次停用。
+	if r.pending == nil && len(r.queue) == 0 {
+		_, r.discardRevision = policy()
+	}
+	r.policy.Store(&policy)
+}
+
+// 面板持久保存的代次随缓存核对，进程重启也能识别停用前的记录。
+func (r *Recorder) SetGeneration(generation func() string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pending == nil && len(r.queue) == 0 {
+		r.generationValue = generation()
+	}
+	r.generation.Store(&generation)
+}
+
+func (r *Recorder) Enabled() bool {
+	if r == nil || !r.enabled.Load() {
+		return false
+	}
+	if policy := r.policy.Load(); policy != nil {
+		enabled, _ := (*policy)()
+		return enabled
+	}
+	return true
+}
+
+func (r *Recorder) syncPolicyLocked() bool {
+	if generation := r.generation.Load(); generation != nil {
+		value := (*generation)()
+		if value != r.generationValue {
+			r.clearLocked()
+			r.generationValue = value
+		}
+	}
+	if policy := r.policy.Load(); policy != nil {
+		enabled, revision := (*policy)()
+		if !enabled || revision != r.discardRevision {
+			r.clearLocked()
+		}
+		r.discardRevision = revision
+		return enabled
+	}
+	return true
 }
 
 func (r *Recorder) Enable(enabled bool) {
@@ -100,7 +157,7 @@ func (r *Recorder) AddForNode(node, user int, domain, address string, port uint1
 }
 
 func (r *Recorder) add(node, user int, domain, address string, port uint16, rule int, network string) {
-	if r == nil || !r.enabled.Load() || node < 0 || port == 0 {
+	if !r.Enabled() || node < 0 || port == 0 {
 		return
 	}
 	if node == 0 {
@@ -115,6 +172,9 @@ func (r *Recorder) add(node, user int, domain, address string, port uint16, rule
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.enabled.Load() || !r.syncPolicyLocked() {
+		return
+	}
 	if r.count >= MaxRecords {
 		r.dropped.Add(1)
 		return
@@ -129,17 +189,35 @@ func (r *Recorder) add(node, user int, domain, address string, port uint16, rule
 			r.dropped.Add(1)
 			return
 		}
-		batch = &Batch{ID: hex.EncodeToString(id[:])}
+		batch = &Batch{ID: hex.EncodeToString(id[:]), Generation: r.generationValue}
 		r.queue = append(r.queue, batch)
 	}
 	batch.Records = append(batch.Records, Record{NodeID: node, UserID: user, ConnectedAt: time.Now().Unix(), Destination: host, Port: port, RuleID: rule, Network: network})
 	r.count++
 }
 
+// 明确停用访问记录后不再补报旧队列；持久化入口会同步移除空缓存。
+func (r *Recorder) Discard() {
+	r.enabled.Store(false)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clearLocked()
+}
+
+func (r *Recorder) clearLocked() {
+	r.queue = nil
+	r.pending = nil
+	r.count = 0
+	r.dropped.Store(0)
+}
+
 // Next 返回固定批次；确认前重复调用得到同一编号和内容，新连接进入另一队列。
 func (r *Recorder) Next() (*Batch, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !r.syncPolicyLocked() {
+		return nil, nil
+	}
 	cutoff := time.Now().Add(-Retention).Unix()
 	if r.pending != nil {
 		fresh := false
@@ -199,10 +277,16 @@ func (r *Recorder) Save(path string) error {
 // 新连接创建新批次；中途退出时可以重发整份快照，面板按固定编号去重。
 func (r *Recorder) Checkpoint(path string) (int, error) {
 	r.mu.Lock()
+	r.syncPolicyLocked()
 	for _, batch := range r.queue {
 		batch.sealed = true
 	}
-	state := savedState{Version: 1, Pending: r.pending, Queue: append([]*Batch(nil), r.queue...)}
+	state := savedState{
+		Version:    1,
+		Pending:    r.pending,
+		Queue:      append([]*Batch(nil), r.queue...),
+		Generation: r.generationValue,
+	}
 	r.mu.Unlock()
 	count := len(state.Queue)
 	if state.Pending != nil {
@@ -259,6 +343,9 @@ func (r *Recorder) Restore(path string) error {
 	if path == "" {
 		return nil
 	}
+	r.mu.Lock()
+	revision := r.discardRevision
+	r.mu.Unlock()
 	data, err := privacy.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -272,6 +359,9 @@ func (r *Recorder) Restore(path string) error {
 	var state savedState
 	if err = json.Unmarshal(data, &state); err != nil {
 		return errors.New("访问记录缓存格式无效")
+	}
+	if state.Generation != "" && !batchID.MatchString(state.Generation) {
+		return errors.New("访问记录缓存停用代次无效")
 	}
 	count := 0
 	batches := append([]*Batch(nil), state.Queue...)
@@ -306,8 +396,18 @@ func (r *Recorder) Restore(path string) error {
 		return errors.New("访问记录缓存数量无效")
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.syncPolicyLocked() || revision != r.discardRevision {
+		return nil
+	}
+	if r.generation.Load() != nil && state.Generation != r.generationValue {
+		return nil
+	}
+	for _, batch := range batches {
+		batch.Generation = state.Generation
+	}
+	r.generationValue = state.Generation
 	r.queue, r.pending = state.Queue, state.Pending
 	r.count = count
-	r.mu.Unlock()
 	return nil
 }

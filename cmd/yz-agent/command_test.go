@@ -53,6 +53,9 @@ func TestAgentCommandEntrypoint(t *testing.T) {
 			if (err != nil) != tc.failed || !strings.Contains(string(out), tc.want) {
 				t.Fatalf("命令结果错误: err=%v, output=%s", err, out)
 			}
+			if strings.Contains(string(out), missing) {
+				t.Fatal("启动错误泄露配置路径")
+			}
 		})
 	}
 }

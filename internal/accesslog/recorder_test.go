@@ -6,9 +6,44 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestAccessPolicyDiscardsRapidDisableReenableAndStopsCollection(t *testing.T) {
+	var policy atomic.Uint64
+	policy.Store(1)
+	r := &Recorder{NodeID: 7}
+	r.SetPolicy(func() (bool, uint64) {
+		value := policy.Load()
+		return value&1 != 0, value >> 1
+	})
+	r.Enable(true)
+	r.Add(9, "before-disable.example.test", "", 443)
+	_, _ = r.Next()
+	r.Add(9, "queued.example.test", "", 443)
+	policy.Store(2)
+	if r.Enabled() {
+		t.Fatal("策略停用后仍允许采集")
+	}
+	r.Add(9, "while-disabled.example.test", "", 443)
+	// 上报协程还未执行，开关已重新开启。
+	policy.Store(3)
+	r.Add(9, "after-enable.example.test", "", 443)
+	batch, _ := r.Next()
+	if batch == nil || len(batch.Records) != 1 || batch.Records[0].Destination != "after-enable.example.test" {
+		t.Fatal("快速重新开启保留了旧队列或混入停用期间的记录")
+	}
+	policy.Store(4)
+	path := filepath.Join(t.TempDir(), "pending.json")
+	if err := r.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("停用期间仍缓存记录")
+	}
+}
 
 func TestHostOnlyAndIPFallback(t *testing.T) {
 	for input, want := range map[string]string{"EXAMPLE.COM.": "example.com", "2001:0db8::1": "2001:db8::1", "::ffff:203.0.113.1": "203.0.113.1", "例子.测试": "xn--fsqu00a.xn--0zwm56d", "https://example.com/path": "", "example.com/path": "", "user@example.com": "", "example.com?key=x": "", "example.com\n": "", "999.0.0.1": "", "fe80::1%eth0": "", "[::1]": ""} {

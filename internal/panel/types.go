@@ -40,10 +40,8 @@ type HandshakeResponse struct {
 		Version int      `json:"version"`
 		Events  []string `json:"events"`
 	} `json:"agent_log"`
-	AccessLog struct {
-		Version int `json:"version"`
-	} `json:"access_log"`
-	BlockLog struct {
+	AccessLog AccessLogPolicy `json:"access_log"`
+	BlockLog  struct {
 		Version int `json:"version"`
 	} `json:"block_log"`
 	WebSocket WSConfig           `json:"websocket"`
@@ -105,6 +103,7 @@ type MachineNode struct {
 
 // MachineNodesResponse is the response from GET /api/v2/server/machine/nodes.
 type MachineNodesResponse struct {
+	AccessLog      *AccessLogPolicy       `json:"access_log,omitempty"`
 	HostMonitoring *bool                  `json:"host_monitoring"`
 	LogPolicy      *LogPolicy             `json:"log_policy,omitempty"`
 	Traffic        *machinetraffic.Policy `json:"traffic,omitempty"`

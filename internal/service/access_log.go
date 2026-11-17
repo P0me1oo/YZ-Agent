@@ -25,6 +25,19 @@ func (s *Service) initializeAccessLog() {
 	if !ok || s.accessLog == nil {
 		return
 	}
+	policy := func() (bool, uint64) { return sink.AccessLogEnabled(), 0 }
+	if source, ok := sink.(interface{ AccessLogState() (bool, uint64) }); ok {
+		policy = source.AccessLogState
+	}
+	s.accessLog.SetPolicy(policy)
+	if source, ok := sink.(interface{ AccessLogGeneration() string }); ok {
+		s.accessLog.SetGeneration(source.AccessLogGeneration)
+	}
+	_, s.accessLogFailureRevision = policy()
+	if !sink.AccessLogEnabled() {
+		s.flushAccessLog(context.Background(), sink)
+		return
+	}
 	if err := s.accessLog.Restore(s.accessLogPath()); err != nil {
 		nlog.Core().Warn("访问记录缓存恢复失败，保留原文件", "error", err)
 		// 不覆盖用途不明或损坏的缓存，代理服务仍可继续运行。
@@ -37,7 +50,7 @@ func (s *Service) initializeAccessLog() {
 // 上报有独立的协程和超时，不与流量结算或连接回调相互等待。
 func (s *Service) startAccessLog(ctx context.Context) func() {
 	sink, ok := s.sink.(controlplane.AccessLogSink)
-	if !ok || s.accessLog == nil || s.accessLogFailed {
+	if !ok || s.accessLog == nil {
 		return func() {}
 	}
 	run, cancel := context.WithCancel(ctx)
@@ -51,7 +64,9 @@ func (s *Service) startAccessLog(ctx context.Context) func() {
 			case <-run.Done():
 				return
 			case <-ticker.C:
-				s.accessLog.Enable(sink.AccessLogEnabled())
+				if !s.accessLogFailed {
+					s.accessLog.Enable(sink.AccessLogEnabled())
+				}
 				flush, stop := context.WithTimeout(run, 10*time.Second)
 				s.flushAccessLog(flush, sink)
 				stop()
@@ -71,14 +86,41 @@ func (s *Service) startAccessLog(ctx context.Context) func() {
 
 func (s *Service) flushAccessLog(ctx context.Context, sink controlplane.AccessLogSink) {
 	path := s.accessLogPath()
-	defer func() {
+	if s.accessLogFailed && sink.AccessLogEnabled() {
+		// 即使上报间隔内已经重新开启，收到过明确停用也应清除损坏缓存。
+		source, ok := sink.(interface{ AccessLogState() (bool, uint64) })
+		if !ok {
+			return
+		}
+		_, revision := source.AccessLogState()
+		if revision == s.accessLogFailureRevision {
+			return
+		}
+		s.accessLog.Discard()
 		if err := s.accessLog.Save(path); err != nil {
 			nlog.Core().Warn("访问记录缓存保存失败", "error", err)
+		} else {
+			s.accessLogFailed = false
+		}
+		return
+	}
+	defer func() {
+		if !sink.AccessLogEnabled() {
+			s.accessLog.Discard()
+		}
+		if err := s.accessLog.Save(path); err != nil {
+			nlog.Core().Warn("访问记录缓存保存失败", "error", err)
+		} else if !sink.AccessLogEnabled() {
+			s.accessLogFailed = false
 		}
 		if count := s.accessLog.Dropped(); count > 0 {
 			nlog.Core().Warn("访问记录队列已满，部分记录未保存", "count", count)
 		}
 	}()
+	if !sink.AccessLogEnabled() {
+		s.accessLog.Discard()
+		return
+	}
 	if _, err := s.accessLog.Next(); err != nil {
 		return
 	}

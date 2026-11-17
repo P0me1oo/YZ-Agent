@@ -1,0 +1,87 @@
+package agentlog
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/P0me1oo/YZ-Agent/internal/config"
+	"github.com/P0me1oo/YZ-Agent/internal/nlog"
+	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy/privacytest"
+)
+
+func TestPrivateCollectorEncryptsQueueAndRetriesOriginalBatch(t *testing.T) {
+	received := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v2/server/handshake" {
+			w.Write([]byte(`{"log_policy":{"version":1,"disabled":true},"agent_log":{"version":1}}`))
+			return
+		}
+		var batch panel.AgentLogBatch
+		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+			t.Error(err)
+		}
+		received = append(received, batch.ID)
+		if len(received) == 1 {
+			w.WriteHeader(503)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"batch_id": batch.ID}})
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	state := privacytest.Bind(t, dir)
+	// 模拟日志策略先到、文件迁移尚未执行的窗口，缓存仍必须立即加密。
+	privacy.Bind(dir, nil, nil, true)
+	scope, policy := t.Name(), nlog.LogPolicyKey(server.URL, 2, 0)
+	nlog.ConfigureLogPolicies([]string{policy})
+	t.Cleanup(func() { nlog.ConfigureLogPolicies(nil) })
+	nlog.RegisterLogScope(scope, policy, filepath.Join(dir, "runtime.log.enc"), state)
+	client := panel.NewClient(config.PanelConfig{URL: server.URL, MachineID: 2})
+	if _, err := client.HandshakeContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !client.AgentLogEnabled() {
+		t.Fatal("privacy disabled reporting capability")
+	}
+	path := filepath.Join(dir, "pending-agent.json")
+	c := &collector{path: path, scope: scope, key: state}
+	c.add(nlog.Event{Source: "agent", Level: "error", Message: "private cached runtime", OccurredAt: time.Now().Unix()})
+	c.flush(t.Context(), client)
+	raw, err := os.ReadFile(path)
+	if err != nil || !privacy.IsEncrypted(raw) || bytes.Contains(raw, []byte("private cached runtime")) {
+		t.Fatal("queue snapshot was not encrypted", err)
+	}
+	if len(received) != 1 || c.pending == nil {
+		t.Fatal("failed report lost fixed batch")
+	}
+	restarted := &collector{path: path, scope: scope, key: state}
+	if err := restarted.restore(); err != nil {
+		t.Fatal(err)
+	}
+	restarted.flush(t.Context(), client)
+	if len(received) != 2 || received[0] != received[1] || restarted.pending != nil {
+		t.Fatal("restart changed batch or prevented private upload")
+	}
+	foreign := privacytest.Bind(t, t.TempDir())
+	foreignData, err := foreign.Seal([]byte("other machine queue"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, foreignData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarted.add(nlog.Event{Source: "agent", Level: "error", Message: "next private event", OccurredAt: time.Now().Unix()})
+	restarted.flush(t.Context(), client)
+	raw, err = os.ReadFile(path)
+	if err != nil || !bytes.Equal(raw, foreignData) || len(received) != 2 {
+		t.Fatal("foreign queue overwritten or unpersisted batch uploaded", err)
+	}
+}

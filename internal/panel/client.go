@@ -45,7 +45,7 @@ type Client struct {
 	etagMu     sync.Mutex
 
 	apiSuccess              atomic.Uint64
-	accessLog               atomic.Bool
+	accessLog               atomic.Pointer[accessLogState]
 	blockLog                atomic.Bool
 	agentLog                atomic.Bool
 	agentLogEvents          atomic.Bool
@@ -143,7 +143,7 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	c.applyLogPolicy(hs.LogPolicy)
 	c.applyHostMonitoring(hs.HostMonitoring)
 	c.realtime.enabled.Store(hs.Realtime.Version == 1 && hs.Realtime.TrafficAck)
-	c.accessLog.Store(hs.AccessLog.Version == 2)
+	c.applyAccessLog(&hs.AccessLog)
 	c.blockLog.Store(hs.BlockLog.Version == 1)
 	c.agentLog.Store(hs.AgentLog.Version == 1)
 	c.agentLogEvents.Store(hs.AgentLog.Version == 1 && containsXrayCrash(hs.AgentLog.Events))
@@ -505,6 +505,7 @@ func (c *Client) GetMachineNodesContext(ctx context.Context) (*MachineNodesRespo
 	}
 	c.applyLogPolicy(out.LogPolicy)
 	c.applyHostMonitoring(out.HostMonitoring)
+	c.applyAccessLog(out.AccessLog)
 	return &out, nil
 }
 

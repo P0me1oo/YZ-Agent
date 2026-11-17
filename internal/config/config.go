@@ -24,6 +24,8 @@ type Config struct {
 	PrivacyNodeID   int `yaml:"privacy_node_id,omitempty"`
 	privateOwner    string
 	privateState    *privacy.State
+	logState        *privacy.State
+	logPrivate      bool
 	Protected       string  `yaml:"protected,omitempty"`
 	PrivacyDefaults *Config `yaml:"privacy_defaults,omitempty"`
 	PrivacyError    error   `yaml:"-"`
@@ -1109,13 +1111,17 @@ func InitLogger(cfg LogConfig) {
 	default:
 		dir := filepath.Dir(cfg.Output)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to create log dir, falling back to stdout: %v\n", err)
+			if !nlog.LogsDisabled() {
+				fmt.Fprintf(os.Stderr, "failed to create log dir, falling back to stdout: %v\n", err)
+			}
 			w = os.Stdout
 			useColor = term.IsTerminal(int(os.Stdout.Fd()))
 		} else {
 			f, err := os.OpenFile(cfg.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to open log file, falling back to stdout: %v\n", err)
+				if !nlog.LogsDisabled() {
+					fmt.Fprintf(os.Stderr, "failed to open log file, falling back to stdout: %v\n", err)
+				}
 				w = os.Stdout
 				useColor = term.IsTerminal(int(os.Stdout.Fd()))
 			} else {
