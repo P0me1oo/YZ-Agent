@@ -1,0 +1,79 @@
+{
+  "date": "2026-11-17",
+  "version": "v2.40.1",
+  "source_commit": "6d4f1dd6c156719e7f4f8a8cc22db08bda027099",
+  "environment": {
+    "go": "1.27.3",
+    "zig": "0.15.2",
+    "os": "linux",
+    "arch": "amd64",
+    "race": true,
+    "tags": "with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api"
+  },
+  "module_packages": 41,
+  "module_passed_top_level": 1073,
+  "dependency_packages": 8,
+  "dependency_passed_top_level": 43,
+  "passed_top_level": 1116,
+  "skipped_top_level": 6,
+  "skipped": [
+    {
+      "package": "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "test": "TestNativeClientProbe"
+    },
+    {
+      "package": "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "test": "TestNativeFirewallLifecycle"
+    },
+    {
+      "package": "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "test": "TestNativeSourceFirewallLifecycle"
+    },
+    {
+      "package": "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+      "test": "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+    },
+    {
+      "package": "github.com/P0me1oo/YZ-Agent/internal/service",
+      "test": "TestNativeSourceSOCKSProbe"
+    },
+    {
+      "package": "github.com/P0me1oo/YZ-Agent/internal/service",
+      "test": "TestNativeSourceSOCKSRuntime"
+    }
+  ],
+  "failures": 0,
+  "installer_checks_reused": [
+    "install_output_test.sh",
+    "install_dependencies_test.sh",
+    "upgrade_version_test.sh",
+    "download_mirrors_test.sh",
+    "install_service_manager_test.sh",
+    "install_health_test.sh",
+    "install_kernel_defaults_test.sh",
+    "install_privacy_test.sh",
+    "install_paths_test.sh",
+    "install_name_migration_test.sh"
+  ],
+  "reuse_basis": "安装器脚本、八个固定依赖包来源、SDK 和运行环境保持一致；首次完成的安装器和依赖检查复用。最终 Agent 模块在 v2.40.1 固定源码上完整重跑，未复用失败包。",
+  "source_initial_update": "32060b2833d1128032deab9fcc68bf956cf98f34",
+  "previous_candidate": "v2.40.0",
+  "listener_regression": "旧实现的独立线程网络空间监听检查稳定失败；修复后该项及前序 WireGuard 后的 Reality 检查通过，最终完整并发矩阵通过。",
+  "github_actions": [
+    {
+      "id": 44097112356,
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "id": 44097112343,
+      "status": "completed",
+      "conclusion": "failure"
+    }
+  ],
+  "online_nodes_upgraded": false,
+  "docker_published": false,
+  "static_analysis": {
+    "affected_healthcheck_and_service": "passed"
+  }
+}
