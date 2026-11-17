@@ -8,6 +8,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/healthcheck"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +25,100 @@ func TestOperationsFieldsDoNotRebuildRuntime(t *testing.T) {
 	}
 	if computeConfigHash(a) == computeConfigHash(&b) {
 		t.Fatal("control update omitted operations")
+	}
+}
+
+func TestOperationsListenerInspectionDoesNotOpenConnection(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Close()
+			accepted <- struct{}{}
+		}
+	}()
+	t.Cleanup(func() {
+		listener.Close()
+		<-done
+	})
+	s := newTestService(&fakeKernel{running: true})
+	s.lastUsers = []model.UserSpec{{ID: 1}}
+	s.lastConfig = &model.NodeSpec{
+		Protocol: "vless", ListenIP: "127.0.0.1",
+		ServerPort:  listener.Addr().(*net.TCPAddr).Port,
+		HealthCheck: &healthcheck.Config{Enabled: true, Interval: 60},
+	}
+	s.updateOperations(t.Context())
+	deadline := time.After(time.Second)
+	for s.operations.probe.Load() == nil {
+		select {
+		case <-deadline:
+			t.Fatal("监听检查没有结束")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	result := s.operations.probe.Load()
+	if len(result.Steps) != 1 || result.Steps[0].Name != "listener" || result.Steps[0].Status != "ok" {
+		t.Fatalf("监听检查未确认当前进程的监听：%+v", result)
+	}
+	select {
+	case <-accepted:
+		t.Fatal("监听检查建立了空连接，会触发入站握手错误")
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
+func TestOperationsProbePreferencesBelongToCurrentConfiguration(t *testing.T) {
+	s := newTestService(&fakeKernel{running: true})
+	s.lastUsers = []model.UserSpec{{ID: 1}}
+	s.lastConfig = &model.NodeSpec{Protocol: "vless", HealthCheck: &healthcheck.Config{Enabled: true}}
+	check := func() {
+		t.Helper()
+		s.lastConfig.HealthCheck.Request += "next"
+		s.updateOperations(t.Context())
+		deadline := time.After(time.Second)
+		for s.operations.probing.Load() {
+			select {
+			case <-deadline:
+				t.Fatal("运行检查未退出")
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}
+	check()
+	previous := s.operations.probeAddresses
+	check()
+	if previous == nil || previous != s.operations.probeAddresses {
+		t.Fatal("同一配置的重复检查未复用出站地址记录")
+	}
+	s.lastConfig.ServerPort++
+	check()
+	if previous == s.operations.probeAddresses {
+		t.Fatal("新核心配置沿用了旧出站地址记录")
+	}
+	previous = s.operations.probeAddresses
+	s.lastConfig.HealthCheck.URL = "https://example.com/check"
+	check()
+	if previous == s.operations.probeAddresses {
+		t.Fatal("更换目标后仍使用旧地址记录")
+	}
+	s.lastConfig.HealthCheck.Enabled = false
+	s.updateOperations(t.Context())
+	if s.operations.probeAddresses != nil {
+		t.Fatal("关闭检查后未清除地址记录")
+	}
+	s.lastConfig.HealthCheck.Enabled = true
+	check()
+	s.kernel.(*fakeKernel).running = false
+	s.updateOperations(t.Context())
+	if s.operations.probeAddresses != nil {
+		t.Fatal("核心停止后未清除地址记录")
 	}
 }
 func TestAutoSpeedPersistenceIsPrivateAndKeepsOriginalExpiry(t *testing.T) {

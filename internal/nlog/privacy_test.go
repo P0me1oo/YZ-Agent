@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -141,4 +142,89 @@ func TestPrivacySeparatesMachineLogsAndProtectsSharedOutput(t *testing.T) {
 	if strings.Contains(decoded.String(), "first private") || !strings.Contains(decoded.String(), "second private") {
 		t.Fatal("machine records mixed")
 	}
+}
+
+func TestFilteredSubscriptionPreservesAllLocalPrivateLevels(t *testing.T) {
+	dir := t.TempDir()
+	state := privacytest.Bind(t, dir)
+	key := t.Name()
+	ConfigureLogPolicies([]string{key})
+	t.Cleanup(func() {
+		ConfigureLogPolicies(nil)
+		Init(os.Stdout, slog.LevelInfo, false)
+		SetGlobalScope("")
+	})
+	var console bytes.Buffer
+	Init(&console, slog.LevelDebug, false)
+	RegisterLogScope(key, key, filepath.Join(dir, "runtime.log.enc"), state)
+	ApplyLogPolicy(key, true)
+	var events []Event
+	stop := SubscribeFiltered(key, func(event Event) bool {
+		return event.Level == "warn" || event.Level == "error"
+	}, func(event Event) { events = append(events, event) })
+	defer stop()
+	logger := Scoped(key, 7, "test")
+	logger.Debug("local debug")
+	logger.Info("local info")
+	logger.Warn("uploaded warning token=" + strings.Repeat("test", 8))
+	logger.Error("uploaded error")
+	if console.Len() != 0 || len(events) != 2 || !strings.Contains(events[0].Message, "[已隐藏]") {
+		t.Fatal("level filtering changed privacy, required events or sanitization")
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "runtime.log.enc"))
+	var decoded bytes.Buffer
+	if err := state.ReadLog(&decoded, bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"local debug", "local info", "uploaded warning", "uploaded error"} {
+		if !strings.Contains(decoded.String(), marker) {
+			t.Fatalf("local level was lost: %s", marker)
+		}
+	}
+}
+
+func TestPrivateLogWritersReleaseHandlesOnPolicyChanges(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("file descriptor inspection requires Linux procfs")
+	}
+	dir := t.TempDir()
+	state := privacytest.Bind(t, dir)
+	path, replacement := filepath.Join(dir, "runtime.log.enc"), filepath.Join(dir, "next", "runtime.log.enc")
+	key := t.Name()
+	ConfigureLogPolicies([]string{key})
+	t.Cleanup(func() { ConfigureLogPolicies(nil) })
+	RegisterLogScope(key, key, path, state)
+	ApplyLogPolicy(key, true)
+	WriteRuntimeScoped(key, "first record")
+	assertHandles := func(path string, want int) {
+		t.Helper()
+		files, err := filepath.Glob("/proc/self/fd/*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := 0
+		for _, fd := range files {
+			if target, err := os.Readlink(fd); err == nil && target == path {
+				got++
+			}
+		}
+		if got != want {
+			t.Fatalf("unexpected open handles: got %d, want %d", got, want)
+		}
+	}
+	assertHandles(path, 1)
+	ApplyLogPolicy(key, false)
+	assertHandles(path, 0)
+	ApplyLogPolicy(key, true)
+	WriteRuntimeScoped(key, "reopened record")
+	assertHandles(path, 1)
+	RegisterLogScope(key, key, replacement, state)
+	assertHandles(path, 0)
+	WriteRuntimeScoped(key, "replacement record")
+	assertHandles(replacement, 1)
+	CloseRuntimeLogs()
+	assertHandles(replacement, 0)
+	WriteRuntimeScoped(key, "after close")
+	ConfigureLogPolicies(nil)
+	assertHandles(replacement, 0)
 }

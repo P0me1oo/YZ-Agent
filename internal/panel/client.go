@@ -49,6 +49,7 @@ type Client struct {
 	blockLog                atomic.Bool
 	agentLog                atomic.Bool
 	agentLogEvents          atomic.Bool
+	agentLogMinLevel        atomic.Int32
 	apiFailure              atomic.Uint64
 	realtime                realtimeClient
 	deviceHandover          atomic.Bool
@@ -147,6 +148,7 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	c.blockLog.Store(hs.BlockLog.Version == 1)
 	c.agentLog.Store(hs.AgentLog.Version == 1)
 	c.agentLogEvents.Store(hs.AgentLog.Version == 1 && containsXrayCrash(hs.AgentLog.Events))
+	c.agentLogMinLevel.Store(agentLogLevel(hs.AgentLog.MinLevel))
 	c.deviceHandover.Store(hs.Realtime.DeviceHandover == 1)
 	c.deviceHandoverWS.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverWS == 1)
 	c.deviceHandoverRenewal.Store(hs.Realtime.DeviceHandover == 1 && hs.Realtime.DeviceHandoverRenewal == 1)

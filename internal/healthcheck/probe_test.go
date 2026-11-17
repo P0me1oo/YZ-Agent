@@ -34,12 +34,17 @@ func TestTargetReturnsAlternatingValidatedAddresses(t *testing.T) {
 		{
 			name: "IPv6 first",
 			ips:  []string{"2001:4860::1", "2001:4860::2", "8.8.8.8", "8.8.4.4"},
-			want: []string{"[2001:4860::1]:8443", "8.8.8.8:8443", "[2001:4860::2]:8443", "8.8.4.4:8443"},
+			want: []string{"8.8.8.8:8443", "[2001:4860::1]:8443", "8.8.4.4:8443", "[2001:4860::2]:8443"},
 		},
 		{
 			name: "IPv4 first",
 			ips:  []string{"8.8.8.8", "8.8.4.4", "2001:4860::1"},
 			want: []string{"8.8.8.8:8443", "[2001:4860::1]:8443", "8.8.4.4:8443"},
+		},
+		{
+			name: "IPv6 only",
+			ips:  []string{"2001:4860::1", "2001:4860::2"},
+			want: []string{"[2001:4860::1]:8443", "[2001:4860::2]:8443"},
 		},
 		{
 			name: "deduplicate equivalent addresses",

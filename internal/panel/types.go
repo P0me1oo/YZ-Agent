@@ -37,8 +37,9 @@ type HandshakeResponse struct {
 	HostMonitoring *bool      `json:"host_monitoring"`
 	LogPolicy      *LogPolicy `json:"log_policy,omitempty"`
 	AgentLog       struct {
-		Version int      `json:"version"`
-		Events  []string `json:"events"`
+		Version  int      `json:"version"`
+		Events   []string `json:"events"`
+		MinLevel string   `json:"min_level"`
 	} `json:"agent_log"`
 	AccessLog AccessLogPolicy `json:"access_log"`
 	BlockLog  struct {

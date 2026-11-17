@@ -85,3 +85,57 @@ func TestPrivateCollectorEncryptsQueueAndRetriesOriginalBatch(t *testing.T) {
 		t.Fatal("foreign queue overwritten or unpersisted batch uploaded", err)
 	}
 }
+
+func TestCollectorUnchangedQueueFollowsProtectionTransitions(t *testing.T) {
+	dir := t.TempDir()
+	state := privacytest.Bind(t, dir)
+	privacy.Bind(dir, nil, nil, true)
+	scope := t.Name()
+	nlog.ConfigureLogPolicies([]string{scope})
+	t.Cleanup(func() { nlog.ConfigureLogPolicies(nil) })
+	nlog.RegisterLogScope(scope, scope, filepath.Join(dir, "runtime.log.enc"), state)
+	nlog.ApplyLogPolicy(scope, false)
+	c := &collector{path: filepath.Join(dir, "pending.json"), scope: scope, key: state}
+	c.add(nlog.Event{Source: "agent", Level: "warn", Message: "retained record", OccurredAt: time.Now().Unix()})
+	if err := c.save(); err != nil {
+		t.Fatal(err)
+	}
+	privacy.Bind(dir, state, nil, true)
+	nlog.ApplyLogPolicy(scope, true)
+	if err := c.save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(c.path)
+	if !privacy.IsEncrypted(raw) {
+		t.Fatal("unchanged plaintext queue was not encrypted after policy change")
+	}
+	for range 5 {
+		if err := c.save(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unchanged, _ := os.ReadFile(c.path)
+	if !bytes.Equal(raw, unchanged) {
+		t.Fatal("unchanged private cache was re-encrypted")
+	}
+	nlog.ApplyLogPolicy(scope, false)
+	if err := privacy.RestoreScopes(t.Context(), []string{dir}, state); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(c.path)
+	if privacy.IsEncrypted(raw) || !bytes.Contains(raw, []byte("retained record")) {
+		t.Fatal("unchanged queue did not follow restoration")
+	}
+	privacy.EnableProtection(state)
+	nlog.ApplyLogPolicy(scope, true)
+	if err := c.save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(c.path)
+	if !privacy.IsEncrypted(raw) {
+		t.Fatal("queue did not follow repeated enable")
+	}
+}

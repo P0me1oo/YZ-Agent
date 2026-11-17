@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -55,6 +56,46 @@ func TestAgentLogCrashCapabilityAndLegacyFallback(t *testing.T) {
 			}
 			if reports != 2 || batch.Records[0].Event != "xray.crash" {
 				t.Fatal("上报不能改写待确认批次")
+			}
+		})
+	}
+}
+
+func TestAgentLogMinimumLevelAndLegacyFallback(t *testing.T) {
+	var minimum atomic.Value
+	minimum.Store("warn")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agent_log": map[string]any{"version": 1, "min_level": minimum.Load()},
+		})
+	}))
+	defer server.Close()
+	client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 7})
+	for _, test := range []struct {
+		name     string
+		minimum  string
+		allowed  []string
+		rejected []string
+	}{
+		{name: "warnings", minimum: "warn", allowed: []string{"warn", "error", "fatal"}, rejected: []string{"debug", "info"}},
+		{name: "errors", minimum: "error", allowed: []string{"error", "fatal"}, rejected: []string{"debug", "info", "warn"}},
+		{name: "legacy_after_new_panel", allowed: []string{"debug", "info", "warn", "error", "fatal"}},
+		{name: "unknown_extension", minimum: "future-level", allowed: []string{"debug", "info", "warn", "error", "fatal"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			minimum.Store(test.minimum)
+			if _, err := client.HandshakeContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			for _, level := range test.allowed {
+				if !client.AgentLogLevelAllowed(level) {
+					t.Errorf("required level %s was dropped", level)
+				}
+			}
+			for _, level := range test.rejected {
+				if client.AgentLogLevelAllowed(level) {
+					t.Errorf("low level %s was retained", level)
+				}
 			}
 		})
 	}

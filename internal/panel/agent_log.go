@@ -16,6 +16,27 @@ type AgentLogBatch struct {
 }
 
 func (c *Client) AgentLogEnabled() bool { return c.agentLog.Load() && c.runtimeLogsReady() }
+
+// 未声明或不能识别的最低等级沿用旧能力，避免旧面板或扩展字段导致日志丢失。
+func agentLogLevel(level string) int32 {
+	switch level {
+	case "info":
+		return 1
+	case "warn":
+		return 2
+	case "error":
+		return 3
+	case "fatal":
+		return 4
+	default:
+		return 0
+	}
+}
+
+func (c *Client) AgentLogLevelAllowed(level string) bool {
+	return agentLogLevel(level) >= c.agentLogMinLevel.Load()
+}
+
 func (c *Client) runtimeLogsReady() bool {
 	return nlog.PolicyReady(nlog.LogPolicyKey(c.baseURL, c.machineID, c.nodeID))
 }

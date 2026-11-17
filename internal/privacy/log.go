@@ -21,6 +21,8 @@ type LogWriter struct {
 	maxBytes      int64
 	keep          int
 	validatedSize int64
+	file          *os.File
+	info          os.FileInfo
 }
 
 func NewLogWriter(path string, state *State) *LogWriter {
@@ -37,46 +39,21 @@ func (w *LogWriter) Write(data []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := os.MkdirAll(filepath.Dir(w.path), 0o700); err != nil {
-		return 0, err
-	}
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+	info, err := w.prepare()
 	if err != nil {
+		_ = w.closeFile()
 		return 0, err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return 0, err
-	}
-	if !info.Mode().IsRegular() {
-		return 0, errors.New("加密日志必须为普通文件")
-	}
-	if info.Size() > 96<<20 {
-		return 0, errors.New("加密日志文件过大，保留原文件")
-	}
-	if err := f.Chmod(0o600); err != nil {
-		return 0, err
-	}
-	if info.Size() > 0 && info.Size() != w.validatedSize {
-		// 重启或外部修改后校验旧记录；损坏、缺少历史密钥时保全原文件。
-		if err := w.state.ReadLog(io.Discard, f); err != nil {
-			return 0, err
-		}
 	}
 	if info.Size() > 0 && info.Size()+int64(len(sealed)+4) > w.maxBytes {
-		if err := f.Close(); err != nil {
+		if err := w.closeFile(); err != nil {
 			return 0, err
 		}
 		if err := w.rotate(); err != nil {
 			return 0, err
 		}
-		f, err = os.OpenFile(w.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+		info, err = w.prepare()
 		if err != nil {
-			return 0, err
-		}
-		info, err = f.Stat()
-		if err != nil {
+			_ = w.closeFile()
 			return 0, err
 		}
 	}
@@ -86,16 +63,83 @@ func (w *LogWriter) Write(data []byte) (int, error) {
 	}
 	frame = binary.BigEndian.AppendUint32(frame, uint32(len(sealed)))
 	frame = append(frame, sealed...)
-	n, err := f.Write(frame)
+	n, err := w.file.Write(frame)
 	if err == nil && n != len(frame) {
 		err = io.ErrShortWrite
 	}
 	if err != nil {
-		w.validatedSize = -1
+		_ = w.closeFile()
 		return 0, err
 	}
 	w.validatedSize = info.Size() + int64(n)
+	w.info, err = w.file.Stat()
+	if err != nil {
+		_ = w.closeFile()
+		return 0, err
+	}
 	return len(data), nil
+}
+
+// 复用句柄，但每次追加仍核对路径身份、长度及修改时间，不能继续写入被移走的旧文件。
+func (w *LogWriter) prepare() (os.FileInfo, error) {
+	info, err := os.Lstat(w.path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if info != nil && !info.Mode().IsRegular() {
+		return nil, errors.New("加密日志必须为普通文件")
+	}
+	if w.file != nil && (info == nil || !os.SameFile(w.info, info)) {
+		if err := w.closeFile(); err != nil {
+			return nil, err
+		}
+	}
+	if w.file == nil {
+		if err := os.MkdirAll(filepath.Dir(w.path), 0o700); err != nil {
+			return nil, err
+		}
+		w.file, err = os.OpenFile(w.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+		if err != nil {
+			return nil, err
+		}
+		info, err = w.file.Stat()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !info.Mode().IsRegular() || info.Size() > 96<<20 {
+		return nil, errors.New("加密日志类型或大小无效，保留原文件")
+	}
+	if info.Mode() != 0o600 {
+		if err := w.file.Chmod(0o600); err != nil {
+			return nil, err
+		}
+	}
+	unchanged := w.info != nil && info.Size() == w.validatedSize &&
+		info.ModTime().Equal(w.info.ModTime())
+	if info.Size() > 0 && !unchanged {
+		// 独立读取位置，支持复用句柄后的重新校验；同长度的外部改写也必须校验。
+		if err := w.state.ReadLog(io.Discard, io.NewSectionReader(w.file, 0, info.Size())); err != nil {
+			return nil, err
+		}
+	}
+	return info, nil
+}
+
+// Close 释放当前句柄；再次开启隐私模式时，下次写入会重新打开并校验原文件。
+func (w *LogWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.closeFile()
+}
+
+func (w *LogWriter) closeFile() error {
+	file := w.file
+	w.file, w.info, w.validatedSize = nil, nil, -1
+	if file == nil {
+		return nil
+	}
+	return file.Close()
 }
 
 func (w *LogWriter) rotate() error {

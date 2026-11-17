@@ -79,7 +79,6 @@ func resolveTarget(
 	}
 	families := [2][]string{{}, {}}
 	seen := make(map[string]bool, len(ips))
-	firstIPv4 := ips[0].IP.To4() != nil
 	for _, resolved := range ips {
 		ip := resolved.IP.String()
 		// 所有答案都必须通过校验，不能因只尝试部分地址而放过非公网答案。
@@ -91,12 +90,12 @@ func resolveTarget(
 		}
 		seen[ip] = true
 		family := 0
-		if (resolved.IP.To4() != nil) != firstIPv4 {
+		if resolved.IP.To4() == nil {
 			family = 1
 		}
 		families[family] = append(families[family], net.JoinHostPort(ip, port))
 	}
-	// 前置的地址优先级不代表落地的连通性；尽早尝试另一地址族。
+	// 前置的 IPv6 能力不代表落地可用；初次优先 IPv4，仍尽早保留另一地址族回退。
 	addresses := make([]string, 0, len(seen))
 	for i := range max(len(families[0]), len(families[1])) {
 		for _, family := range families {
@@ -109,6 +108,15 @@ func resolveTarget(
 }
 
 func Request(ctx context.Context, u *url.URL, addresses []string, dial DialFunc) (int64, error) {
+	return request(
+		ctx,
+		u,
+		addresses,
+		requestTransport(u, dial),
+	)
+}
+
+func requestTransport(u *url.URL, dial DialFunc) *http.Transport {
 	transport := &http.Transport{
 		TLSClientConfig:       &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12},
 		DialContext:           dial,
@@ -116,18 +124,28 @@ func Request(ctx context.Context, u *url.URL, addresses []string, dial DialFunc)
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: 5 * time.Second,
 	}
-	return request(
-		ctx,
-		u,
-		addresses,
-		transport,
-	)
+	return transport
 }
 
 func request(ctx context.Context, u *url.URL, addresses []string, base *http.Transport) (int64, error) {
+	ms, _, err := requestWithAddress(
+		ctx,
+		u,
+		addresses,
+		base,
+	)
+	return ms, err
+}
+
+func requestWithAddress(
+	ctx context.Context,
+	u *url.URL,
+	addresses []string,
+	base *http.Transport,
+) (int64, string, error) {
 	started := time.Now()
 	if len(addresses) == 0 {
-		return 0, fmt.Errorf("目标没有地址")
+		return 0, "", fmt.Errorf("目标没有地址")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -135,7 +153,7 @@ func request(ctx context.Context, u *url.URL, addresses []string, base *http.Tra
 	var lastErr error
 	for i, address := range addresses {
 		if err := ctx.Err(); err != nil {
-			return time.Since(started).Milliseconds(), err
+			return time.Since(started).Milliseconds(), "", err
 		}
 		timeout := time.Until(deadline)
 		if i < len(addresses)-1 {
@@ -150,12 +168,15 @@ func request(ctx context.Context, u *url.URL, addresses []string, base *http.Tra
 			base,
 		)
 		cancelAttempt()
-		if err == nil || !retryable {
-			return time.Since(started).Milliseconds(), err
+		if err == nil {
+			return time.Since(started).Milliseconds(), address, nil
+		}
+		if !retryable {
+			return time.Since(started).Milliseconds(), "", err
 		}
 		lastErr = err
 	}
-	return time.Since(started).Milliseconds(), lastErr
+	return time.Since(started).Milliseconds(), "", lastErr
 }
 
 func requestAddress(ctx context.Context, u *url.URL, address string, base *http.Transport) (bool, error) {

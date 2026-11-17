@@ -1,0 +1,121 @@
+{
+  "date": "2026-11-17",
+  "agent_version": "v2.40.0",
+  "panel_version": "2.23.0",
+  "source": {
+    "agent_baseline": "78e3af7d992f241bdb8a3f77716c89c80de483b3",
+    "panel_baseline": "f7501219a6fb89c7a8c7caaf374c4d4c79905e8d",
+    "uncommitted": true,
+    "unrelated_panel_changes_excluded": true
+  },
+  "benchmark_environment": {
+    "go": "1.27.3",
+    "os": "linux",
+    "arch": "amd64",
+    "cpu": "AMD Ryzen 9 9950X",
+    "parallelism": 6,
+    "storage": "tmpfs",
+    "repetitions": 4,
+    "before_benchtime": "200ms",
+    "after_benchtime": "300ms",
+    "concurrent_timing_discarded": true
+  },
+  "benchmarks": {
+    "before-bench.txt": {
+      "BenchmarkLogWriter/bytes_128": [
+        5075.0,
+        2224.0,
+        15.0
+      ],
+      "BenchmarkLogWriter/bytes_1024": [
+        7171.0,
+        9333.5,
+        15.0
+      ],
+      "BenchmarkCollectorUnchangedSave/plain": [
+        16200.5,
+        2561.0,
+        27.0
+      ],
+      "BenchmarkCollectorUnchangedSave/private": [
+        20880.0,
+        4499.5,
+        42.0
+      ]
+    },
+    "after-bench.txt": {
+      "BenchmarkLogWriter/bytes_128": [
+        2349.0,
+        2072.0,
+        12.0
+      ],
+      "BenchmarkLogWriter/bytes_1024": [
+        5201.0,
+        9182.0,
+        12.0
+      ],
+      "BenchmarkCollectorUnchangedSave/plain": [
+        1033.0,
+        400.0,
+        5.0
+      ],
+      "BenchmarkCollectorUnchangedSave/private": [
+        1028.5,
+        400.0,
+        5.0
+      ],
+      "BenchmarkPublishInfoFiltering/unfiltered": [
+        30692.5,
+        2411.5,
+        30.0
+      ],
+      "BenchmarkPublishInfoFiltering/filtered": [
+        25.375,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "benchmark_raw": {
+    "before": "goos: linux\ngoarch: amd64\npkg: github.com/P0me1oo/YZ-Agent/internal/privacy\ncpu: AMD Ryzen 9 9950X 16-Core Processor            \nBenchmarkLogWriter/bytes_128-6         \t   44685\t      5674 ns/op\t  22.56 MB/s\t    2224 B/op\t      15 allocs/op\nBenchmarkLogWriter/bytes_128-6         \t   35250\t      6135 ns/op\t  20.86 MB/s\t    2224 B/op\t      15 allocs/op\nBenchmarkLogWriter/bytes_128-6         \t   59532\t      4227 ns/op\t  30.28 MB/s\t    2224 B/op\t      15 allocs/op\nBenchmarkLogWriter/bytes_128-6         \t   51438\t      4476 ns/op\t  28.60 MB/s\t    2224 B/op\t      15 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   33513\t      8471 ns/op\t 120.89 MB/s\t    9334 B/op\t      15 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   28845\t      7398 ns/op\t 138.41 MB/s\t    9334 B/op\t      15 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   38607\t      6944 ns/op\t 147.46 MB/s\t    9333 B/op\t      15 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   34717\t      6847 ns/op\t 149.56 MB/s\t    9333 B/op\t      15 allocs/op\nPASS\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/privacy\t1.974s\ngoos: linux\ngoarch: amd64\npkg: github.com/P0me1oo/YZ-Agent/internal/agentlog\ncpu: AMD Ryzen 9 9950X 16-Core Processor            \nBenchmarkCollectorUnchangedSave/plain-6         \t    9758\t     24034 ns/op\t    2561 B/op\t      27 allocs/op\nBenchmarkCollectorUnchangedSave/plain-6         \t   13504\t     17148 ns/op\t    2561 B/op\t      27 allocs/op\nBenchmarkCollectorUnchangedSave/plain-6         \t   15517\t     15253 ns/op\t    2561 B/op\t      27 allocs/op\nBenchmarkCollectorUnchangedSave/plain-6         \t   16711\t     14513 ns/op\t    2561 B/op\t      27 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t   12918\t     18281 ns/op\t    4500 B/op\t      42 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t   10000\t     27382 ns/op\t    4499 B/op\t      42 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t   10000\t     23374 ns/op\t    4503 B/op\t      42 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t   11834\t     18386 ns/op\t    4499 B/op\t      42 allocs/op\nPASS\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/agentlog\t1.939s\n",
+    "after": "goos: linux\ngoarch: amd64\npkg: github.com/P0me1oo/YZ-Agent/internal/privacy\ncpu: AMD Ryzen 9 9950X 16-Core Processor            \nBenchmarkLogWriter/bytes_128-6         \t  106894\t      3102 ns/op\t  41.26 MB/s\t    2073 B/op\t      12 allocs/op\nBenchmarkLogWriter/bytes_128-6         \t  130056\t      2379 ns/op\t  53.81 MB/s\t    2072 B/op\t      12 allocs/op\nBenchmarkLogWriter/bytes_128-6         \t  176079\t      2313 ns/op\t  55.33 MB/s\t    2072 B/op\t      12 allocs/op\nBenchmarkLogWriter/bytes_128-6         \t  143724\t      2319 ns/op\t  55.20 MB/s\t    2072 B/op\t      12 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   74184\t      5757 ns/op\t 177.87 MB/s\t    9183 B/op\t      12 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   73342\t      6023 ns/op\t 170.02 MB/s\t    9182 B/op\t      12 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   79134\t      4645 ns/op\t 220.45 MB/s\t    9182 B/op\t      12 allocs/op\nBenchmarkLogWriter/bytes_1024-6        \t   87760\t      4503 ns/op\t 227.41 MB/s\t    9182 B/op\t      12 allocs/op\nPASS\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/privacy\t3.047s\ngoos: linux\ngoarch: amd64\npkg: github.com/P0me1oo/YZ-Agent/internal/agentlog\ncpu: AMD Ryzen 9 9950X 16-Core Processor            \nBenchmarkCollectorUnchangedSave/plain-6         \t  349352\t      1046 ns/op\t     400 B/op\t       5 allocs/op\nBenchmarkCollectorUnchangedSave/plain-6         \t  347391\t      1030 ns/op\t     400 B/op\t       5 allocs/op\nBenchmarkCollectorUnchangedSave/plain-6         \t  374612\t       999.3 ns/op\t     400 B/op\t       5 allocs/op\nBenchmarkCollectorUnchangedSave/plain-6         \t  340270\t      1036 ns/op\t     400 B/op\t       5 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t  358058\t      1032 ns/op\t     400 B/op\t       5 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t  295036\t      1023 ns/op\t     400 B/op\t       5 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t  388657\t      1032 ns/op\t     400 B/op\t       5 allocs/op\nBenchmarkCollectorUnchangedSave/private-6       \t  344950\t      1025 ns/op\t     400 B/op\t       5 allocs/op\nPASS\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/agentlog\t2.895s\ngoos: linux\ngoarch: amd64\npkg: github.com/P0me1oo/YZ-Agent/internal/nlog\ncpu: AMD Ryzen 9 9950X 16-Core Processor            \nBenchmarkPublishInfoFiltering/unfiltered-6         \t   10000\t     30631 ns/op\t    2416 B/op\t      30 allocs/op\nBenchmarkPublishInfoFiltering/unfiltered-6         \t   10000\t     31465 ns/op\t    2411 B/op\t      30 allocs/op\nBenchmarkPublishInfoFiltering/unfiltered-6         \t   10000\t     30754 ns/op\t    2404 B/op\t      30 allocs/op\nBenchmarkPublishInfoFiltering/unfiltered-6         \t   12111\t     29879 ns/op\t    2412 B/op\t      30 allocs/op\nBenchmarkPublishInfoFiltering/filtered-6           \t14177775\t        24.92 ns/op\t       0 B/op\t       0 allocs/op\nBenchmarkPublishInfoFiltering/filtered-6           \t14348280\t        26.81 ns/op\t       0 B/op\t       0 allocs/op\nBenchmarkPublishInfoFiltering/filtered-6           \t12411818\t        25.83 ns/op\t       0 B/op\t       0 allocs/op\nBenchmarkPublishInfoFiltering/filtered-6           \t14306140\t        24.81 ns/op\t       0 B/op\t       0 allocs/op\nPASS\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/nlog\t2.713s\n"
+  },
+  "tests": {
+    "affected_race": "ok  \tgithub.com/P0me1oo/YZ-Agent/internal/privacy\t1.199s\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/nlog\t1.023s\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/agentlog\t1.170s\nok  \tgithub.com/P0me1oo/YZ-Agent/internal/panel\t4.150s\n",
+    "panel": "PHPUnit 11.5.57 by Sebastian Bergmann and contributors.\n\nRuntime:       PHP 8.4.27\nConfiguration: /root/YZboard/YZboard/phpunit.xml\n\n..........................................................        58 / 58 (100%)\n\nTime: 00:05.691, Memory: 94.50 MB\n\nOK (58 tests, 434 assertions)\n",
+    "panel_final_policy": "PHPUnit 11.5.57 by Sebastian Bergmann and contributors.\n\nRuntime:       PHP 8.4.27\nConfiguration: /root/YZboard/YZboard/phpunit.xml\n\n..............                                                    14 / 14 (100%)\n\nTime: 00:01.043, Memory: 88.50 MB\n\nOK (14 tests, 152 assertions)\n",
+    "lifecycle-tests": {
+      "github.com/P0me1oo/YZ-Agent/internal/nlog": {
+        "pass": 9
+      },
+      "github.com/P0me1oo/YZ-Agent/internal/privacy": {
+        "pass": 14
+      },
+      "github.com/P0me1oo/YZ-Agent/cmd/yz-agent": {
+        "pass": 9
+      }
+    },
+    "integration-tests": {
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/xray": {
+        "pass": 5
+      },
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/singbox": {
+        "pass": 6
+      },
+      "github.com/P0me1oo/YZ-Agent/internal/config": {
+        "pass": 2
+      }
+    }
+  },
+  "builds": {
+    "amd64": "\tpath\tgithub.com/P0me1oo/YZ-Agent/cmd/yz-agent\n\tmod\tgithub.com/P0me1oo/YZ-Agent\tv1.26.2-0.20261117060336-78e3af7d992f+dirty\t\n\tdep\tgithub.com/sagernet/sing-box\tv1.14.0\n\t=>\tgithub.com/P0me1oo/YZ-sing-box\tv1.16.0\th1:Yi9H0sUYMKJIGxfT08DhpgffyhWp5dKM9LSpHISsn/Q=\n\tdep\tgithub.com/xtls/xray-core\tv1.260327.0\n\t=>\tgithub.com/P0me1oo/YZ-Xray-core\tv0.0.0-20261116081756-36f4516090e3\th1:mgMjDxgmEVcMw6Jg/96l9EHWWwla9elWSdzQ5EcCLB4=\n\tdep\tgolang.org/x/mod\tv0.41.0\th1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=\n\tbuild\tGOARCH=amd64\n\tbuild\tGOOS=linux\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=78e3af7d992f241bdb8a3f77716c89c80de483b3\n\tbuild\tvcs.time=2026-11-17T06:03:36Z\n\tbuild\tvcs.modified=true\n",
+    "arm64": "\tpath\tgithub.com/P0me1oo/YZ-Agent/cmd/yz-agent\n\tmod\tgithub.com/P0me1oo/YZ-Agent\tv1.26.2-0.20261117060336-78e3af7d992f+dirty\t\n\tdep\tgithub.com/sagernet/sing-box\tv1.14.0\n\t=>\tgithub.com/P0me1oo/YZ-sing-box\tv1.16.0\th1:Yi9H0sUYMKJIGxfT08DhpgffyhWp5dKM9LSpHISsn/Q=\n\tdep\tgithub.com/xtls/xray-core\tv1.260327.0\n\t=>\tgithub.com/P0me1oo/YZ-Xray-core\tv0.0.0-20261116081756-36f4516090e3\th1:mgMjDxgmEVcMw6Jg/96l9EHWWwla9elWSdzQ5EcCLB4=\n\tdep\tgolang.org/x/mod\tv0.41.0\th1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=\n\tbuild\tGOARCH=arm64\n\tbuild\tGOOS=linux\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=78e3af7d992f241bdb8a3f77716c89c80de483b3\n\tbuild\tvcs.time=2026-11-17T06:03:36Z\n\tbuild\tvcs.modified=true\n",
+    "program_version": "yz-agent v2.40.0 (built 2026-11-17T10:02:21Z, commit 78e3af7d992f241bdb8a3f77716c89c80de483b3)\nxray-core: fork v26.12.0 (upstream v26.10.31 @ a4a3dff5b20c2faae567b742c172c7b95e75c083; fork commit 36f4516090e3e2fe88dcbe0840126582cd6fb795; module github.com/P0me1oo/YZ-Xray-core@v0.0.0-20261116081756-36f4516090e3)\nsing-box: requested v1.14.0, resolved v1.16.0 (upstream commit 0b8995879f29a9b98ee027bc17b75e101445b238; fork commit ad0c0cfbc7c3827f3058aa666d9f1a3b0e0fd085; module github.com/P0me1oo/YZ-sing-box@v1.16.0)\nsing-shadowsocks: upstream v0.2.8 @ e0612494bafdd1429e9632bc52fd278585d28690; Node compatibility source ./compat/sing-shadowsocks@(devel)\nanytls: upstream v0.0.11 @ 130d2e61b8895727bfed4942c535e91b246a9603; Node compatibility source ./compat/sing-anytls@(devel)\n"
+  },
+  "static_analysis": {
+    "affected_packages": "passed",
+    "extended_xray": "existing lostcancel warning in internal/kernel/xray/dispatcher.go:267 and :276; file unchanged"
+  },
+  "server_changes": false,
+  "published": false
+}

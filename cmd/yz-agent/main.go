@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	version       = "v2.39.0"
+	version       = "v2.40.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -67,6 +67,7 @@ func main() {
 		os.Exit(0)
 	}
 	nlog.ConfigureLogPolicies([]string{"startup"})
+	defer nlog.CloseRuntimeLogs()
 
 	pruneCtx, stopPrune := context.WithTimeout(context.Background(), 10*time.Second)
 	_, pruneErr := config.PruneDeletedMachines(pruneCtx, *configPath)

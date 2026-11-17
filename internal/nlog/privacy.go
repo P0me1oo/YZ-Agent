@@ -38,6 +38,7 @@ func ConfigureLogPolicies(keys []string) {
 	defer policyMu.Unlock()
 	logMu.Lock()
 	defer logMu.Unlock()
+	closeRuntimeLogsLocked()
 	activePolicies = make(map[string]bool, len(keys))
 	knownPolicies = map[string]bool{}
 	logScopes = map[string]logScope{}
@@ -60,6 +61,18 @@ func ApplyLogPolicy(key string, disabled bool) {
 	activePolicies[key] = disabled
 	knownPolicies[key] = true
 	updateLogPolicyLocked()
+	for _, writer := range privateWriters {
+		active := false
+		for _, item := range logScopes {
+			if item.writer == writer && knownPolicies[item.policy] && activePolicies[item.policy] {
+				active = true
+				break
+			}
+		}
+		if !active {
+			_ = writer.Close()
+		}
+	}
 }
 
 func updateLogPolicyLocked() {
@@ -95,6 +108,32 @@ func RegisterLogScope(scope, policy, path string, state *privacy.State) {
 		privateOrder = append(privateOrder, scope)
 	}
 	logScopes[scope] = item
+	// 重载或密钥变更后回收不再属于任何实例的句柄。
+	for key, writer := range privateWriters {
+		referenced := false
+		for _, registered := range logScopes {
+			if registered.writer == writer {
+				referenced = true
+				break
+			}
+		}
+		if !referenced {
+			_ = writer.Close()
+			delete(privateWriters, key)
+		}
+	}
+}
+
+func CloseRuntimeLogs() {
+	logMu.Lock()
+	defer logMu.Unlock()
+	closeRuntimeLogsLocked()
+}
+
+func closeRuntimeLogsLocked() {
+	for _, writer := range privateWriters {
+		_ = writer.Close()
+	}
 }
 
 func effectiveScope(scope string) string {

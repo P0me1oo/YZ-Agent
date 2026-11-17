@@ -356,6 +356,29 @@ func lookup(path string) (binding, bool) {
 	return best, length >= 0
 }
 
+// ProtectionKey 只读取当前文件保护策略，供缓存判断是否需要重新保存。
+// 调用方持有文件写入屏障时，返回值在本次保存期间不会变化。
+func ProtectionKey(path string) string {
+	b, ok := lookup(path)
+	if !ok {
+		return ""
+	}
+	if b.owner != "" {
+		target, dir := canonical(path), filepath.Dir(b.owner)
+		if target == b.owner || target == filepath.Join(dir, "credentials.env") ||
+			target == filepath.Join(dir, "install-meta.json") {
+			return ""
+		}
+	}
+	registry.RLock()
+	plain := registry.plain[b.state.current]
+	registry.RUnlock()
+	if plain {
+		return ""
+	}
+	return b.state.current
+}
+
 func Protect(path string, data []byte) ([]byte, error) {
 	if IsEncrypted(data) {
 		return data, nil

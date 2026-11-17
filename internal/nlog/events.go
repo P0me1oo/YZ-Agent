@@ -20,13 +20,24 @@ type Event struct {
 }
 
 var eventMu sync.RWMutex
-var subscriptions = map[string]func(Event){}
+
+type subscription struct {
+	accept   func(Event) bool
+	callback func(Event)
+}
+
+var subscriptions = map[string]subscription{}
 var globalScope string
 
 func SetGlobalScope(scope string) { eventMu.Lock(); globalScope = scope; eventMu.Unlock() }
 func Subscribe(scope string, callback func(Event)) func() {
+	return SubscribeFiltered(scope, nil, callback)
+}
+
+// 在脱敏和队列分配前筛选上传等级，本地日志出口仍按原等级记录。
+func SubscribeFiltered(scope string, accept func(Event) bool, callback func(Event)) func() {
 	eventMu.Lock()
-	subscriptions[scope] = callback
+	subscriptions[scope] = subscription{accept: accept, callback: callback}
 	eventMu.Unlock()
 	return func() { eventMu.Lock(); delete(subscriptions, scope); eventMu.Unlock() }
 }
@@ -74,12 +85,15 @@ func Publish(scope string, event Event) {
 	}
 	eventMu.RLock()
 	defer eventMu.RUnlock()
-	if callback := subscriptions[scope]; callback != nil {
+	if subscriber := subscriptions[scope]; subscriber.callback != nil {
+		if subscriber.accept != nil && !subscriber.accept(event) {
+			return
+		}
 		event.Message = Sanitize(event.Message)
 		if event.OccurredAt == 0 {
 			event.OccurredAt = time.Now().Unix()
 		}
-		callback(event)
+		subscriber.callback(event)
 	}
 }
 func Scoped(scope string, node int, prefix string) *NodeLog {

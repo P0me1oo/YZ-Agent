@@ -33,6 +33,8 @@ type operationsState struct {
 	renewID           string
 	lastProbe         time.Time
 	probeRequest      string
+	probeAddresses    *healthcheck.Prober
+	probeAddressKey   string
 }
 type renewResult struct {
 	ID     string `json:"id"`
@@ -128,10 +130,8 @@ func (s *Service) updateOperations(ctx context.Context) {
 			target := c.URL
 			port := cfg.ServerPort
 			listen := cfg.ListenIP
-			if listen == "" || listen == "0.0.0.0" {
-				listen = "127.0.0.1"
-			} else if listen == "::" {
-				listen = "::1"
+			if listen == "" {
+				listen = "::"
 			}
 			if cfg.IsRelayLanding() && cfg.Relay.ListenPort > 0 {
 				port = cfg.Relay.ListenPort
@@ -151,6 +151,12 @@ func (s *Service) updateOperations(ctx context.Context) {
 				}
 			}
 			generation := computeKernelConfigHash(cfg)
+			addressKey := generation + "|" + target
+			if s.operations.probeAddresses == nil || s.operations.probeAddressKey != addressKey {
+				s.operations.probeAddresses = &healthcheck.Prober{}
+				s.operations.probeAddressKey = addressKey
+			}
+			prober := s.operations.probeAddresses
 			go func() {
 				defer s.operations.probing.Store(false)
 				job, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -158,14 +164,16 @@ func (s *Service) updateOperations(ctx context.Context) {
 				result := &healthcheck.Result{ID: fmt.Sprintf("%d", time.Now().UnixNano()), Checked: time.Now().Unix(), Status: "ok", Source: "节点本机", ConfigHash: generation, Target: target, Steps: []healthcheck.Step{}}
 				if tcp {
 					start := time.Now()
-					conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(job, "tcp", net.JoinHostPort(listen, strconv.Itoa(port)))
+					listening, err := healthcheck.Listener(job, net.JoinHostPort(listen, strconv.Itoa(port)))
 					step := healthcheck.Step{Name: "listener", Status: "ok", MS: time.Since(start).Milliseconds()}
 					if err != nil {
+						step.Status = "not_supported"
+						step.Error = "本机监听状态无法读取"
+						result.Status = "partial"
+					} else if !listening {
 						step.Status = "failed"
-						step.Error = "本机监听连接失败"
+						step.Error = "当前进程没有对应的 TCP 监听"
 						result.Status = "failed"
-					} else {
-						conn.Close()
 					}
 					result.Steps = append(result.Steps, step)
 				} else {
@@ -181,8 +189,9 @@ func (s *Service) updateOperations(ctx context.Context) {
 					result.Steps = append(result.Steps, healthcheck.Step{Name: "target", Status: "failed", Error: err.Error()})
 				} else {
 					result.Routes = healthcheck.CheckRoutes(job, routes, func(ctx context.Context, tag string) (int64, error) {
-						return healthcheck.Request(
+						return prober.Request(
 							ctx,
+							tag,
 							u,
 							addresses,
 							func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -213,6 +222,10 @@ func (s *Service) updateOperations(ctx context.Context) {
 	snapshot := &operationsSnapshot{Run: s.operations.run, Sequence: s.operations.sequence, ErrorID: s.runtimeErrorID, Version: 1, SampledAt: time.Now().UnixMilli(), Runtime: "running", ConfigHash: computeKernelConfigHash(cfg), Control: s.controlVersion.Current(), Health: s.operations.probe.Load(), AutoSpeed: s.autoSpeed.manager.Snapshot(time.Now()), AutoSpeedError: s.autoSpeed.error, Renewal: s.operations.renewDone.Load()}
 	if c == nil || !c.Enabled || snapshot.Health != nil && snapshot.Health.ConfigHash != snapshot.ConfigHash {
 		snapshot.Health = nil
+	}
+	if c == nil || !c.Enabled || !s.kernel.IsRunning() {
+		s.operations.probeAddresses = nil
+		s.operations.probeAddressKey = ""
 	}
 	if !s.kernel.IsRunning() {
 		snapshot.Runtime = "stopped"

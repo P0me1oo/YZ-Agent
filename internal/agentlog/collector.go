@@ -15,6 +15,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
@@ -22,16 +23,22 @@ import (
 const capacity = 4096
 
 type collector struct {
-	mu       sync.Mutex
-	queue    []nlog.Event
-	pending  *panel.AgentLogBatch
-	path     string
-	enabled  bool
-	dropped  uint64
-	failures nlog.Failures
-	logger   *nlog.NodeLog
-	scope    string
-	key      *privacy.State
+	mu              sync.Mutex
+	saveMu          sync.Mutex
+	queue           []nlog.Event
+	pending         *panel.AgentLogBatch
+	path            string
+	enabled         bool
+	dropped         uint64
+	failures        nlog.Failures
+	logger          *nlog.NodeLog
+	scope           string
+	key             *privacy.State
+	acceptLevel     func(string) bool
+	revision        uint64
+	savedRevision   uint64
+	savedProtection string
+	savedInfo       os.FileInfo
 }
 
 func (c *collector) add(event nlog.Event) {
@@ -42,15 +49,33 @@ func (c *collector) add(event nlog.Event) {
 		return
 	}
 	c.queue = append(c.queue, event)
+	c.revision++
 }
 func (c *collector) next() *panel.AgentLogBatch {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.acceptLevel != nil {
+		previous := len(c.queue)
+		c.queue = slices.DeleteFunc(c.queue, func(event nlog.Event) bool {
+			return !c.acceptLevel(event.Level)
+		})
+		if len(c.queue) != previous {
+			c.revision++
+		}
+	}
+	// 已固定的批次不删减记录，保留重试位置和面板防重编号。
 	if c.pending != nil {
 		return c.pending
 	}
 	if c.dropped > 0 && len(c.queue) < capacity {
-		c.queue = append(c.queue, nlog.Event{Source: "agent", Level: "warn", Message: fmt.Sprintf("日志队列已满，未保存 %d 条运行日志", c.dropped), OccurredAt: time.Now().Unix()})
+		if c.acceptLevel == nil || c.acceptLevel("warn") {
+			c.queue = append(c.queue, nlog.Event{
+				Source: "agent", Level: "warn",
+				Message:    fmt.Sprintf("日志队列已满，未保存 %d 条运行日志", c.dropped),
+				OccurredAt: time.Now().Unix(),
+			})
+			c.revision++
+		}
 		c.dropped = 0
 	}
 	if len(c.queue) == 0 {
@@ -63,6 +88,7 @@ func (c *collector) next() *panel.AgentLogBatch {
 	count := min(128, len(c.queue))
 	c.pending = &panel.AgentLogBatch{ID: hex.EncodeToString(id), Records: append([]nlog.Event(nil), c.queue[:count]...)}
 	c.queue = append([]nlog.Event(nil), c.queue[count:]...)
+	c.revision++
 	return c.pending
 }
 
@@ -72,6 +98,8 @@ type saved struct {
 }
 
 func (c *collector) save() error {
+	c.saveMu.Lock()
+	defer c.saveMu.Unlock()
 	private, unlockPolicy := nlog.LockLogPolicy(c.scope)
 	defer unlockPolicy()
 	release := privacy.LockFileWrite(c.path)
@@ -79,28 +107,46 @@ func (c *collector) save() error {
 	if c.path == "" {
 		return nil
 	}
+	protection := privacy.ProtectionKey(c.path)
+	if private {
+		if c.key == nil {
+			return errors.New("运行日志密钥尚未取得")
+		}
+		protection = privacy.StateKey(c.key)
+	}
+	info, err := os.Stat(c.path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if info != nil && (!info.Mode().IsRegular() || info.Size() > 24<<20) {
+		return errors.New("日志缓存类型或大小无效")
+	}
 	c.mu.Lock()
-	state := saved{c.pending, append([]nlog.Event(nil), c.queue...)}
+	revision := c.revision
+	if revision == c.savedRevision && protection == c.savedProtection && sameCacheFile(info, c.savedInfo) {
+		c.mu.Unlock()
+		return nil
+	}
+	state := saved{Pending: c.pending, Queue: append([]nlog.Event(nil), c.queue...)}
 	c.mu.Unlock()
 	data, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
 	if private {
-		if c.key == nil {
-			return errors.New("运行日志密钥尚未取得")
-		}
-		if info, statErr := os.Stat(c.path); statErr == nil && info.Size() > 24<<20 {
-			return errors.New("日志缓存大小无效")
-		}
-		if old, readErr := os.ReadFile(c.path); readErr == nil && privacy.IsEncrypted(old) {
-			plain, openErr := c.key.Open(old)
-			clear(plain)
-			if openErr != nil {
-				return openErr
+		// 本进程已校验并保存的原文件无需重复解密；外部变化仍必须验证归属。
+		if !sameCacheFile(info, c.savedInfo) {
+			old, readErr := os.ReadFile(c.path)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				return readErr
 			}
-		} else if readErr != nil && !os.IsNotExist(readErr) {
-			return readErr
+			if privacy.IsEncrypted(old) {
+				plain, openErr := c.key.Open(old)
+				clear(plain)
+				if openErr != nil {
+					return openErr
+				}
+			}
 		}
 		data, err = c.key.Seal(data, nil)
 	} else {
@@ -124,6 +170,10 @@ func (c *collector) save() error {
 	if err == nil {
 		err = temp.Sync()
 	}
+	var savedInfo os.FileInfo
+	if err == nil {
+		savedInfo, err = temp.Stat()
+	}
 	closeErr := temp.Close()
 	if err == nil {
 		err = closeErr
@@ -132,7 +182,20 @@ func (c *collector) save() error {
 		return err
 	}
 	// 同目录临时文件在成功保存后才替换，失败保留原快照。
-	return os.Rename(name, c.path)
+	if err := os.Rename(name, c.path); err != nil {
+		return err
+	}
+	// 保存期间新加入的记录拥有新的修订号，下一轮仍会落盘。
+	c.savedRevision, c.savedProtection, c.savedInfo = revision, protection, savedInfo
+	return nil
+}
+
+func sameCacheFile(current, saved os.FileInfo) bool {
+	if current == nil || saved == nil {
+		return false
+	}
+	return os.SameFile(current, saved) && current.Size() == saved.Size() &&
+		current.Mode() == saved.Mode() && current.ModTime().Equal(saved.ModTime())
 }
 func (c *collector) restore() error {
 	if c.path == "" {
@@ -196,6 +259,7 @@ func (c *collector) restore() error {
 	}
 	// 不删减 pending 内的位置，过期项由面板确认并丢弃，保持幂等键一致。
 	c.pending = state.Pending
+	c.revision++
 	return nil
 }
 func (c *collector) flush(ctx context.Context, client *panel.Client) {
@@ -217,6 +281,7 @@ func (c *collector) flush(ctx context.Context, client *panel.Client) {
 	}
 	c.mu.Lock()
 	c.pending = nil
+	c.revision++
 	c.mu.Unlock()
 	c.saveWithDiagnostic()
 }
@@ -239,14 +304,20 @@ func Start(ctx context.Context, cfg *config.Config) func() {
 	if panelCfg.MachineID > 0 {
 		prefix = fmt.Sprintf("agent-log:machine:%d", panelCfg.MachineID)
 	}
-	c := &collector{logger: nlog.Scoped(cfg.LogScope(), panelCfg.NodeID, prefix), scope: cfg.LogScope(), key: cfg.RuntimeLogState()}
+	c := &collector{
+		logger: nlog.Scoped(cfg.LogScope(), panelCfg.NodeID, prefix),
+		scope:  cfg.LogScope(), key: cfg.RuntimeLogState(),
+		acceptLevel: client.AgentLogLevelAllowed,
+	}
 	if cfg.Kernel.ConfigDir != "" {
 		c.path = filepath.Join(cfg.Kernel.ConfigDir, fmt.Sprintf("pending-agent-%x.json", sha256.Sum256([]byte(cfg.LogScope()))))
 	}
 	restoreErr := c.restore()
 	unsubscribe := func() {}
 	if restoreErr == nil {
-		unsubscribe = nlog.Subscribe(cfg.LogScope(), c.add)
+		unsubscribe = nlog.SubscribeFiltered(cfg.LogScope(), func(event nlog.Event) bool {
+			return client.AgentLogLevelAllowed(event.Level)
+		}, c.add)
 	}
 	run, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
