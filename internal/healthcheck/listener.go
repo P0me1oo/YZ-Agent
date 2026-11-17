@@ -4,10 +4,7 @@ import (
 	"context"
 	"net/netip"
 	"os"
-	"runtime"
-	"strconv"
 
-	gcommon "github.com/shirou/gopsutil/v4/common"
 	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
@@ -55,18 +52,4 @@ func listener(
 		}
 	}
 	return false, nil
-}
-
-func processConnections(ctx context.Context, pid int32) ([]gnet.ConnectionStat, error) {
-	if runtime.GOOS == "linux" {
-		// 检查的是实际运行进程；外部主机监控的 HOST_PROC 不能改变监听归属。
-		ctx = context.WithValue(ctx, gcommon.EnvKey, gcommon.EnvMap{gcommon.HostProcEnvKey: "/proc"})
-		fd, err := os.Open("/proc/" + strconv.Itoa(int(pid)) + "/fd")
-		if err != nil {
-			return nil, err
-		}
-		fd.Close()
-		return gnet.ConnectionsPidWithoutUidsWithContext(ctx, "tcp", pid)
-	}
-	return gnet.ConnectionsPidWithContext(ctx, "tcp", pid)
 }
