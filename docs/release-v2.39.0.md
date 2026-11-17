@@ -1,4 +1,4 @@
-# Agent v2.39.0 发布检查
+# Agent v2.39.0 发布
 
 维护者：P0me1oo。日期：2026-11-17。
 
@@ -6,4 +6,6 @@
 
 Go 1.27.3、Linux amd64、Zig 0.15.2：`make test` 的安装器检查、正式功能标签下完整并发检测及八个依赖包的检查全部执行成功。合计 1095 个顶层用例通过，没有失败或数据竞争；6 个用例按环境或条件跳过，涉及原生防火墙、来源 SOCKS、原生客户端及占用端口选择，不计为通过。此前受影响功能的实连与专项结果见[兼容矩阵](../YZ_COMPATIBILITY.md)和[访问记录联动](../../YZboard/docs/access-policy-verification.md)。
 
-安装程序将在干净固定提交上为 Linux amd64、arm64 构建，同时提供原兼容名称与 xbctl；版本、完整提交、核心模块、目标架构及 `vcs.modified=false` 逐项核对，摘要随发布附件提供。本次发布 Agent，不升级线上节点。
+已发布为 [v2.39.0](https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.39.0) 并设为 Latest，固定源码 `43988dae63e75bfdbf46a63b4850fd7034bcf29d`。Linux amd64、arm64 安装程序已在干净固定提交上构建，原兼容名称与对应 Agent 逐字节一致；版本、完整提交、核心模块、目标架构及 `vcs.modified=false` 逐项核对通过。13 份附件下载及摘要核验通过，见[附件核验](release-v2.39.0-verification.json)。
+
+GitHub 自动检查在启动阶段失败，没有执行测试步骤，不计作通过；使用上述本机检查。没有发布 Docker 镜像，本次未升级线上节点。

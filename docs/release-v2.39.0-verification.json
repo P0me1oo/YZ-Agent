@@ -1,0 +1,24 @@
+{
+  "tag": "v2.39.0",
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.39.0",
+  "assets_verified": 13,
+  "source_commit": "43988dae63e75bfdbf46a63b4850fd7034bcf29d",
+  "files": {
+    "yz-agent-linux-arm64.buildinfo.txt": "05452b1b6a79da0122b8f48393831db6b674c2d67bf509fdd6b22e417c579bb7",
+    "yz-agent-linux-arm64": "e617dc224110e6efa9e77c2f644ceb2f5fa71b8e859f963c190699c96f45e72f",
+    "yz-agent-linux-amd64.buildinfo.txt": "545a14685e809aecc4b4aee5f024a9c2edc535fa15620d3f2c18a83dd92c8b71",
+    "yz-agent-linux-amd64": "652c3479679439d466a3277890adc9d3cc4029a0c429b653202242a8aeb6efd6",
+    "xbctl-linux-arm64": "7870927c2c9b3ab4f6518c2f802992b31715232b77f84e3fadd3bd7b173d2e57",
+    "xboard-node-linux-amd64": "652c3479679439d466a3277890adc9d3cc4029a0c429b653202242a8aeb6efd6",
+    "xboard-node-linux-arm64": "e617dc224110e6efa9e77c2f644ceb2f5fa71b8e859f963c190699c96f45e72f",
+    "xbctl-linux-arm64.buildinfo.txt": "726d42859ad3f60fc85344f2255bafec603330684c98cf9929b2d4fb2b0318e5",
+    "xbctl-linux-amd64": "99f0c4cc94202d7343837ed2802489f23de8d78b806782264cc15270abb3fa5a",
+    "SHA256SUMS": "3cb679de372ec3cbc5db5d470b3e23e147ca88a8ff192d35674e8fc8b9960295",
+    "release.json": "39f1cd6873949b131b5c59f1aebf7374884d7ad64c3aa29d3fab6b2b67b947ce",
+    "install.sh": "9cee3cbf340991e9ba1d9ac7f012e4234f6e274cc0ca1f7947eef8cc0faa40b3",
+    "xbctl-linux-amd64.buildinfo.txt": "b569c3980127cf7230ab3905576abf5eb0b27446339c47813c751ab56e22b86a"
+  },
+  "date": "2026-11-17",
+  "docker_published": false,
+  "github_actions": "启动阶段失败，未执行测试步骤；使用已完成的本机检查"
+}
