@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	version       = "v2.40.1"
+	version       = "v2.41.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -154,7 +154,8 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 		if port <= 0 {
 			return
 		}
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		address := fmt.Sprintf("127.0.0.1:%d", port)
+		ln, err := net.Listen("tcp", address)
 		if err != nil {
 			startupFailure(root, "failed to start health check listener", err)
 			os.Exit(1)
@@ -164,19 +165,13 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 		srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 		healthSrv = srv
 		go func() {
-			nlog.Core().Debug(fmt.Sprintf("health check listening on :%d", port))
+			nlog.Core().Debug("health check listening", "address", address)
 			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				nlog.Core().Warn("health check server stopped", "error", err)
 			}
 		}()
 	}
 
-	initialInstances, err := initialRoot.NormalizeInstances()
-	if err != nil {
-		startupFailure(initialRoot, "failed to normalize initial config", err)
-		os.Exit(1)
-	}
-	startHealth(runtimeProfile(initialRoot, initialInstances).HealthPort, initialRoot)
 	defer func() {
 		if healthSrv != nil {
 			healthSrv.Close()
@@ -218,6 +213,13 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 	go watchDeletedBindings(watchCtx, configPath, enqueueReload)
 
 	for root := initialRoot; ; {
+		if port := root.EffectiveHealthPort(); port != healthPort {
+			if healthSrv != nil {
+				_ = healthSrv.Close()
+				healthSrv = nil
+			}
+			startHealth(port, root)
+		}
 		if root.IsBindingIdle() {
 			health.waitForBinding()
 			select {
@@ -245,7 +247,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			if err != nil {
 				cancel()
 				startupFailure(root, "failed to prepare file protection during reload", err)
-				return
+				os.Exit(1)
 			}
 		}
 		go config.WatchPrivacy(ctx, configPath, root, enqueueReload)
@@ -290,14 +292,6 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 		timesync.SetDefault(timeManager)
 		health.setClock(timeManager)
 		timeManager.Start(ctx)
-
-		if instances[0].HealthPort != healthPort {
-			if healthSrv != nil {
-				healthSrv.Close()
-				healthSrv = nil
-			}
-			startHealth(instances[0].HealthPort, root)
-		}
 
 		instanceHealthIDs, allHealthIDs := healthComponentIDs(instances)
 		for _, instance := range instances {
@@ -403,14 +397,14 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			cancel()
 			if sig, shuttingDown := waitForReloadStop(doneCh, sigCh); shuttingDown {
 				nlog.Core().Info(fmt.Sprintf("received %v during reload, shutting down...", sig))
-				forceExitIfNeeded(waitForShutdown(doneCh, sigCh, shutdownGracePeriod))
+				forceExitIfNeeded(waitForShutdown(doneCh, sigCh, shutdownGracePeriod), firewallManager.Close)
 				stopShared()
 				return
 			}
 		case sig := <-sigCh:
 			nlog.Core().Info(fmt.Sprintf("received %v, shutting down...", sig))
 			cancel()
-			forceExitIfNeeded(waitForShutdown(doneCh, sigCh, shutdownGracePeriod))
+			forceExitIfNeeded(waitForShutdown(doneCh, sigCh, shutdownGracePeriod), firewallManager.Close)
 			stopShared()
 			return
 		case <-doneCh:
@@ -499,15 +493,33 @@ func waitForShutdown(done <-chan struct{}, signals <-chan os.Signal, timeout tim
 	}
 }
 
-func forceExitIfNeeded(result shutdownResult) {
+func forceExitIfNeeded(result shutdownResult, cleanup func() error) {
+	var code int
 	switch result {
 	case shutdownSecondSignal:
 		nlog.Core().Warn("received second signal, forcing exit")
-		os.Exit(1)
+		code = 1
 	case shutdownTimedOut:
 		nlog.Core().Error("shutdown timed out, forcing exit", "timeout", shutdownGracePeriod)
-		os.Exit(2)
+		code = 2
+	default:
+		return
 	}
+	if cleanup != nil {
+		done := make(chan error, 1)
+		go func() { done <- cleanup() }()
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case err := <-done:
+			if err != nil {
+				nlog.Core().Warn("防火墙规则未完全清理，已保留恢复记录", "error", err)
+			}
+		case <-timer.C:
+			nlog.Core().Warn("防火墙清理未在退出前完成，下次启动会检查遗留规则")
+		}
+	}
+	os.Exit(code)
 }
 
 func healthComponentIDs(instances []*config.Config) ([][]string, []string) {

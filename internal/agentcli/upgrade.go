@@ -30,6 +30,9 @@ type upgradeFile struct {
 // 新文件和旧文件的硬链接都位于程序分区，升级最多保存两份二进制内容。
 // 失败时只有本次创建的临时目录会被清理；无法回滚的备份会保留供恢复。
 func upgradeBinaries(paths installPaths, release string, ops upgradeOperations) (string, error) {
+	if err := validateUpgradeTarget(release); err != nil {
+		return "", err
+	}
 	stage, err := os.MkdirTemp(paths.binDir, ".yz-agent-upgrade-")
 	if err != nil {
 		return "", fmt.Errorf("create upgrade directory: %w", err)

@@ -3,6 +3,7 @@ package timesync
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -154,16 +155,12 @@ func (m *Manager) Start(parent context.Context) {
 	m.wg.Add(1)
 	m.runMu.Unlock()
 
-	_, _ = m.Check(ctx)
-	if ctx.Err() != nil {
-		m.wg.Done()
-		return
-	}
 	go m.loop(ctx)
 }
 
 func (m *Manager) loop(ctx context.Context) {
 	defer m.wg.Done()
+	_, _ = m.Check(ctx)
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
 	for {
@@ -294,7 +291,7 @@ func (m *Manager) queryServer(parent context.Context, server string) (time.Durat
 	}
 	done := make(chan result, 1)
 	go func() {
-		response, err := m.exchange(ctx, N.SystemDialer, address)
+		response, err := m.exchange(ctx, deadlineDialer{Dialer: N.SystemDialer}, address)
 		done <- result{response: response, err: err}
 	}()
 
@@ -313,6 +310,30 @@ func (m *Manager) queryServer(parent context.Context, server string) (time.Durat
 		}
 		return result.response.ClockOffset, nil
 	}
+}
+
+type deadlineDialer struct{ N.Dialer }
+
+func (d deadlineDialer) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
+	conn, err := d.Dialer.DialContext(ctx, network, destination)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	deadline, _ := ctx.Deadline()
+	return &deadlineConn{Conn: conn, deadline: deadline, stop: stop}, nil
+}
+
+type deadlineConn struct {
+	net.Conn
+	deadline time.Time
+	stop     func() bool
+}
+
+func (c *deadlineConn) SetDeadline(time.Time) error { return c.Conn.SetDeadline(c.deadline) }
+func (c *deadlineConn) Close() error {
+	c.stop()
+	return c.Conn.Close()
 }
 
 func (m *Manager) SetUsage(consumer string, required bool) {

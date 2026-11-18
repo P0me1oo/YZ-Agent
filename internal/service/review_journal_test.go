@@ -11,6 +11,36 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/privacy/privacytest"
 )
 
+func TestPendingTrafficRecoversAfterConfirmedClear(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			dir := t.TempDir()
+			privacytest.Bind(t, dir)
+			cfg := pendingTestConfig(dir, 7)
+			store := newPendingReportStore(cfg)
+			pending := pendingTraffic{Traffic: map[int][2]int64{1: {20, 40}}}
+			if err := store.save(nil, pending); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.save(nil, pendingTraffic{}); err != nil {
+				t.Fatal(err)
+			}
+			if legacy {
+				store.saved = true // 旧版清空检查点后仍写入增量。
+			}
+			if err := store.save(nil, pending); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				_, restored, err := newPendingReportStore(cfg).load()
+				if err != nil || restored.Traffic[1] != pending.Traffic[1] {
+					t.Fatalf("重启后丢失未确认流量: %v, %v", restored, err)
+				}
+			}
+		})
+	}
+}
+
 func TestIncrementalTrafficJournalRecoversAcrossCompactionAndBatchMoves(t *testing.T) {
 	dir := t.TempDir()
 	privacytest.Bind(t, dir)

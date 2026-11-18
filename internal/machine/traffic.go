@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/machinetraffic"
@@ -52,7 +53,7 @@ func (o *Orchestrator) setTrafficBlocked(blocked bool) {
 	if changed {
 		o.logger().Info("machine traffic protection changed", "blocked", blocked)
 		if !blocked && o.runCtx != nil {
-			go o.rediscover(o.runCtx)
+			o.runJob(func() { o.rediscover(o.runCtx) })
 		}
 	}
 }
@@ -65,7 +66,9 @@ func (o *Orchestrator) trafficLoop(ctx context.Context) {
 	defer ticker.Stop()
 	// 请求在独立协程发送，网络超时不能阻塞本机额度检查。
 	reports := make(chan machinetraffic.Sample, 1)
-	go func() {
+	var sender sync.WaitGroup
+	defer sender.Wait()
+	sender.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -83,7 +86,7 @@ func (o *Orchestrator) trafficLoop(ctx context.Context) {
 				o.setTrafficBlocked(blocked)
 			}
 		}
-	}()
+	})
 	count := 0
 	for {
 		select {

@@ -704,8 +704,8 @@ func TestBuildRoutes_WithCustomRouteRules(t *testing.T) {
 	}
 	route := buildRoutes(nil, customRules, nil)
 	allRules := route["rules"].([]M)
-	if len(allRules) != 13 {
-		t.Fatalf("rules count: got %d, want 13", len(allRules))
+	if len(allRules) != 9 {
+		t.Fatalf("rules count: got %d, want 9", len(allRules))
 	}
 	if allRules[0]["domain"].([]string)[0] != "full.example.com" {
 		t.Fatalf("unexpected exact domain rule: %v", allRules[0])
@@ -716,17 +716,11 @@ func TestBuildRoutes_WithCustomRouteRules(t *testing.T) {
 	if allRules[2]["ip_cidr"].([]string)[0] != "1.1.1.0/24" {
 		t.Fatalf("unexpected ip cidr rule: %v", allRules[2])
 	}
-	if allRules[3]["port"].([]int)[0] != 53 {
-		t.Fatalf("unexpected port rule: %v", allRules[3])
-	}
-	if allRules[4]["network"].([]string)[0] != "tcp" {
-		t.Fatalf("unexpected network rule: %v", allRules[4])
-	}
-	if allRules[5]["source_ip_cidr"].([]string)[0] != "10.10.0.0/16" {
-		t.Fatalf("unexpected source cidr rule: %v", allRules[5])
-	}
-	if allRules[6]["source_port_range"].([]string)[0] != "2000:2001" {
-		t.Fatalf("unexpected source port rule: %v", allRules[6])
+	for _, rule := range allRules[:3] {
+		if rule["port"].([]int)[0] != 53 || rule["network"].([]string)[0] != "tcp" ||
+			rule["source_ip_cidr"].([]string)[0] != "10.10.0.0/16" || rule["source_port_range"].([]string)[0] != "2000:2001" {
+			t.Fatalf("custom address rule lost its other conditions: %v", rule)
+		}
 	}
 }
 

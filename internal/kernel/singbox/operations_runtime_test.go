@@ -18,7 +18,9 @@ func TestOperationsProbeBothCoresExcludesUserAccounting(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var k kernel.Kernel
 			if name == "xray" {
-				k = xkernel.New(config.KernelConfig{})
+				k = xkernel.New(config.KernelConfig{CustomOutbound: []map[string]any{{
+					"tag": "direct", "protocol": "freedom",
+				}}})
 			} else {
 				k = New(config.KernelConfig{})
 			}

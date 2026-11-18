@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,16 +20,20 @@ type MachineOperation struct {
 
 // ExchangeMachineControl 独立于节点配置和负载采样，空服务器也能接受操作。
 func (c *Client) ExchangeMachineControl(version, bootID string, manageable bool, operation *MachineOperation) (*MachineOperation, error) {
-	command, _, err := c.exchangeMachineControl(version, bootID, manageable, operation, nil, false)
+	command, _, err := c.exchangeMachineControl(context.Background(), version, bootID, manageable, operation, nil, false)
 	return command, err
 }
 
 // 检测能力独立于远程重启权限，旧面板忽略新增字段后仍可正常工作。
 func (c *Client) ExchangeMachineControlWithReality(version, bootID string, manageable bool, operation *MachineOperation, scan *realityscan.Report) (*MachineOperation, *realityscan.Task, error) {
-	return c.exchangeMachineControl(version, bootID, manageable, operation, scan, true)
+	return c.exchangeMachineControl(context.Background(), version, bootID, manageable, operation, scan, true)
 }
 
-func (c *Client) exchangeMachineControl(version, bootID string, manageable bool, operation *MachineOperation, scan *realityscan.Report, supported bool) (*MachineOperation, *realityscan.Task, error) {
+func (c *Client) ExchangeMachineControlContext(ctx context.Context, version, bootID string, manageable bool, operation *MachineOperation, scan *realityscan.Report) (*MachineOperation, *realityscan.Task, error) {
+	return c.exchangeMachineControl(ctx, version, bootID, manageable, operation, scan, true)
+}
+
+func (c *Client) exchangeMachineControl(ctx context.Context, version, bootID string, manageable bool, operation *MachineOperation, scan *realityscan.Report, supported bool) (*MachineOperation, *realityscan.Task, error) {
 	payload := map[string]interface{}{"version": version, "boot_id": bootID, "manageable": manageable}
 	if supported {
 		payload["reality_scan_supported"] = true
@@ -44,7 +49,7 @@ func (c *Client) exchangeMachineControl(version, bootID string, manageable bool,
 	if err != nil {
 		return nil, nil, err
 	}
-	resp, err := c.doRequest("POST", "/api/v2/server/machine/control", body, "")
+	resp, err := c.doRequestContext(ctx, "POST", "/api/v2/server/machine/control", body, "")
 	if err != nil {
 		return nil, nil, err
 	}

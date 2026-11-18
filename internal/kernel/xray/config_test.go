@@ -512,8 +512,8 @@ func TestBuildRouting_WithCustomRouteRules(t *testing.T) {
 
 	routing := buildRouting(nil, customRules, nil, nil, nil)
 	xrayRules := routing["rules"].([]M)
-	if len(xrayRules) != 6 {
-		t.Fatalf("expected 6 rules, got %d", len(xrayRules))
+	if len(xrayRules) != 2 {
+		t.Fatalf("expected one combined rule and one default block, got %d", len(xrayRules))
 	}
 	if xrayRules[0]["outboundTag"] != "warp-jp" {
 		t.Fatalf("expected first custom outbound warp-jp, got %v", xrayRules[0]["outboundTag"])
@@ -521,16 +521,16 @@ func TestBuildRouting_WithCustomRouteRules(t *testing.T) {
 	if got := xrayRules[0]["domain"].([]string); len(got) != 2 || got[0] != "full.example.com" || got[1] != "domain:example.org" {
 		t.Fatalf("unexpected custom domains: %v", got)
 	}
-	if got := xrayRules[1]["port"]; got != "80,443-445" {
+	if got := xrayRules[0]["port"]; got != "80,443-445" {
 		t.Fatalf("unexpected port matcher: %v", got)
 	}
-	if got := xrayRules[2]["network"]; got != "tcp,udp" {
+	if got := xrayRules[0]["network"]; got != "tcp,udp" {
 		t.Fatalf("unexpected network matcher: %v", got)
 	}
-	if got := xrayRules[3]["source"].([]string); len(got) != 1 || got[0] != "192.168.1.0/24" {
+	if got := xrayRules[0]["source"].([]string); len(got) != 1 || got[0] != "192.168.1.0/24" {
 		t.Fatalf("unexpected source cidr matcher: %v", got)
 	}
-	if got := xrayRules[4]["sourcePort"]; got != "1000-1002" {
+	if got := xrayRules[0]["sourcePort"]; got != "1000-1002" {
 		t.Fatalf("unexpected source port matcher: %v", got)
 	}
 }

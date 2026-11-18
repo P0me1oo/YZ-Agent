@@ -25,12 +25,12 @@ func (o *Orchestrator) publishRuntimeState(ctx context.Context) {
 			load["net"] = map[string]float64{"in_speed": status.NetInSpeed, "out_speed": status.NetOutSpeed}
 		}
 	}
-	go func() {
+	o.runJob(func() {
 		defer o.stateActive.Store(false)
 		reportCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		defer cancel()
 		if err := o.client.PublishState(reportCtx, panel.StatePayload{Status: load}); err != nil && ctx.Err() == nil {
 			o.logger().Warn("machine realtime state report failed", "error", err)
 		}
-	}()
+	})
 }

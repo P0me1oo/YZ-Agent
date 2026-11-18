@@ -3,9 +3,10 @@ package singbox
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net"
+	"net/netip"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,12 @@ type M = map[string]interface{}
 func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TLSCert) (M, error) {
 	if err := kernel.ValidateSourcePolicy(nc); err != nil {
 		return nil, err
+	}
+	if kernel.NeedsGeoIP(nc.Routes) || kernel.NeedsGeoSite(nc.Routes) || kernel.NeedsGeoIPRules(nc.CustomRouteRules) || kernel.NeedsGeoSiteRules(nc.CustomRouteRules) {
+		return nil, fmt.Errorf("sing-box 不支持旧版 geoip/geosite 写法，请使用规则集或明确的域名和网段")
+	}
+	if nc.TLS == 2 && model.RealityProtectionEnabled(nc.TLSSettings["anti_abuse"]) {
+		return nil, fmt.Errorf("此 Reality 防盗用选项需要 Xray 内核")
 	}
 	level, err := config.ResolveKernelLogLevel(kcfg.LogLevel, nc.KernelLogLevel)
 	if err != nil {
@@ -58,7 +65,8 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	}
 	outbounds = append(outbounds, buildRelayOutbounds(nc)...)
 	for _, rule := range nc.Routes {
-		if rule.Action == "block" && rule.ID > 0 {
+		if rule.Action == "block" && rule.ID > 0 && !tags[model.PanelBlockTag(rule.ID)] {
+			tags[model.PanelBlockTag(rule.ID)] = true
 			outbounds = append(outbounds, M{"type": "block", "tag": model.PanelBlockTag(rule.ID)})
 		}
 	}
@@ -93,18 +101,6 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 
 	// Merge panel routes and static config routes
 	cfg["route"] = buildRoutes(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute), buildRelayRoutingRules(nc, users)...)
-
-	// Automatically enable rule_set caching (cache_file) when panel routes
-	// reference geoip:/geosite: entries so that the downloaded .srs rule_set
-	// files survive across process restarts.
-	if kernel.NeedsGeoIP(nc.Routes) || kernel.NeedsGeoSite(nc.Routes) || kernel.NeedsGeoIPRules(nc.CustomRouteRules) || kernel.NeedsGeoSiteRules(nc.CustomRouteRules) {
-		cfg["experimental"] = M{
-			"cache_file": M{
-				"enabled": true,
-				"path":    filepath.Join(kcfg.ConfigDir, "cache.db"),
-			},
-		}
-	}
 
 	mergeCustomSingbox(cfg, kcfg)
 	applySourcePolicy(cfg, nc)
@@ -294,6 +290,10 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 		if item == "" {
 			continue
 		}
+		if addr, err := netip.ParseAddr(item); err == nil {
+			cidrs = append(cidrs, netip.PrefixFrom(addr, addr.BitLen()).String())
+			continue
+		}
 		if strings.Contains(item, "/") {
 			cidrs = append(cidrs, item)
 			continue
@@ -367,63 +367,37 @@ func compileCustomRouteRule(rule model.CustomRouteRule) []M {
 	if rule.Disabled {
 		return nil
 	}
-
-	outbound := singboxOutboundForAction(rule.Action)
-	var compiled []M
-
-	if len(rule.Match.Domains) > 0 {
-		compiled = append(compiled, M{
-			"domain":   copyStrings(rule.Match.Domains),
-			"outbound": outbound,
-		})
-	}
-	if len(rule.Match.DomainSuffixes) > 0 {
-		compiled = append(compiled, M{
-			"domain_suffix": copyStrings(rule.Match.DomainSuffixes),
-			"outbound":      outbound,
-		})
-	}
-	if len(rule.Match.IPCIDRs) > 0 {
-		compiled = append(compiled, M{
-			"ip_cidr":  copyStrings(rule.Match.IPCIDRs),
-			"outbound": outbound,
-		})
-	}
-	if len(rule.Match.Ports) > 0 {
-		ports, portRanges := splitPorts(rule.Match.Ports)
-		entry := M{"outbound": outbound}
-		if len(ports) > 0 {
-			entry["port"] = ports
-		}
-		if len(portRanges) > 0 {
-			entry["port_range"] = portRanges
-		}
-		compiled = append(compiled, entry)
-	}
+	base := M{"outbound": singboxOutboundForAction(rule.Action)}
 	if len(rule.Match.Networks) > 0 {
-		compiled = append(compiled, M{
-			"network":  copyStrings(rule.Match.Networks),
-			"outbound": outbound,
-		})
+		base["network"] = copyStrings(rule.Match.Networks)
 	}
 	if len(rule.Match.SourceCIDRs) > 0 {
-		compiled = append(compiled, M{
-			"source_ip_cidr": copyStrings(rule.Match.SourceCIDRs),
-			"outbound":       outbound,
-		})
+		base["source_ip_cidr"] = copyStrings(rule.Match.SourceCIDRs)
 	}
-	if len(rule.Match.SourcePorts) > 0 {
-		ports, portRanges := splitPorts(rule.Match.SourcePorts)
-		entry := M{"outbound": outbound}
+	for prefix, values := range map[string][]string{"": rule.Match.Ports, "source_": rule.Match.SourcePorts} {
+		ports, ranges := splitPorts(values)
 		if len(ports) > 0 {
-			entry["source_port"] = ports
+			base[prefix+"port"] = ports
 		}
-		if len(portRanges) > 0 {
-			entry["source_port_range"] = portRanges
+		if len(ranges) > 0 {
+			base[prefix+"port_range"] = ranges
 		}
-		compiled = append(compiled, entry)
 	}
-	return compiled
+	var rules []M
+	for _, values := range []struct {
+		field  string
+		values []string
+	}{{"domain", rule.Match.Domains}, {"domain_suffix", rule.Match.DomainSuffixes}, {"ip_cidr", rule.Match.IPCIDRs}} {
+		if len(values.values) > 0 {
+			entry := maps.Clone(base)
+			entry[values.field] = copyStrings(values.values)
+			rules = append(rules, entry)
+		}
+	}
+	if len(rules) == 0 && len(base) > 1 {
+		rules = append(rules, base)
+	}
+	return rules
 }
 
 func singboxOutboundForAction(action model.RouteAction) string {
@@ -1052,17 +1026,8 @@ func buildRealityConfig(nc *model.NodeSpec) M {
 		dest = settings.ServerName
 	}
 
-	if dest != "" {
-		handshake := M{"server": dest, "server_port": 443}
-		if parts := strings.SplitN(dest, ":", 2); len(parts) == 2 {
-			handshake["server"] = parts[0]
-			if p, err := strconv.Atoi(parts[1]); err == nil {
-				handshake["server_port"] = p
-			}
-		} else if settings.ServerPort > 0 {
-			handshake["server_port"] = settings.ServerPort
-		}
-		reality["handshake"] = handshake
+	if host, port, ok := model.RealityOrigin(dest, settings.ServerPort); ok {
+		reality["handshake"] = M{"server": host, "server_port": port}
 	}
 
 	if settings.ServerName != "" {

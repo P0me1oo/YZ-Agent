@@ -377,11 +377,15 @@ func (m *Manager) Stop() {
 // ─── Mode: file ────────────────────────────────────────────────────────────
 
 func (m *Manager) startFile() error {
-	certPEM, err := privacy.ReadFile(m.cfg.CertFile)
+	readFile := privacy.ReadFile
+	if m.cfg.RestrictFilesToCertDir {
+		readFile = func(path string) ([]byte, error) { return privacy.ReadFileIn(m.cfg.CertDir, path) }
+	}
+	certPEM, err := readFile(m.cfg.CertFile)
 	if err != nil {
 		return fmt.Errorf("cert file: %w", err)
 	}
-	keyPEM, err := privacy.ReadFile(m.cfg.KeyFile)
+	keyPEM, err := readFile(m.cfg.KeyFile)
 	if err != nil {
 		return fmt.Errorf("key file: %w", err)
 	}
@@ -486,7 +490,7 @@ func (m *Manager) startACME(ctx context.Context, dnsSolver *certmagic.DNS01Solve
 		return fmt.Errorf("cert.domain is required for ACME modes (http/dns)")
 	}
 
-	if err := os.MkdirAll(m.cfg.CertDir, 0o755); err != nil {
+	if err := os.MkdirAll(m.cfg.CertDir, 0o700); err != nil {
 		return fmt.Errorf("create cert dir: %w", err)
 	}
 

@@ -92,12 +92,18 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 		addresses = append(addresses, a)
 	}
 	var allowed []*net.IPNet
-	for _, value := range w.AllowedIPs {
-		_, subnet, err := net.ParseCIDR(value)
-		if err != nil {
-			return nil, errors.New("系统 WG 允许网段无效")
+	seen := make(map[string]bool)
+	for i := range peers {
+		for _, value := range peers[i].AllowedIPs {
+			_, subnet, err := net.ParseCIDR(value)
+			if err != nil {
+				return nil, errors.New("系统 WG 允许网段无效")
+			}
+			if key := subnet.String(); !seen[key] {
+				seen[key] = true
+				allowed = append(allowed, subnet)
+			}
 		}
-		allowed = append(allowed, subnet)
 	}
 	if len(addresses) == 0 || len(allowed) == 0 {
 		return nil, errors.New("系统 WG 缺少地址或允许网段")

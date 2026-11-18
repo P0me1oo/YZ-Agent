@@ -53,36 +53,39 @@ type instanceRow struct {
 }
 
 type fileRootConfig struct {
-	Log       *fileLogConfig         `yaml:"log,omitempty"`
-	Kernel    *fileKernelConfig      `yaml:"kernel,omitempty"`
-	Node      *fileNodeConfig        `yaml:"node,omitempty"`
-	WS        *config.WSConfig       `yaml:"ws,omitempty"`
-	Runtime   *fileRuntimeConfig     `yaml:"runtime,omitempty"`
-	Cert      *config.CertConfig     `yaml:"cert,omitempty"`
-	TimeSync  *config.TimeSyncConfig `yaml:"time_sync,omitempty"`
-	Firewall  *config.FirewallConfig `yaml:"firewall,omitempty"`
-	Instances []fileInstance         `yaml:"instances,omitempty"`
+	BindingIdle bool                   `yaml:"binding_idle,omitempty"`
+	HealthPort  int                    `yaml:"health_port,omitempty"`
+	Log         *fileLogConfig         `yaml:"log,omitempty"`
+	Kernel      *fileKernelConfig      `yaml:"kernel,omitempty"`
+	Node        *fileNodeConfig        `yaml:"node,omitempty"`
+	WS          *config.WSConfig       `yaml:"ws,omitempty"`
+	Runtime     *fileRuntimeConfig     `yaml:"runtime,omitempty"`
+	Cert        *config.CertConfig     `yaml:"cert,omitempty"`
+	TimeSync    *config.TimeSyncConfig `yaml:"time_sync,omitempty"`
+	Firewall    *config.FirewallConfig `yaml:"firewall,omitempty"`
+	Instances   []fileInstance         `yaml:"instances,omitempty"`
 }
 
 type fileInstance struct {
-	ID         string                 `yaml:"id,omitempty"`
-	Panel      filePanelConfig        `yaml:"panel"`
-	Node       *fileNodeConfig        `yaml:"node,omitempty"`
-	Kernel     fileKernelConfig       `yaml:"kernel"`
-	Log        fileLogConfig          `yaml:"log"`
-	Runtime    *fileRuntimeConfig     `yaml:"runtime,omitempty"`
-	HealthPort int                    `yaml:"health_port,omitempty"`
-	Machine    *fileMachineConfig     `yaml:"machine,omitempty"`
-	Standalone map[string]any         `yaml:"standalone,omitempty"`
-	Cert       *config.CertConfig     `yaml:"cert,omitempty"`
-	WS         *config.WSConfig       `yaml:"ws,omitempty"`
-	TimeSync   *config.TimeSyncConfig `yaml:"time_sync,omitempty"`
-	Firewall   *config.FirewallConfig `yaml:"firewall,omitempty"`
-	Nodes      []config.NodeEntry     `yaml:"nodes,omitempty"`
+	ID         string                   `yaml:"id,omitempty"`
+	Panel      filePanelConfig          `yaml:"panel"`
+	Node       *fileNodeConfig          `yaml:"node,omitempty"`
+	Kernel     fileKernelConfig         `yaml:"kernel"`
+	Log        fileLogConfig            `yaml:"log"`
+	Runtime    *fileRuntimeConfig       `yaml:"runtime,omitempty"`
+	HealthPort int                      `yaml:"health_port,omitempty"`
+	Machine    *fileMachineConfig       `yaml:"machine,omitempty"`
+	Standalone *config.StandaloneConfig `yaml:"standalone,omitempty"`
+	Cert       *config.CertConfig       `yaml:"cert,omitempty"`
+	WS         *config.WSConfig         `yaml:"ws,omitempty"`
+	TimeSync   *config.TimeSyncConfig   `yaml:"time_sync,omitempty"`
+	Firewall   *config.FirewallConfig   `yaml:"firewall,omitempty"`
+	Nodes      []config.NodeEntry       `yaml:"nodes,omitempty"`
 }
 
 type filePanelConfig struct {
 	URL      string `yaml:"url"`
+	Token    string `yaml:"token,omitempty"`
 	TokenEnv string `yaml:"token_env,omitempty"`
 	NodeID   int    `yaml:"node_id,omitempty"`
 	NodeType string `yaml:"node_type,omitempty"`
@@ -90,6 +93,7 @@ type filePanelConfig struct {
 
 type fileMachineConfig struct {
 	MachineID int    `yaml:"machine_id"`
+	Token     string `yaml:"token,omitempty"`
 	TokenEnv  string `yaml:"token_env,omitempty"`
 }
 
@@ -531,9 +535,6 @@ func runUpgrade(args []string) error {
 }
 
 func runUpgradeWithResult(args []string, result func(string)) error {
-	if err := ensureRoot("upgrade"); err != nil {
-		return err
-	}
 	release := "latest"
 	for i := 0; i < len(args); i++ {
 		if args[i] != "--version" || i+1 >= len(args) || args[i+1] == "" {
@@ -541,6 +542,12 @@ func runUpgradeWithResult(args []string, result func(string)) error {
 		}
 		i++
 		release = args[i]
+		if err := validateUpgradeTarget(release); err != nil {
+			return err
+		}
+	}
+	if err := ensureRoot("upgrade"); err != nil {
+		return err
 	}
 	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
 		return fmt.Errorf("unsupported architecture: %s", runtime.GOARCH)
@@ -680,8 +687,15 @@ func runUninstall(args []string) error {
 	// Stop and disable service
 	if fileExists(serviceFilePath) {
 		if err := runManagedService(manager, "stop", false); err != nil {
-			warnings = append(warnings, fmt.Sprintf("stop service: %v", err))
+			return fmt.Errorf("停止服务失败，保留程序和防火墙归属记录: %w", err)
 		}
+	}
+	if fileExists(defaultConfigPath) && filepath.Base(paths.installedBinary()) == "yz-agent" {
+		if err := runConfig([]string{"cleanup-firewall", "--config", defaultConfigPath}); err != nil {
+			return fmt.Errorf("清理防火墙失败，保留程序和归属记录: %w", err)
+		}
+	}
+	if fileExists(serviceFilePath) {
 		if err := runManagedService(manager, "disable", false); err != nil {
 			warnings = append(warnings, fmt.Sprintf("disable service: %v", err))
 		}
@@ -749,9 +763,15 @@ func downloadFileWithClient(client *http.Client, url, dest string) error {
 		return err
 	}
 	defer os.Remove(dest + ".part")
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	const maxReleaseArtifact = 512 << 20
+	written, err := io.Copy(f, io.LimitReader(resp.Body, maxReleaseArtifact+1))
+	if err != nil {
 		_ = f.Close()
 		return err
+	}
+	if written > maxReleaseArtifact {
+		_ = f.Close()
+		return errors.New("发布附件超过大小限制")
 	}
 	if err := f.Close(); err != nil {
 		return err
@@ -942,8 +962,21 @@ func removeBinding(panelURL string, nodeID int, machineID int, instanceID string
 		return fmt.Errorf("binding not found: panel=%s machine_id=%d", panelURL, machineID)
 	}
 	if len(kept) == 0 {
-		// Last binding removed — stop the service to prevent crash-loop
+		if len(root.Instances) == 0 {
+			root.Config = config.Config{
+				HealthPort: root.HealthPort,
+				Runtime:    root.Runtime,
+				TimeSync:   root.TimeSync,
+				Firewall:   root.Firewall,
+			}
+		}
+		root.BindingIdle = true
+		if root.HealthPort == 0 {
+			root.HealthPort = instances[0].HealthPort
+		}
 		root.Instances = nil
+		root.Panel, root.Machine, root.Nodes, root.Protected = config.PanelConfig{}, nil, nil, ""
+		root.Standalone = nil
 		if err := writeRootConfig(defaultConfigPath, root); err != nil {
 			return err
 		}
@@ -987,27 +1020,35 @@ func normalizeRootInstances(root *config.RootConfig) []config.Config {
 		return append([]config.Config(nil), root.Instances...)
 	}
 	// Only treat legacy single-config mode if the embedded Config is valid
-	if root.Config.Panel.URL != "" {
+	if root.Config.Panel.URL != "" || root.Config.IsStandalone() {
 		return []config.Config{root.Config}
 	}
 	return nil
 }
 
 func writeRootConfig(path string, root *config.RootConfig) error {
-	instances := root.Instances
-	if len(instances) == 0 && root.Config.Panel.URL != "" {
-		instances = []config.Config{root.Config}
-	}
-	out := fileRootConfig{Instances: make([]fileInstance, 0, len(instances))}
+	instances := normalizeRootInstances(root)
+	out := fileRootConfig{BindingIdle: root.BindingIdle, HealthPort: root.HealthPort, Instances: make([]fileInstance, 0, len(instances))}
 
 	// Preserve top-level shared settings so instances can inherit them.
-	p := &root.Config
+	p := root.Config
+	if len(root.Instances) > 0 && (p.Panel.URL != "" || p.IsStandalone()) {
+		// The old root already moved into its own instance. Do not distribute its
+		// certificate, custom core configuration or other node settings to new bindings.
+		p = config.Config{Runtime: p.Runtime, TimeSync: p.TimeSync, Firewall: p.Firewall}
+	}
 	if p.Log.Level != "" || p.Log.Output != "" {
 		out.Log = &fileLogConfig{Level: p.Log.Level, Output: p.Log.Output}
 	}
-	if p.Kernel.Type != "" || p.Kernel.LogLevel != "" || p.Kernel.RealityMinClientVer != "" {
+	if p.Kernel.Type != "" || p.Kernel.LogLevel != "" || p.Kernel.RealityMinClientVer != "" || p.Kernel.ConfigDir != "" ||
+		p.Kernel.GeoDataDir != "" || p.Kernel.CustomConfig != "" || len(p.Kernel.CustomRoute) != 0 || len(p.Kernel.CustomOutbound) != 0 {
 		out.Kernel = &fileKernelConfig{
 			Type:                p.Kernel.Type,
+			ConfigDir:           p.Kernel.ConfigDir,
+			GeoDataDir:          p.Kernel.GeoDataDir,
+			CustomConfig:        p.Kernel.CustomConfig,
+			CustomRoute:         p.Kernel.CustomRoute,
+			CustomOut:           p.Kernel.CustomOutbound,
 			LogLevel:            p.Kernel.LogLevel,
 			RealityMinClientVer: p.Kernel.RealityMinClientVer,
 		}
@@ -1060,6 +1101,10 @@ func writeRootConfig(path string, root *config.RootConfig) error {
 				Output: inst.Log.Output,
 			},
 			HealthPort: inst.HealthPort,
+			Standalone: inst.Standalone,
+		}
+		if fi.Panel.TokenEnv == "" {
+			fi.Panel.Token = inst.Panel.Token
 		}
 		if !inst.IsMachineMode() && (inst.Node.PushInterval != 0 || inst.Node.PullInterval != 0 || inst.Node.TrackInterval != 0 || inst.Node.DeviceReportInterval != 0) {
 			fi.Node = &fileNodeConfig{
@@ -1079,6 +1124,9 @@ func writeRootConfig(path string, root *config.RootConfig) error {
 			fi.Machine = &fileMachineConfig{
 				MachineID: inst.Machine.MachineID,
 				TokenEnv:  inst.Machine.TokenEnv,
+			}
+			if fi.Machine.TokenEnv == "" {
+				fi.Machine.Token = inst.Machine.Token
 			}
 			fi.Panel.NodeID = 0
 			fi.Panel.NodeType = ""
@@ -1256,30 +1304,10 @@ func healthStatus() string {
 
 func instanceAwareHealth() string {
 	port := 0
-	if meta, err := loadInstallMeta(defaultMetaPath); err == nil {
-		for _, inst := range meta.Instances {
-			if inst.HealthPort > 0 {
-				port = inst.HealthPort
-				break
-			}
-		}
-	}
-	if port == 0 {
-		if root, err := loadWritableRootConfig(defaultConfigPath); err == nil {
-			// Check top-level health_port first (inherited by all instances)
-			if root.HealthPort > 0 {
-				port = root.HealthPort
-			}
-			if port == 0 {
-				instances, _ := root.NormalizeInstances()
-				for _, inst := range instances {
-					if inst.HealthPort > 0 {
-						port = inst.HealthPort
-						break
-					}
-				}
-			}
-		}
+	if root, err := loadWritableRootConfig(defaultConfigPath); err == nil {
+		port = root.EffectiveHealthPort()
+	} else if meta, err := loadInstallMeta(defaultMetaPath); err == nil && len(meta.Instances) != 0 {
+		port = meta.Instances[0].HealthPort
 	}
 	if port == 0 {
 		return "disabled"
@@ -1793,7 +1821,7 @@ func runConfigInitWithInput(args []string, input io.Reader) error {
 		stopProbe()
 		if loadErr == nil {
 			root = loaded
-			hasExisting = len(root.Instances) > 0 || root.Config.Panel.URL != "" || root.Config.Kernel.Type != ""
+			hasExisting = len(normalizeRootInstances(root)) > 0
 		} else if !errors.Is(loadErr, os.ErrNotExist) {
 			return loadErr
 		}
@@ -2018,17 +2046,8 @@ func runConfigHealthPort(args []string) error {
 	if err := yaml.Unmarshal(data, root); err != nil {
 		return nil
 	}
-	// Check instances first, then legacy top-level.
-	if len(root.Instances) > 0 {
-		for _, inst := range root.Instances {
-			if inst.HealthPort > 0 {
-				fmt.Println(inst.HealthPort)
-				return nil
-			}
-		}
-	}
-	if root.Config.HealthPort > 0 {
-		fmt.Println(root.Config.HealthPort)
+	if port := root.EffectiveHealthPort(); port > 0 {
+		fmt.Println(port)
 	}
 	return nil
 }

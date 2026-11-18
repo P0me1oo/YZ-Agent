@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -34,7 +35,8 @@ func (c *Client) ReportMachineAddress(ctx context.Context, network string) (stri
 	req.Header.Set("Accept", "application/json")
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	client := &http.Client{
-		Timeout: machineAddressTimeout,
+		Timeout:       machineAddressTimeout,
+		CheckRedirect: sameOriginRedirect,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
 				return dialer.DialContext(ctx, network, addr)
@@ -46,7 +48,7 @@ func (c *Client) ReportMachineAddress(ctx context.Context, network string) (stri
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", panelRequestError(err, http.MethodPost, "/api/v2/server/machine/address")
 	}
 	defer drainAndClose(resp.Body)
 	if resp.StatusCode == http.StatusNotFound {
@@ -58,7 +60,7 @@ func (c *Client) ReportMachineAddress(ctx context.Context, network string) (stri
 	var result struct {
 		IP string `json:"ip"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&result); err != nil {
 		return "", err
 	}
 	return result.IP, nil

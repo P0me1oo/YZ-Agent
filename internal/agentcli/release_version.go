@@ -11,6 +11,13 @@ import (
 // 历史两段版本补零；yz 修订按数字排序，同基线的无后缀正式版排在其后。
 var releaseVersionPattern = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:-yz\.(0|[1-9][0-9]*))?$`)
 
+func validateUpgradeTarget(version string) error {
+	if version == "latest" || releaseVersionPattern.MatchString(version) {
+		return nil
+	}
+	return upgradeCheckFailure("latest_version_invalid", errors.New("目标版本格式无效，请指定 latest、正式版本或受支持的历史版本"))
+}
+
 // 固定结果码供面板翻译；本地命令保留具体原因，不上传命令输出。
 type upgradeCheckError struct {
 	code string

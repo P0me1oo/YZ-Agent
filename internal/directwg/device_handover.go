@@ -106,6 +106,7 @@ func (s *State) closeDeviceSource(u *userState, raw string, permit *devicegate.P
 		if u.connectionSources[conn] == permit {
 			delete(u.connectionSources, conn)
 			delete(u.connections, conn)
+			delete(u.connectionIPs, conn)
 		}
 	}
 	s.mu.Unlock()

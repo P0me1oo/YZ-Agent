@@ -79,7 +79,7 @@ func applyTrafficDelta(base, delta map[int][2]int64) (map[int][2]int64, error) {
 	return base, nil
 }
 
-func (s *pendingReportStore) replayJournal(file *pendingReportFile) error {
+func (s *pendingReportStore) replayJournal(file *pendingReportFile, withoutCheckpoint bool) error {
 	dir := s.path + ".journal"
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -104,15 +104,16 @@ func (s *pendingReportStore) replayJournal(file *pendingReportFile) error {
 		if err := json.Unmarshal(data, &record); err != nil {
 			return fmt.Errorf("decode traffic journal: %w", err)
 		}
-		if entry.Name() != fmt.Sprintf("%020d.json", record.Sequence) {
+		if record.Sequence == 0 || entry.Name() != fmt.Sprintf("%020d.json", record.Sequence) {
 			return fmt.Errorf("invalid traffic journal sequence")
 		}
 		if record.Sequence <= file.JournalSequence {
 			continue
 		}
-		if record.Sequence != file.JournalSequence+1 {
+		if record.Sequence != file.JournalSequence+1 && !withoutCheckpoint {
 			return fmt.Errorf("traffic journal sequence gap")
 		}
+		withoutCheckpoint = false
 		if record.BatchChanged {
 			file.Batch = record.Batch
 		}

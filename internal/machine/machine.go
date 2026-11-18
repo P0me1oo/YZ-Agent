@@ -75,7 +75,10 @@ type Orchestrator struct {
 
 	// runCtx is stored from Run() so that onWSEvent can trigger rediscover
 	// for sync.nodes events without blocking the main loop.
-	runCtx context.Context
+	runCtx     context.Context
+	jobsMu     sync.Mutex
+	jobs       sync.WaitGroup
+	jobsClosed bool
 
 	pullInterval time.Duration
 	pushInterval time.Duration
@@ -158,7 +161,7 @@ func (o *Orchestrator) controlLoop(ctx context.Context) {
 			return
 		default:
 		}
-		command, scan, err := o.client.ExchangeMachineControlWithReality(o.agentVersion, o.bootID, agentcli.RemoteAvailable(), agentcli.RemoteResult(key), scanner.Snapshot())
+		command, scan, err := o.client.ExchangeMachineControlContext(ctx, o.agentVersion, o.bootID, agentcli.RemoteAvailable(), agentcli.RemoteResult(key), scanner.Snapshot())
 		select {
 		case <-ctx.Done():
 			return
@@ -238,16 +241,33 @@ func (o *Orchestrator) aggregateNodeStatusLocked() service.RuntimeStatus {
 	return aggregate
 }
 
+func (o *Orchestrator) runJob(run func()) {
+	o.jobsMu.Lock()
+	defer o.jobsMu.Unlock()
+	if !o.jobsClosed {
+		o.jobs.Go(run)
+	}
+}
+
 // Run is the main loop. It blocks until ctx is cancelled.
 func (o *Orchestrator) Run(ctx context.Context) error {
 	if o.cfg.PrivacyError != nil {
 		return o.cfg.PrivacyError
 	}
 	o.notifyStatus(service.RuntimeStarting)
+	ctx, cancel := context.WithCancel(ctx)
 	o.runCtx = ctx
+	defer func() {
+		cancel()
+		o.jobsMu.Lock()
+		o.jobsClosed = true
+		o.jobsMu.Unlock()
+		o.jobs.Wait()
+		o.stopAll()
+	}()
 	if o.agentVersion != "" {
-		go o.controlLoop(ctx)
-		go o.addressLoop(ctx)
+		o.runJob(func() { o.controlLoop(ctx) })
+		o.runJob(func() { o.addressLoop(ctx) })
 	}
 	nodesResp, err := o.client.GetMachineNodesContext(ctx)
 	if err != nil {
@@ -263,7 +283,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		if refreshed, err := o.client.GetMachineNodesContext(ctx); err == nil {
 			nodesResp = refreshed
 		}
-		go o.trafficLoop(ctx)
+		o.runJob(func() { o.trafficLoop(ctx) })
 	}
 	o.applyIntervals(nodesResp.BaseConfig)
 	o.logger().Info(fmt.Sprintf("machine %d: discovered %d nodes",
@@ -293,7 +313,6 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			o.stopAll()
 			o.notifyStatus(service.RuntimeStopped)
 			return nil
 
@@ -301,17 +320,17 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			ws := o.currentWebSocket()
 			synchronized := ws != nil && ws.IsConnected() && o.discoverySocket.Load() == ws && o.discoveryVersion.Load() == ws.Generation()
 			if !synchronized || time.Since(time.UnixMilli(o.lastDiscovery.Load())) >= 5*time.Minute {
-				go o.rediscover(ctx)
+				o.runJob(func() { o.rediscover(ctx) })
 			}
 
 		case <-statusTicker.C:
 			if !o.client.RealtimeEnabled() {
-				o.reportMachineStatus()
+				o.reportMachineStatusContext(ctx)
 			}
 		case <-stateTicker.C:
 			o.publishRuntimeState(ctx)
 		case <-wsDiscoveryTicker.C:
-			go o.tryStartWS(ctx)
+			o.runJob(func() { o.tryStartWS(ctx) })
 		}
 	}
 }
@@ -424,6 +443,20 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 	cp.SetPrefetchedConfig(cfgSnapshot)
 	svc := service.NewWithControlPlane(nodeCfg, cp)
 	svc.SetFirewallController(o.firewall)
+	var kernelChanged atomic.Bool
+	svc.SetConfigKernelCheck(func(spec *model.NodeSpec) bool {
+		target := wantedKernel
+		if value, err := model.NormalizeKernelType(spec.KernelType); err == nil {
+			target = value
+		}
+		target = model.ResolveKernelForTransport(spec.Network, target)
+		if target == nodeCfg.Kernel.Type {
+			return true
+		}
+		kernelChanged.Store(true)
+		cancel()
+		return false
+	})
 	svc.SetStatusHandler(func(status service.RuntimeStatus) {
 		o.setNodeStatus(mn.ID, status)
 	})
@@ -440,6 +473,9 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 		}
 		o.unregisterNode(mn.ID)
 		o.finishNode(mn.ID, done, err)
+		if kernelChanged.Load() && ctx.Err() == nil {
+			o.runJob(func() { o.rediscover(ctx) })
+		}
 	}()
 }
 
@@ -464,7 +500,7 @@ func (o *Orchestrator) finishNode(nodeID int, done chan struct{}, runErr error) 
 	}
 	// 提额可能早于旧服务完成退出；退出后重新发现，避免等待长连接的周期校对。
 	if runErr == nil && o.trafficMeter != nil && !o.trafficBlocked.Load() && o.runCtx != nil && o.runCtx.Err() == nil {
-		go o.rediscover(o.runCtx)
+		o.runJob(func() { o.rediscover(o.runCtx) })
 	}
 }
 
@@ -573,12 +609,15 @@ func (o *Orchestrator) rediscoverOnce(ctx context.Context) {
 
 // ─── Machine status reporting ────────────────────────────────────────────
 
-func (o *Orchestrator) reportMachineStatus() {
+func (o *Orchestrator) reportMachineStatus() { o.reportMachineStatusContext(context.Background()) }
+
+func (o *Orchestrator) reportMachineStatusContext(ctx context.Context) {
 	if !o.client.HostMonitoringEnabled() {
 		return
 	}
 	s := monitor.Collect()
-	if err := o.client.ReportMachineStatus(
+	if err := o.client.ReportMachineStatusContext(
+		ctx,
 		s.CPU,
 		[2]uint64{s.MemTotal, s.MemUsed},
 		[2]uint64{s.SwapTotal, s.SwapUsed},
@@ -596,7 +635,7 @@ func (o *Orchestrator) tryStartWS(ctx context.Context) {
 		return
 	}
 	defer o.wsDiscovering.Store(false)
-	hs, err := o.client.Handshake()
+	hs, err := o.client.HandshakeContext(ctx)
 	if err != nil {
 		o.logger().Warn("machine ws discovery failed", "error", err)
 		return
@@ -647,7 +686,7 @@ func (o *Orchestrator) tryStartWS(ctx context.Context) {
 	if oldCancel != nil {
 		oldCancel()
 	}
-	go next.Run(wsCtx)
+	o.runJob(func() { next.Run(wsCtx) })
 }
 
 func (o *Orchestrator) currentWebSocket() *panel.WSClient {
@@ -662,7 +701,7 @@ func (o *Orchestrator) onWSEvent(event panel.WSEvent) {
 	// sync.nodes is a machine-level event, not per-node
 	if event.Type == panel.WSEventSyncNodes {
 		o.logger().Info("machine received sync.nodes, triggering immediate rediscovery")
-		go o.rediscover(o.runCtx)
+		o.runJob(func() { o.rediscover(o.runCtx) })
 		return
 	}
 
@@ -690,9 +729,9 @@ func (o *Orchestrator) onWSStatus(status panel.WSStatusChange) {
 	// 连接变化立即重新取得节点列表；完整同步完成后再停止十秒兜底。
 	o.discoverySocket.Store(nil)
 	if o.runCtx != nil {
-		go o.rediscover(o.runCtx)
+		o.runJob(func() { o.rediscover(o.runCtx) })
 	}
-	change := controlplane.StatusChange{Connected: status.Connected}
+	change := controlplane.StatusChange{Connected: status.Connected, ReadCurrent: true}
 	o.eventsMu.RLock()
 	defer o.eventsMu.RUnlock()
 	for _, ch := range o.statuses {

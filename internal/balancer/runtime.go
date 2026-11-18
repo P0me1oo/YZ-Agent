@@ -45,6 +45,7 @@ type Runtime struct {
 	listener    net.Listener
 	mu          sync.Mutex
 	connections map[net.Conn]bool
+	sessions    int
 	wg          sync.WaitGroup
 	once        sync.Once
 }
@@ -104,12 +105,13 @@ func (r *Runtime) acceptLoop() {
 			return
 		}
 		r.mu.Lock()
-		if r.ctx.Err() != nil || len(r.connections) >= r.config.MaxSessions*2 {
+		if r.ctx.Err() != nil || r.sessions >= r.config.MaxSessions {
 			r.mu.Unlock()
 			client.Close()
 			continue
 		}
 		r.connections[client] = true
+		r.sessions++
 		r.wg.Add(1)
 		r.mu.Unlock()
 		go r.connection(client)
@@ -117,7 +119,13 @@ func (r *Runtime) acceptLoop() {
 }
 func (r *Runtime) connection(client net.Conn) {
 	defer r.wg.Done()
-	defer func() { client.Close(); r.mu.Lock(); delete(r.connections, client); r.mu.Unlock() }()
+	defer func() {
+		client.Close()
+		r.mu.Lock()
+		delete(r.connections, client)
+		r.sessions--
+		r.mu.Unlock()
+	}()
 	ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
 	defer cancel()
 	excluded := make(map[int]bool)
@@ -135,7 +143,9 @@ func (r *Runtime) connection(client net.Conn) {
 		if err != nil {
 			continue
 		}
+		_ = upstream.SetWriteDeadline(time.Now().Add(3 * time.Second))
 		if err = writeProxyHeader(upstream, client.RemoteAddr(), client.LocalAddr()); err == nil {
+			_ = upstream.SetWriteDeadline(time.Time{})
 			break
 		}
 		upstream.Close()
@@ -150,13 +160,21 @@ func (r *Runtime) connection(client net.Conn) {
 	r.mu.Unlock()
 	defer func() { upstream.Close(); r.mu.Lock(); delete(r.connections, upstream); r.mu.Unlock() }()
 	done := make(chan struct{}, 1)
-	go func() { io.Copy(upstream, client); closeWrite(upstream); done <- struct{}{} }()
-	io.Copy(client, upstream)
-	closeWrite(client)
+	go func() { copyHalf(upstream, client); done <- struct{}{} }()
+	copyHalf(client, upstream)
 	<-done
 }
-func closeWrite(conn net.Conn) {
-	if value, ok := conn.(interface{ CloseWrite() error }); ok {
-		value.CloseWrite()
+func copyHalf(dst, src net.Conn) {
+	_, err := io.Copy(dst, src)
+	if writer, ok := dst.(interface{ CloseWrite() error }); err == nil && ok {
+		// 排空期间既可能等待读取，也可能卡在向已经停止读取的一侧写入。
+		deadline := time.Now().Add(30 * time.Second)
+		_ = dst.SetReadDeadline(deadline)
+		_ = src.SetWriteDeadline(deadline)
+		if writer.CloseWrite() == nil {
+			return
+		}
 	}
+	_ = dst.Close()
+	_ = src.Close()
 }

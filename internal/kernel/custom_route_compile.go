@@ -8,6 +8,9 @@ import (
 
 func NeedsGeoIPRules(rules []model.CustomRouteRule) bool {
 	for _, r := range rules {
+		if r.Disabled {
+			continue
+		}
 		for _, v := range r.Match.IPCIDRs {
 			if strings.HasPrefix(v, "geoip:") {
 				return true
@@ -24,6 +27,9 @@ func NeedsGeoIPRules(rules []model.CustomRouteRule) bool {
 
 func NeedsGeoSiteRules(rules []model.CustomRouteRule) bool {
 	for _, r := range rules {
+		if r.Disabled {
+			continue
+		}
 		for _, v := range r.Match.Domains {
 			if strings.HasPrefix(v, "geosite:") {
 				return true

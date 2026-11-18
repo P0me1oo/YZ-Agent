@@ -3,6 +3,7 @@ package privacy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +24,40 @@ type Bootstrap struct {
 	TokenEnv        string `json:"token_env,omitempty"`
 	Token           string `json:"token,omitempty"`
 	CredentialsFile string `json:"credentials_file,omitempty"`
+}
+
+var ErrPanelUnavailable = errors.New("暂时无法向面板领取文件密钥，稍后自动重试")
+
+type authKey struct {
+	url           string
+	machine, node int
+	credential    [32]byte
+}
+
+var authenticatedStates sync.Map
+
+func NormalizePanelURL(address string) string {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(address), "/"))
+	if err != nil || u.Hostname() == "" || u.User != nil {
+		return ""
+	}
+	u.Scheme, u.Host = strings.ToLower(u.Scheme), strings.ToLower(u.Host)
+	return u.String()
+}
+
+func (b Bootstrap) authenticationKey(token string) authKey {
+	if override := os.Getenv("PANEL_URL"); override != "" {
+		b.URL = override
+	}
+	return authKey{url: NormalizePanelURL(b.URL), machine: b.MachineID, node: b.NodeID, credential: sha256.Sum256([]byte(token))}
+}
+
+func CachedAuthenticatedState(b Bootstrap, configPath string) *State {
+	value, ok := authenticatedStates.Load(b.authenticationKey(b.Credential(configPath)))
+	if !ok {
+		return nil
+	}
+	return value.(*State)
 }
 
 func (b Bootstrap) Credential(configPath string) string {
@@ -63,6 +99,7 @@ func Fetch(ctx context.Context, b Bootstrap, configPath string, client *http.Cli
 	if override := os.Getenv("PANEL_URL"); override != "" {
 		b.URL = override
 	}
+	b.URL = NormalizePanelURL(b.URL)
 	u, err := url.Parse(b.URL)
 	if err != nil || u.User != nil || u.Hostname() == "" {
 		return nil, false, errors.New("文件保护的面板入口无效")
@@ -102,13 +139,17 @@ func Fetch(ctx context.Context, b Bootstrap, configPath string, client *http.Cli
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := copyClient.Do(req)
 	if err != nil {
-		return nil, false, errors.New("暂时无法向面板领取文件密钥，稍后自动重试")
+		return nil, false, ErrPanelUnavailable
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 500 {
+		return nil, false, ErrPanelUnavailable
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		return legacyPolicy(ctx, &copyClient, b, body)
 	}
 	if resp.StatusCode != http.StatusOK {
+		authenticatedStates.Delete(b.authenticationKey(token))
 		return nil, false, errors.New("面板未授权文件密钥请求，保留原文件")
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
@@ -129,12 +170,16 @@ func Fetch(ctx context.Context, b Bootstrap, configPath string, client *http.Cli
 		return nil, false, errors.New("面板不支持所需的文件保护版本")
 	}
 	if !result.Data.Enabled && len(result.Data.Keys) == 0 {
+		authenticatedStates.Delete(b.authenticationKey(token))
 		return nil, false, nil
 	}
 	if !secure {
 		return nil, false, errors.New("文件保护需要 HTTPS 面板入口")
 	}
 	s, err := New(result.Data.Keys)
+	if err == nil {
+		authenticatedStates.Store(b.authenticationKey(token), s)
+	}
 	return s, result.Data.Enabled, err
 }
 

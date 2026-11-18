@@ -269,8 +269,8 @@ type KernelConfig struct {
 	// GeoDataDir is the directory that contains GeoIP/GeoSite database files.
 	// For sing-box: geoip.db and geosite.db (geoip2-format).
 	// For xray:     geoip.dat and geosite.dat.
-	// Defaults to config_dir when empty. You only need to set this if your
-	// geo database files live somewhere other than config_dir.
+	// Defaults to config_dir for a single instance and the shared config root
+	// for multiple instances. Xray instances in one process share the cache.
 	GeoDataDir string `yaml:"geo_data_dir"`
 
 	// CustomOutbound adds outbound entries to the generated kernel config.
@@ -327,13 +327,14 @@ func (k KernelConfig) RealityMinClientVersion() string {
 }
 
 type CertConfig struct {
-	AutoTLS  bool   `yaml:"auto_tls"`
-	Domain   string `yaml:"domain"`
-	Email    string `yaml:"email"`
-	CertFile string `yaml:"cert_file"`
-	KeyFile  string `yaml:"key_file"`
-	CertDir  string `yaml:"cert_dir"`
-	HTTPPort int    `yaml:"http_port"` // port for HTTP-01 challenge (default: 80)
+	RestrictFilesToCertDir bool   `yaml:"-"`
+	AutoTLS                bool   `yaml:"auto_tls"`
+	Domain                 string `yaml:"domain"`
+	Email                  string `yaml:"email"`
+	CertFile               string `yaml:"cert_file"`
+	KeyFile                string `yaml:"key_file"`
+	CertDir                string `yaml:"cert_dir"`
+	HTTPPort               int    `yaml:"http_port"` // port for HTTP-01 challenge (default: 80)
 
 	// CertMode selects the TLS certificate strategy:
 	//   ""       - auto-detect: if CertFile is set → file; if AutoTLS → http; else none
@@ -375,6 +376,13 @@ type RootConfig struct {
 	wrapped         bool
 	Instances       []Config `yaml:"instances,omitempty"`
 	Config          `yaml:",inline"`
+}
+
+func (rc *RootConfig) EffectiveHealthPort() int {
+	if len(rc.Instances) != 0 && rc.Instances[0].HealthPort != 0 {
+		return rc.Instances[0].HealthPort
+	}
+	return rc.HealthPort
 }
 
 func LoadRoot(path string) (*RootConfig, error) {
@@ -491,6 +499,9 @@ func (rc *RootConfig) setDefaultsFrom(baseDir string) {
 		// InstanceID is always populated by assignInstanceIDs() before this runs.
 		if len(rc.Instances) > 1 && rc.Instances[i].Kernel.ConfigDir == "" {
 			instBase = filepath.Join(baseDir, rc.Instances[i].InstanceID)
+		}
+		if len(rc.Instances) > 1 && rc.Instances[i].Kernel.GeoDataDir == "" {
+			rc.Instances[i].Kernel.GeoDataDir = baseDir
 		}
 		rc.Instances[i].setDefaultsFrom(instBase)
 	}
@@ -1117,7 +1128,7 @@ func InitLogger(cfg LogConfig) {
 			w = os.Stdout
 			useColor = term.IsTerminal(int(os.Stdout.Fd()))
 		} else {
-			f, err := os.OpenFile(cfg.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			f, err := os.OpenFile(cfg.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 			if err != nil {
 				if !nlog.LogsDisabled() {
 					fmt.Fprintf(os.Stderr, "failed to open log file, falling back to stdout: %v\n", err)

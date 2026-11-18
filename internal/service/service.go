@@ -57,10 +57,12 @@ type Service struct {
 	lastFirewallRetry   time.Time
 	firewallFailureHash string
 	sourcePolicyState
-	tracker      *tracker.Tracker
-	limiter      *limiter.Limiter
-	speedTracker *limiter.SpeedTracker
-	cert         *cert.Manager
+	tracker           *tracker.Tracker
+	limiter           *limiter.Limiter
+	speedTracker      *limiter.SpeedTracker
+	cert              *cert.Manager
+	localCert         config.CertConfig
+	configKernelCheck func(*model.NodeSpec) bool
 
 	// 保存面板最新要求的状态；实际成功运行的状态单独记录在 appliedState。
 	lastConfig *model.NodeSpec
@@ -284,6 +286,7 @@ func newService(cfg *config.Config, cp controlplane.ControlPlane) *Service {
 		limiter:      l,
 		speedTracker: st,
 		cert:         certMgr,
+		localCert:    cfg.Cert,
 		wsEvents:     make(chan controlplane.Event, 16),
 		wsStatusCh:   make(chan controlplane.StatusChange, 4),
 		pullResults:  make(chan pullResult, 1),
@@ -355,6 +358,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 	if realtimeActive {
 		trackInterval = time.Second
 	}
+	s.userSpeed.maxGap = trackInterval + min(trackInterval, 5*time.Second)
 	trackTicker := time.NewTicker(trackInterval)
 	speedTicker := time.NewTicker(time.Second)
 	defer speedTicker.Stop()
@@ -438,6 +442,7 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 			s.applyWSDiscovery(ctx, result)
 			if s.realtimeEnabled() && !realtimeActive {
 				realtimeActive = true
+				s.userSpeed = userSpeedSampler{}
 				trackTicker.Reset(time.Second)
 				pullTicker.Reset(10 * time.Second)
 			}
@@ -453,6 +458,9 @@ func (s *Service) Run(ctx context.Context) (runErr error) {
 		}
 	}
 }
+
+// SetConfigKernelCheck allows the machine to replace this service if the required core changes.
+func (s *Service) SetConfigKernelCheck(check func(*model.NodeSpec) bool) { s.configKernelCheck = check }
 
 func (s *Service) initialSetup(ctx context.Context) error {
 	// Register speed limit lookup with kernel unconditionally (before push/poll branch).
@@ -527,6 +535,9 @@ func (s *Service) initialSetup(ctx context.Context) error {
 		}
 		return fmt.Errorf("initial config is nil")
 	}
+	if s.configKernelCheck != nil && !s.configKernelCheck(bootstrap.Config) {
+		return nil
+	}
 	s.metricsMu.Lock()
 	s.lastConfig = bootstrap.Config
 	s.metricsMu.Unlock()
@@ -582,6 +593,11 @@ func (s *Service) applyNodeCert(ctx context.Context, newCfg *config.CertConfig) 
 	}
 	cfgCopy := *newCfg
 	cfgCopy.CertDir = s.cfg.Cert.CertDir
+	if !s.cfg.IsStandalone() {
+		if err := cert.RestrictPanelConfig(&cfgCopy, s.localCert); err != nil {
+			return false, fmt.Errorf("runtime certificate configuration: %w", err)
+		}
+	}
 
 	changed, err := s.cert.Reconfigure(ctx, cfgCopy)
 	if err != nil {
@@ -672,6 +688,15 @@ func (s *Service) wsMetrics() map[string]interface{} {
 // - On disconnect: record timestamp, immediately REST poll.
 // - On reconnect: clear disconnect timestamp, REST poll to catch missed events.
 func (s *Service) handleWSStatus(ctx context.Context, status controlplane.StatusChange) {
+	if status.ReadCurrent {
+		if s.wsClient == nil {
+			return
+		}
+		status.Connected = s.wsClient.IsConnected()
+		if push, ok := s.wsClient.(interface{ TakeResync() bool }); ok && push.TakeResync() {
+			status.NeedsResync = true
+		}
+	}
 	s.wsSynchronized = false
 	if status.NeedsResync {
 		s.requestWSResync(ctx, "drop_detected")
@@ -1017,6 +1042,9 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 // 无论成功还是失败，lastConfig 都保留面板最新要求；失败时节点保持停止，
 // 这样后续用户同步不会误把旧配置重新启动起来。
 func (s *Service) applyConfigUpdate(ctx context.Context, config *model.NodeSpec, hash string) bool {
+	if s.configKernelCheck != nil && !s.configKernelCheck(config) {
+		return false
+	}
 	s.applySchedulingTargets(config)
 	// 仅来源策略变化不重建中转监听，避免切换前置出口时中断已有连接。
 	policyOnly := s.kernel.IsRunning() && computeKernelConfigHash(s.lastConfig) == computeKernelConfigHash(config) && s.appliedState.TLSHash == s.currentTLSHash()
@@ -1403,7 +1431,7 @@ func (s *Service) trackAndEnforce(ctx context.Context) bool {
 func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int, err error) {
 	traffic, aliveIPs, connCount, err := s.kernel.GetUserTraffic(ctx)
 	if err != nil {
-		s.userSpeed = userSpeedSampler{}
+		s.userSpeed = userSpeedSampler{maxGap: s.userSpeed.maxGap}
 		return 0, 0, err
 	}
 	s.userSpeed.sample(traffic, time.Now())

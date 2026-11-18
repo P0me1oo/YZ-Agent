@@ -35,6 +35,18 @@ check_case v1.13-yz.10 v1.13-yz.9 1
 check_case v1.13-yz.24 v1.13.1 0
 check_case v0.1.0-yz.1 v1.16.1 0
 check_case v1.13 v1.13.0 1
+
+# 安装和升级共用的参数解析应在系统操作前拒绝无效版本。
+for version in latest v2.40.1 2.40.1 v1.13 v1.13-yz.24; do
+    parse_args upgrade --version "$version"
+    [ "$RELEASE_VERSION" = "$version" ]
+done
+for action in install upgrade; do
+    for version in dev v01.2.3 v1.16.1-beta.1; do
+        if parse_args "$action" --version "$version"; then exit 1; fi
+    done
+done
+
 for invalid in dev unknown v01.2.3 v1.16.1-beta.1; do
     CURRENT_TEST_VERSION="$invalid" RELEASE_VERSION=latest
     if check_latest_upgrade; then exit 1; fi

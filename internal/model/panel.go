@@ -145,6 +145,7 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 		CustomOutbounds:     outbounds,
 		CustomRoutes:        cloneMapSlice(nc.CustomRoutes),
 		CustomRouteRules:    customRouteRules,
+		PanelManaged:        true,
 		CertConfig:          certCfg,
 		AutoTLS:             nc.AutoTLS,
 		Domain:              nc.Domain,

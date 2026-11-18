@@ -17,7 +17,67 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"gopkg.in/yaml.v3"
 )
+
+func TestConfigRewritePreservesBindingFieldsAndIsolatesNewBinding(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yml")
+	credential := rand.Text()
+	input := fmt.Sprintf(`id: old-custom-id
+panel:
+  url: https://old.example
+  node_id: 12
+  token: %q
+cert:
+  cert_mode: file
+  cert_file: /local/node.pem
+  key_file: /local/node.key
+kernel:
+  custom_config: /local/node.json
+extension:
+  owner: old
+`, credential)
+	if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := config.LoadWritableRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID, err := root.Config.AutoInstanceID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Config.InstanceID = oldID
+	root.Instances = []config.Config{root.Config, {Panel: config.PanelConfig{URL: "https://new.example", NodeID: 12}}}
+	if err := writeRootConfig(path, root); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved config.RootConfig
+	if err := yaml.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Instances) != 2 || saved.Instances[0].Panel.Token != credential || saved.Instances[0].Cert.CertFile == "" ||
+		saved.Instances[0].Kernel.CustomConfig == "" || saved.Instances[1].Panel.Token != "" || saved.Cert.CertFile != "" || saved.Kernel.CustomConfig != "" {
+		t.Fatal("绑定转换没有保留或隔离旧实例的凭据、证书及核心设置")
+	}
+	var raw struct {
+		Extension map[string]string `yaml:"extension"`
+		Instances []struct {
+			Extension map[string]string `yaml:"extension"`
+		} `yaml:"instances"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw.Instances[0].Extension["owner"] != "old" || raw.Extension != nil || raw.Instances[1].Extension != nil {
+		t.Fatal("扩展字段未保留在原绑定")
+	}
+}
 
 func TestPrivateInstallAndDirectoryMigrationPreserveEncryptedSettings(t *testing.T) {
 	dir := t.TempDir()
@@ -70,7 +130,8 @@ func TestPrivateInstallAndDirectoryMigrationPreserveEncryptedSettings(t *testing
 		t.Fatal(err)
 	}
 	if err := runConfigInit([]string{"--mode", "machine", "--panel-url", server.URL, "--machine-id", "7",
-		"--token", token, "--config", migratedPath, "--output", output}); err != nil {
+		"--token", token, "--config", migratedPath, "--output", output,
+		"--credentials-in", filepath.Join(dir, "credentials.env"), "--credentials-out", filepath.Join(filepath.Dir(output), "credentials.env")}); err != nil {
 		t.Fatal(err)
 	}
 	staged, _ := os.ReadFile(output)

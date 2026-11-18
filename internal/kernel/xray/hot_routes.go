@@ -4,18 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/xtls/xray-core/app/router"
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/infra/conf/serial"
-	"reflect"
 )
 
-// tryHotRoutes 只替换现有出站之间的路由规则；监听、TLS、出站及路由静态字段变化仍重建实例。
-func (x *Xray) tryHotRoutes(next *model.NodeSpec, users []model.UserSpec, tls kernel.TLSCert) (bool, error) {
-	x.lifecycleMu.Lock()
-	defer x.lifecycleMu.Unlock()
+// tryHotRoutesLocked 只替换现有出站之间的路由规则；监听、TLS、出站及路由静态字段变化仍重建实例。
+func (x *Xray) tryHotRoutesLocked(next *model.NodeSpec, users []model.UserSpec, tls kernel.TLSCert) (bool, error) {
 	x.mu.Lock()
 	previous := x.nodeConfig
 	oldUsers := append([]model.UserSpec(nil), x.users...)
@@ -23,6 +22,9 @@ func (x *Xray) tryHotRoutes(next *model.NodeSpec, users []model.UserSpec, tls ke
 	instance := x.instance
 	x.mu.Unlock()
 	if previous == nil || instance == nil || !tlsEqual(oldTLS, tls) || !reflect.DeepEqual(oldUsers, users) {
+		return false, nil
+	}
+	if realityGuardEnabled(previous) || realityGuardEnabled(next) {
 		return false, nil
 	}
 	before := buildConfig(x.cfg, previous, oldUsers, oldTLS)
@@ -38,31 +40,39 @@ func (x *Xray) tryHotRoutes(next *model.NodeSpec, users []model.UserSpec, tls ke
 	if err != nil {
 		return false, err
 	}
-	config, err := serial.LoadJSONConfig(bytes.NewReader(data))
-	if err != nil {
-		return false, fmt.Errorf("validate routes: %w", err)
-	}
 	r, ok := instance.GetFeature(routing.RouterType()).(routing.Router)
 	if !ok {
 		return false, nil
 	}
-	for _, app := range config.App {
-		value, err := app.GetInstance()
+	applied := false
+	err = x.withAssets(data, func() error {
+		config, err := serial.LoadJSONConfig(bytes.NewReader(data))
 		if err != nil {
-			return false, err
+			return fmt.Errorf("validate routes: %w", err)
 		}
-		if _, ok := value.(*router.Config); ok {
-			if err := r.AddRule(app, false); err != nil {
-				return false, fmt.Errorf("apply routes: %w", err)
+		for _, app := range config.App {
+			value, err := app.GetInstance()
+			if err != nil {
+				return err
 			}
-			x.mu.Lock()
-			x.nodeConfig = next
-			x.lastKernelHash = kernel.ComputeHash(next, users)
-			x.mu.Unlock()
-			return true, nil
+			if _, ok := value.(*router.Config); ok {
+				if err := r.AddRule(app, false); err != nil {
+					return fmt.Errorf("apply routes: %w", err)
+				}
+				applied = true
+				return nil
+			}
 		}
+		return nil
+	})
+	if err != nil || !applied {
+		return false, err
 	}
-	return false, nil
+	x.mu.Lock()
+	x.nodeConfig = next
+	x.lastKernelHash = kernel.ComputeHash(next, users)
+	x.mu.Unlock()
+	return true, nil
 }
 func routesOnly(before, after M) bool {
 	for _, cfg := range []M{before, after} {

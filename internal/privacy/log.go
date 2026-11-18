@@ -1,6 +1,7 @@
 package privacy
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // 每条记录独立认证加密，文件只保存格式、长度和密钥编号。
@@ -120,6 +122,16 @@ func (w *LogWriter) prepare() (os.FileInfo, error) {
 	if info.Size() > 0 && !unchanged {
 		// 独立读取位置，支持复用句柄后的重新校验；同长度的外部改写也必须校验。
 		if err := w.state.ReadLog(io.Discard, io.NewSectionReader(w.file, 0, info.Size())); err != nil {
+			if errors.Is(err, errIncompleteLog) {
+				if closeErr := w.closeFile(); closeErr != nil {
+					return nil, closeErr
+				}
+				backup := fmt.Sprintf("%s.partial-%d", w.path, time.Now().UnixNano())
+				if renameErr := os.Rename(w.path, backup); renameErr != nil {
+					return nil, renameErr
+				}
+				return w.prepare()
+			}
 			return nil, err
 		}
 	}
@@ -155,11 +167,16 @@ func (w *LogWriter) rotate() error {
 	return os.Rename(w.path, w.path+".1")
 }
 
+var errIncompleteLog = errors.New("加密日志尾部记录不完整")
+
 // ReadLog 用当前机器的内存密钥恢复记录，不创建明文文件。
 // 尾部损坏时返回错误，此前完整记录仍可读取。
 func (s *State) ReadLog(out io.Writer, in io.Reader) error {
 	header := make([]byte, len(LogMagic))
-	if _, err := io.ReadFull(in, header); err != nil {
+	if n, err := io.ReadFull(in, header); err != nil {
+		if n > 0 && errors.Is(err, io.ErrUnexpectedEOF) && bytes.HasPrefix([]byte(LogMagic), header[:n]) {
+			return errIncompleteLog
+		}
 		return err
 	}
 	if string(header) != LogMagic {
@@ -171,6 +188,9 @@ func (s *State) ReadLog(out io.Writer, in io.Reader) error {
 		if err == io.EOF {
 			return nil
 		}
+		if err == io.ErrUnexpectedEOF {
+			return errIncompleteLog
+		}
 		if err != nil {
 			return err
 		}
@@ -180,6 +200,9 @@ func (s *State) ReadLog(out io.Writer, in io.Reader) error {
 		}
 		data := make([]byte, length)
 		if _, err := io.ReadFull(in, data); err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				return errIncompleteLog
+			}
 			return err
 		}
 		if !IsEncrypted(data) {

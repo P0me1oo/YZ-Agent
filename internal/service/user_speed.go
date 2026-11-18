@@ -11,23 +11,29 @@ type userSpeedSampler struct {
 	previous map[int][2]int64
 	at       time.Time
 	rates    map[int][2]int64
+	maxGap   time.Duration
+	reset    []int
 }
 
 func (s *userSpeedSampler) sample(totals map[int][2]int64, now time.Time) {
 	previous, elapsed := s.previous, now.Sub(s.at)
-	ready := !s.at.IsZero() && elapsed > 0 && elapsed <= 5*time.Second
+	ready := !s.at.IsZero() && elapsed > 0 && elapsed <= max(s.maxGap, 5*time.Second)
 	s.previous = make(map[int][2]int64, len(totals))
 	s.at, s.rates = now, nil
+	s.reset = s.reset[:0]
 	rates := make(map[int][2]int64)
+	valid := len(totals) == 0
 	for id, total := range totals {
 		s.previous[id] = total
 		before := previous[id]
 		if total[0] < 0 || total[1] < 0 || before[0] < 0 || before[1] < 0 || total[0] < before[0] || total[1] < before[1] {
-			ready = false
+			s.reset = append(s.reset, id)
+			continue
 		}
 		if !ready {
 			continue
 		}
+		valid = true
 		// 使用实际经过的时间；不应用套餐倍率或累计流量上报周期。
 		value := [2]int64{
 			int64(math.Min(9007199254740991, float64(total[0]-before[0])/elapsed.Seconds())),
@@ -37,7 +43,7 @@ func (s *userSpeedSampler) sample(totals map[int][2]int64, now time.Time) {
 			rates[id] = value
 		}
 	}
-	if ready {
+	if ready && valid {
 		s.rates = rates
 	}
 }

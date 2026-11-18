@@ -5,6 +5,9 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"maps"
+	"net"
+	"net/netip"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -19,6 +22,11 @@ import (
 type M = map[string]interface{}
 
 func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TLSCert) M {
+	cfg, _ := buildConfigWithGuards(kcfg, nc, users, tc)
+	return cfg
+}
+
+func buildConfigWithGuards(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TLSCert) (M, map[string]bool) {
 	level, _ := config.ResolveKernelLogLevel(kcfg.LogLevel, nc.KernelLogLevel)
 	var outbounds []M
 	tags := make(map[string]bool)
@@ -55,7 +63,8 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 		outbounds = append(outbounds, M{"protocol": "blackhole", "tag": "block"})
 	}
 	for _, rule := range nc.Routes {
-		if rule.Action == "block" && rule.ID > 0 {
+		if rule.Action == "block" && rule.ID > 0 && !tags[model.PanelBlockTag(rule.ID)] {
+			tags[model.PanelBlockTag(rule.ID)] = true
 			outbounds = append(outbounds, M{"protocol": "blackhole", "tag": model.PanelBlockTag(rule.ID)})
 		}
 	}
@@ -111,7 +120,38 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 
 	mergeCustomXray(cfg, kcfg)
 	applySourcePolicy(cfg, nc)
-	return cfg
+	return cfg, protectDirectOutbounds(outbounds, kcfg.CustomOutbound, nc.PanelManaged)
+}
+
+var privateDestinationCIDRs = []string{
+	"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+	"172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "::/127", "fc00::/7", "fe80::/10",
+}
+
+func protectDirectOutbounds(outbounds, local []M, panelManaged bool) map[string]bool {
+	localTags := make(map[string]bool, len(local))
+	for _, outbound := range local {
+		if tag, ok := outbound["tag"].(string); ok {
+			localTags[tag] = true
+		}
+	}
+	protected := make(map[string]bool)
+	for _, outbound := range outbounds {
+		if outbound["protocol"] != "freedom" {
+			continue
+		}
+		tag, _ := outbound["tag"].(string)
+		settings, _ := outbound["settings"].(M)
+		if localTags[tag] || !panelManaged && settings["finalRules"] != nil {
+			// 本机原生配置仍可为内部服务指定例外。
+			continue
+		}
+		protected[tag] = true
+		settings = cloneWithout(settings, []string{"finalRules"})
+		settings["finalRules"] = []M{{"action": "block", "ip": privateDestinationCIDRs, "blockDelay": "0"}}
+		outbound["settings"] = settings
+	}
+	return protected
 }
 
 // outboundConfigToXray converts a structured OutboundConfig (from the panel)
@@ -372,8 +412,9 @@ func buildTrojan(base M, kcfg config.KernelConfig, nc *model.NodeSpec, users []m
 	// we should enable a default TLS config to ensure the inbound can start.
 	ss, _ := base["streamSettings"].(M)
 	if security, ok := ss["security"].(string); !ok || (security != "tls" && security != "reality") {
-		nc.TLS = 1 // Force internal state to trigger TLS build in applyStreamSettings
-		applyStreamSettings(base, kcfg, nc, tc)
+		node := *nc
+		node.TLS = 1
+		applyStreamSettings(base, kcfg, &node, tc)
 	}
 
 	return base
@@ -675,12 +716,15 @@ func buildRealitySettings(kcfg config.KernelConfig, nc *model.NodeSpec) M {
 
 	if dest, ok := nc.TLSSettings["dest"]; ok {
 		destStr := fmt.Sprintf("%v", dest)
+		if host, port, ok := model.RealityOrigin(destStr, 443); ok {
+			destStr = net.JoinHostPort(host, fmt.Sprint(port))
+		}
 		reality["dest"] = destStr
 	}
 	if sn, ok := nc.TLSSettings["server_name"]; ok {
 		reality["serverNames"] = []string{fmt.Sprintf("%v", sn)}
 		if _, exists := reality["dest"]; !exists {
-			reality["dest"] = fmt.Sprintf("%v:443", sn)
+			reality["dest"] = net.JoinHostPort(fmt.Sprint(sn), "443")
 		}
 	}
 
@@ -764,6 +808,10 @@ func compilePanelRouteRule(rule model.RouteRule) []M {
 			continue
 		}
 		hasAddress = true
+		if addr, err := netip.ParseAddr(item); err == nil {
+			ips = append(ips, addr.String())
+			continue
+		}
 		if strings.HasPrefix(item, "geoip:") || strings.Contains(item, "/") {
 			ips = append(ips, item)
 			continue
@@ -829,69 +877,39 @@ func compilePanelRouteRule(rule model.RouteRule) []M {
 }
 
 func compileCustomRouteRule(rule model.CustomRouteRule) []M {
-	outbound := xrayOutboundForAction(rule.Action)
-	var compiled []M
-
-	if len(rule.Match.Domains) > 0 || len(rule.Match.DomainSuffixes) > 0 {
-		domains := make([]string, 0, len(rule.Match.Domains)+len(rule.Match.DomainSuffixes))
-		for _, value := range rule.Match.Domains {
-			value = strings.TrimSpace(value)
-			if value == "" {
-				continue
-			}
-			domains = append(domains, value)
-		}
-		for _, value := range rule.Match.DomainSuffixes {
-			value = strings.TrimSpace(value)
-			if value == "" {
-				continue
-			}
-			domains = append(domains, "domain:"+value)
-		}
-		if len(domains) > 0 {
-			compiled = append(compiled, M{
-				"type":        "field",
-				"domain":      domains,
-				"outboundTag": outbound,
-			})
-		}
+	if rule.Disabled {
+		return nil
 	}
-	if len(rule.Match.IPCIDRs) > 0 {
-		compiled = append(compiled, M{
-			"type":        "field",
-			"ip":          copyStrings(rule.Match.IPCIDRs),
-			"outboundTag": outbound,
-		})
-	}
-	if len(rule.Match.Ports) > 0 {
-		compiled = append(compiled, M{
-			"type":        "field",
-			"port":        strings.Join(rule.Match.Ports, ","),
-			"outboundTag": outbound,
-		})
-	}
-	if len(rule.Match.Networks) > 0 {
-		compiled = append(compiled, M{
-			"type":        "field",
-			"network":     strings.Join(rule.Match.Networks, ","),
-			"outboundTag": outbound,
-		})
+	base := M{"type": "field", "outboundTag": xrayOutboundForAction(rule.Action)}
+	for field, values := range map[string][]string{"port": rule.Match.Ports, "network": rule.Match.Networks, "sourcePort": rule.Match.SourcePorts} {
+		if len(values) > 0 {
+			base[field] = strings.Join(values, ",")
+		}
 	}
 	if len(rule.Match.SourceCIDRs) > 0 {
-		compiled = append(compiled, M{
-			"type":        "field",
-			"source":      copyStrings(rule.Match.SourceCIDRs),
-			"outboundTag": outbound,
-		})
+		base["source"] = copyStrings(rule.Match.SourceCIDRs)
 	}
-	if len(rule.Match.SourcePorts) > 0 {
-		compiled = append(compiled, M{
-			"type":        "field",
-			"sourcePort":  strings.Join(rule.Match.SourcePorts, ","),
-			"outboundTag": outbound,
-		})
+	domains := copyStrings(rule.Match.Domains)
+	for _, suffix := range rule.Match.DomainSuffixes {
+		if suffix = strings.TrimSpace(suffix); suffix != "" {
+			domains = append(domains, "domain:"+suffix)
+		}
 	}
-	return compiled
+	var rules []M
+	if len(domains) > 0 {
+		entry := maps.Clone(base)
+		entry["domain"] = domains
+		rules = append(rules, entry)
+	}
+	if len(rule.Match.IPCIDRs) > 0 {
+		entry := maps.Clone(base)
+		entry["ip"] = copyStrings(rule.Match.IPCIDRs)
+		rules = append(rules, entry)
+	}
+	if len(rules) == 0 && len(base) > 2 {
+		rules = append(rules, base)
+	}
+	return rules
 }
 
 func xrayOutboundForAction(action model.RouteAction) string {

@@ -49,7 +49,11 @@ func (s *Service) updateAutoSpeed(now time.Time) {
 			}
 		}
 	}
-	active := s.autoSpeed.manager.UpdateSample(rules, s.userSpeed.rates, s.userSpeed.at, now)
+	for _, id := range s.userSpeed.reset {
+		s.autoSpeed.manager.ResetSample(id)
+	}
+	s.userSpeed.reset = s.userSpeed.reset[:0]
+	active := s.autoSpeed.manager.UpdateSampleWithGap(rules, s.userSpeed.rates, s.userSpeed.at, now, s.userSpeed.maxGap)
 	if reflect.DeepEqual(active, s.autoSpeed.active) && s.autoSpeed.error == "" {
 		return
 	}

@@ -106,22 +106,17 @@ func applyRealityGuard(nc *model.NodeSpec, inbound M) *realityGuard {
 // realityGuardEnabled 读取面板下发的防盗用开关。面板会把它规范成布尔值，
 // 这里仍兼容字符串和数字写法，避免历史数据或手工配置被静默忽略。
 func realityGuardEnabled(nc *model.NodeSpec) bool {
-	if nc.TLS != 2 || nc.TLSSettings == nil {
-		return false
+	return nc != nil && nc.TLS == 2 && model.RealityProtectionEnabled(nc.TLSSettings["anti_abuse"])
+}
+
+func hasRealityGuard(cfg M) bool {
+	inbounds, _ := cfg["inbounds"].([]M)
+	for _, inbound := range inbounds {
+		if inbound["tag"] == realityGuardTag {
+			return true
+		}
 	}
-	switch v := nc.TLSSettings["anti_abuse"].(type) {
-	case bool:
-		return v
-	case string:
-		enabled, err := strconv.ParseBool(strings.TrimSpace(v))
-		return err == nil && enabled
-	case float64:
-		return v != 0
-	case int:
-		return v != 0
-	default:
-		return false
-	}
+	return false
 }
 
 // realityGuardDomains 把伪装域名列表编译成精确匹配的路由域名。

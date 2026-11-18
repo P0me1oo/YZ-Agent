@@ -80,7 +80,7 @@ func RotateFile(path string, rotate func() (*os.File, error)) (bool, error) {
 	next, err := rotate()
 	if err != nil {
 		// 轮转失败时恢复输出；原文件已经被移动时创建新文件继续记录。
-		next, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		next, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if next == nil {
 			logWriter = os.Stderr
 		} else {

@@ -34,6 +34,7 @@ func ExpectNodes(controller Controller, instance string, ids []int) {
 }
 
 func (m *Manager) confirmPlan(owner string, plan Plan) {
+	delete(m.revisions, owner)
 	if m.confirm == nil {
 		m.confirm = map[string]Plan{}
 	}

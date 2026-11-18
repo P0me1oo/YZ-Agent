@@ -56,6 +56,14 @@ type Manager struct {
 	last  time.Time
 }
 
+// ResetSample drops observations for a reset counter without lifting an existing penalty.
+func (m *Manager) ResetSample(id int) {
+	if s := m.users[id]; s != nil {
+		s.since = time.Time{}
+		s.hits = nil
+	}
+}
+
 func (m *Manager) Update(rules map[int]*Rule, rates map[int][2]int64, now time.Time) map[int]Penalty {
 	return m.UpdateSample(rules, rates, now, now)
 }
@@ -84,9 +92,13 @@ func (m *Manager) syncRules(rules map[int]*Rule) {
 
 // UpdateSample 用采样时间去重。名单刷新只更新规则和到期状态，不重复消费旧网速。
 func (m *Manager) UpdateSample(rules map[int]*Rule, rates map[int][2]int64, sampledAt, now time.Time) map[int]Penalty {
+	return m.UpdateSampleWithGap(rules, rates, sampledAt, now, 5*time.Second)
+}
+
+func (m *Manager) UpdateSampleWithGap(rules map[int]*Rule, rates map[int][2]int64, sampledAt, now time.Time, maxGap time.Duration) map[int]Penalty {
 	m.syncRules(rules)
 	sample := !sampledAt.IsZero() && !sampledAt.Equal(m.last)
-	gap := m.last.IsZero() || sampledAt.Sub(m.last) > 5*time.Second || sampledAt.Before(m.last)
+	gap := m.last.IsZero() || sampledAt.Sub(m.last) > max(maxGap, 5*time.Second) || sampledAt.Before(m.last)
 	if sample {
 		m.last = sampledAt
 	}

@@ -101,7 +101,7 @@ func (h *healthTracker) snapshot() healthSnapshot {
 func (h *healthTracker) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	snapshot := h.snapshot()
 	w.Header().Set("Content-Type", "application/json")
-	if !snapshot.componentsReady || snapshot.Failed > 0 {
+	if snapshot.Status != "unbound" && (!snapshot.componentsReady || snapshot.Failed > 0) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	_ = json.NewEncoder(w).Encode(snapshot)

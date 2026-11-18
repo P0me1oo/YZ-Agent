@@ -10,6 +10,16 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
 
+func TestUserSpeedTenSecondIntervalIsolatesCounterReset(t *testing.T) {
+	sampler := userSpeedSampler{maxGap: 20 * time.Second}
+	now := time.Now()
+	sampler.sample(map[int][2]int64{1: {200, 200}, 2: {100, 100}}, now)
+	sampler.sample(map[int][2]int64{1: {10, 10}, 2: {30100, 10100}}, now.Add(10*time.Second))
+	if !reflect.DeepEqual(sampler.rates, map[int][2]int64{2: {3000, 1000}}) || !reflect.DeepEqual(sampler.reset, []int{1}) {
+		t.Fatalf("计数器回退影响了其他用户的十秒采样: rates=%v reset=%v", sampler.rates, sampler.reset)
+	}
+}
+
 func TestUserSpeedUsesActualIntervalAndKeepsPublishedSnapshot(t *testing.T) {
 	var sampler userSpeedSampler
 	now := time.Now()

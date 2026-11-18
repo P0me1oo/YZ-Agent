@@ -95,7 +95,9 @@ func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) e
 	}
 	state := pendingReportFile{Version: pendingReportVersion, Identity: s.identity, Batch: batch, Pending: pending}
 	hash, err := pendingStateHash(state)
- if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if s.saved && hash == s.lastHash {
 		return nil
 	}
@@ -123,6 +125,10 @@ func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) e
 				return err
 			}
 			syncDir(dir)
+			s.lastState = pendingReportFile{}
+			s.lastHash = [32]byte{}
+			s.saved = false
+			return nil
 		}
 	} else {
 		record := pendingJournalRecord{Sequence: s.journalSeq + 1, Pending: diffPending(s.lastState.Pending, pending)}
@@ -148,7 +154,7 @@ func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) e
 	}
 	// 输入由采样复制，检查点状态另留独立副本，避免批次移动后改写比较基线。
 	s.lastState = clonePendingState(state)
- s.lastState.JournalSequence = 0
+	s.lastState.JournalSequence = 0
 	s.lastHash, s.saved = hash, true
 	return nil
 }
@@ -198,13 +204,36 @@ func (s *pendingReportStore) load() (*pendingBatch, pendingTraffic, error) {
 	if s == nil {
 		return nil, pendingTraffic{}, nil
 	}
+	release := privacy.LockFileWrite(s.path)
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	data, err := privacy.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, pendingTraffic{}, nil
+		// 旧版本清空检查点后仍可能写出增量。其基线为空，首条序号不必为 1。
+		file := pendingReportFile{Version: pendingReportVersion, Identity: s.identity}
+		if err := s.replayJournal(&file, true); err != nil {
+			s.loadErr = err
+			return nil, pendingTraffic{}, err
+		}
+		s.journalSeq = file.JournalSequence
+		if file.JournalSequence > 0 {
+			checkpoint, err := json.Marshal(file)
+			if err == nil {
+				err = s.writeProtected(s.path, checkpoint)
+			}
+			if err != nil {
+				s.loadErr = err
+				return nil, pendingTraffic{}, err
+			}
+		}
+		if file.Batch != nil && (file.Batch.ID == "" || file.Batch.empty()) {
+			file.Batch = nil
+		}
+		return file.Batch, file.Pending, nil
 	}
 	if err != nil {
+		s.loadErr = err
 		return nil, pendingTraffic{}, err
 	}
 	var file pendingReportFile
@@ -221,16 +250,18 @@ func (s *pendingReportStore) load() (*pendingBatch, pendingTraffic, error) {
 		}
 		return nil, pendingTraffic{}, fmt.Errorf("pending report file moved to %s: %w", aside, err)
 	}
-	if err := s.replayJournal(&file); err != nil {
+	if err := s.replayJournal(&file, false); err != nil {
 		s.loadErr = err
 		return nil, pendingTraffic{}, err
 	}
 	s.journalSeq = file.JournalSequence
 	file.JournalSequence = 0
 	hash, err := pendingStateHash(file)
- if err != nil { return nil, pendingTraffic{}, err }
- s.lastState = clonePendingState(file)
- s.lastHash, s.saved = hash, true
+	if err != nil {
+		return nil, pendingTraffic{}, err
+	}
+	s.lastState = clonePendingState(file)
+	s.lastHash, s.saved = hash, true
 	if file.Batch != nil && (file.Batch.ID == "" || file.Batch.empty()) {
 		file.Batch = nil
 	}

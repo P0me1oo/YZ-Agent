@@ -49,6 +49,8 @@ func (s *Service) updateFirewall(ctx context.Context, node *model.NodeSpec, user
 		prepared, err = s.prepareSourcePolicy(ctx, node)
 		if err != nil {
 			s.failRuntime("准备防火墙来源集合失败", node, users, err)
+			s.firewallFailureHash = s.failedRuntimeHash
+			s.lastFirewallRetry = time.Now()
 			return false
 		}
 	}
@@ -66,10 +68,8 @@ func (s *Service) updateFirewall(ctx context.Context, node *model.NodeSpec, user
 			return true
 		}
 		s.failRuntime("应用防火墙规则失败", node, users, err)
-		if node.SourcePolicy.Enabled() {
-			s.firewallFailureHash = s.failedRuntimeHash
-			s.lastFirewallRetry = time.Now()
-		}
+		s.firewallFailureHash = s.failedRuntimeHash
+		s.lastFirewallRetry = time.Now()
 		return false
 	}
 	s.firewallNotice.Store(nil)

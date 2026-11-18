@@ -128,7 +128,7 @@ func TestLogWriterPreservesCorruptAndPlaintextFiles(t *testing.T) {
 		data []byte
 	}{
 		{"plaintext", []byte("existing private plaintext")},
-		{"partial", append([]byte(LogMagic), 0, 0)},
+		{"invalid record", append([]byte(LogMagic), 0, 0, 0, 0)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "runtime.log.enc")
@@ -143,6 +143,36 @@ func TestLogWriterPreservesCorruptAndPlaintextFiles(t *testing.T) {
 				t.Fatal("original file lost")
 			}
 		})
+	}
+}
+
+func TestLogWriterPreservesPartialTailAndContinues(t *testing.T) {
+	state, _ := New([]Key{logKey(t)})
+	path := filepath.Join(t.TempDir(), "runtime.log.enc")
+	partial := append([]byte(LogMagic), 0, 0)
+	if err := os.WriteFile(path, partial, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writer := NewLogWriter(path, state)
+	defer writer.Close()
+	if _, err := writer.Write([]byte("new record")); err != nil {
+		t.Fatal(err)
+	}
+	backups, _ := filepath.Glob(path + ".partial-*")
+	if len(backups) != 1 {
+		t.Fatalf("want one preserved log, got %v", backups)
+	}
+	saved, err := os.ReadFile(backups[0])
+	if err != nil || !bytes.Equal(saved, partial) {
+		t.Fatal("partial log was not preserved", err)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plain bytes.Buffer
+	if err := state.ReadLog(&plain, bytes.NewReader(current)); err != nil || plain.String() != "new record" {
+		t.Fatal("new log could not be read", err)
 	}
 }
 

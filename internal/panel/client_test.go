@@ -13,6 +13,22 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 )
 
+func TestTLSHandshakeFallsBackToHTTPAPIsForCleartextWebSocket(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"websocket":{"enabled":true,"ws_url":"ws://panel.example/ws"}}`))
+	}))
+	defer server.Close()
+	client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 12})
+	client.httpClient = server.Client()
+	response, err := client.HandshakeContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.WebSocket.Enabled || response.WebSocket.WSURL != "" {
+		t.Fatal("HTTPS 面板不应启用明文 WebSocket")
+	}
+}
+
 func TestRequestErrorsOmitAuthenticationQuery(t *testing.T) {
 	ts, client := newTestServer(func(http.ResponseWriter, *http.Request) {})
 	ts.Close()

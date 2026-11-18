@@ -137,6 +137,16 @@ func (s *Service) updateOperations(ctx context.Context) {
 				port = cfg.Relay.ListenPort
 			}
 			tcp := healthcheck.IsTCP(cfg.Protocol, cfg.Network, cfg.TLS, cfg.TLSSettings)
+			if cfg.IsRelayLanding() {
+				switch cfg.Relay.Protocol {
+				case "wireguard":
+					tcp = false
+				case "shadowsocks":
+					tcp = true
+				case "vless":
+					tcp = healthcheck.IsTCP("vless", cfg.Network, cfg.TLS, cfg.TLSSettings)
+				}
+			}
 			routes := map[string]int{"": 0}
 			totalRoutes := 1
 			if cfg.Relay != nil && cfg.Relay.IsEntry() {

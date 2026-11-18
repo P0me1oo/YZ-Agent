@@ -150,7 +150,21 @@ func (s *SingBox) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec
 	s.logger().Debug("sing-box config generated", "len", len(data))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	ctx, err = directOutboundContext(ctx, nodeConfig.CustomOutbounds)
+	var guarded map[string]bool
+	if nodeConfig.PanelManaged {
+		guarded = map[string]bool{"direct": true}
+		for _, outbound := range nodeConfig.CustomOutbounds {
+			if model.IsDirectOutbound(outbound.Protocol) {
+				guarded[outbound.Tag] = true
+			}
+		}
+		for _, outbound := range s.cfg.CustomOutbound {
+			if tag, ok := outbound["tag"].(string); ok {
+				delete(guarded, tag)
+			}
+		}
+	}
+	ctx, err = directOutboundContext(ctx, nodeConfig.CustomOutbounds, guarded)
 	if err != nil {
 		cancel()
 		return err

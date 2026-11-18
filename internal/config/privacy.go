@@ -49,28 +49,16 @@ func bootstrapFor(c *Config, path string) privacy.Bootstrap {
 
 // 兼容恢复用的整文件密文；日常配置按实例保存。
 func ReadConfigData(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := privacy.ReadRegularFile(path, 96<<20)
 	if err != nil || !privacy.IsEncrypted(data) {
 		return data, err
-	}
-	if plain, err := privacy.Open(data); err == nil {
-		return plain, nil
 	}
 	header, err := privacy.BootstrapData(data)
 	var b privacy.Bootstrap
 	if err != nil || json.Unmarshal(header, &b) != nil || b.URL == "" {
 		return nil, errors.New("加密配置缺少启动信息")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	state, _, err := privacy.Fetch(ctx, b, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if state == nil {
-		return nil, errors.New("面板没有返回配置解密密钥，保留原文件")
-	}
-	return privacy.Open(data)
+	return openInstance(path, data, &b)
 }
 
 func (rc *RootConfig) openProtected(path string, strict bool) error {
@@ -117,6 +105,17 @@ func (rc *RootConfig) openProtected(path string, strict bool) error {
 				continue
 			}
 			value.PrivacyNodeID = c.PrivacyNodeID
+			bound := bootstrapFor(&value, path)
+			expected := bootstrapFor(c, path)
+			if privacy.NormalizePanelURL(bound.URL) == "" || privacy.NormalizePanelURL(bound.URL) != privacy.NormalizePanelURL(expected.URL) ||
+				bound.MachineID != expected.MachineID || bound.NodeID != expected.NodeID || value.IsMachineMode() != c.IsMachineMode() ||
+				value.Panel.NodeID != c.Panel.NodeID {
+				c.PrivacyError = errors.New("加密配置身份不匹配")
+				if strict {
+					return c.PrivacyError
+				}
+				continue
+			}
 			value.Panel.URL = c.Panel.URL
 			value.Panel.TokenEnv = c.Panel.TokenEnv
 			value.Panel.Token = c.Panel.Token
@@ -145,8 +144,8 @@ func (rc *RootConfig) openProtected(path string, strict bool) error {
 }
 
 func openInstance(path string, data []byte, owner *privacy.Bootstrap) ([]byte, error) {
-	if plain, err := privacy.Open(data); err == nil {
-		return plain, nil
+	if !privacy.IsEncrypted(data) {
+		return nil, errors.New("实例保护内容不是加密配置")
 	}
 	var b privacy.Bootstrap
 	if owner != nil {
@@ -160,6 +159,11 @@ func openInstance(path string, data []byte, owner *privacy.Bootstrap) ([]byte, e
 	if b.URL == "" {
 		return nil, errors.New("加密配置启动信息无效")
 	}
+	if state := privacy.CachedAuthenticatedState(b, path); state != nil {
+		if plain, err := state.Open(data); err == nil {
+			return plain, nil
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	state, _, err := privacy.Fetch(ctx, b, path, nil)
@@ -169,7 +173,7 @@ func openInstance(path string, data []byte, owner *privacy.Bootstrap) ([]byte, e
 	if state == nil {
 		return nil, errors.New("面板不再提供该配置的解密密钥")
 	}
-	return privacy.Open(data)
+	return state.Open(data)
 }
 
 func LoadWritableRoot(path string) (*RootConfig, error) {
@@ -186,7 +190,7 @@ func loadWritableRootData(path string, data []byte) (*RootConfig, error) {
 		return nil, errors.New("配置格式无效")
 	}
 	root.sourceHash, root.sourcePath = sha256.Sum256(data), path
-	if raw, err := os.ReadFile(path); err == nil {
+	if raw, err := privacy.ReadRegularFile(path, 96<<20); err == nil {
 		root.wrapped = privacy.IsEncrypted(raw)
 	}
 	if err := root.openProtected(path, true); err != nil {
@@ -209,9 +213,12 @@ func resolvePrivacy(ctx context.Context, path string, root *RootConfig) map[int]
 		}
 		b := bootstrapFor(c, path)
 		state, enabled, b, err := fetchInstancePrivacy(ctx, c, path, b)
-		if err != nil && c.Protected != "" {
-			if cached := privacy.CachedState(c.Protected); cached != nil {
-				state, enabled, err = cached, true, nil
+		if errors.Is(err, privacy.ErrPanelUnavailable) && c.Protected != "" {
+			if cached := privacy.CachedAuthenticatedState(b, path); cached != nil {
+				if plain, openErr := cached.Open([]byte(c.Protected)); openErr == nil {
+					clear(plain)
+					state, enabled, err = cached, true, nil
+				}
 			}
 		}
 		if err != nil {
@@ -451,8 +458,7 @@ func encodePrivateRoot(data []byte, root *RootConfig, states map[int]privateInst
 		}
 		existing, _ := entry["protected"].(string)
 		if existing != "" {
-			owner := state.bootstrap
-			plain, err = openInstance(pathForBootstrap(state.bootstrap), []byte(existing), &owner)
+			plain, err = state.state.Open([]byte(existing))
 			if err != nil {
 				return nil, err
 			}
@@ -509,10 +515,6 @@ func restorePrivateEntry(entry map[string]any, c *Config, state *privacy.State) 
 	return previous, nil
 }
 
-func pathForBootstrap(b privacy.Bootstrap) string {
-	return filepath.Join(filepath.Dir(b.CredentialsFile), "config.yml")
-}
-
 func PreparePrivacy(ctx context.Context, path string, root *RootConfig) error {
 	if root.IsBindingIdle() {
 		root.PrivacyReady = true
@@ -523,7 +525,7 @@ func PreparePrivacy(ctx context.Context, path string, root *RootConfig) error {
 		return err
 	}
 	defer unlock()
-	before, err := os.ReadFile(path)
+	before, err := privacy.ReadRegularFile(path, 96<<20)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -544,7 +546,16 @@ func PreparePrivacy(ctx context.Context, path string, root *RootConfig) error {
 	states := resolvePrivacy(ctx, credentialPath, root)
 	if len(states) == 0 {
 		root.PrivacyReady = true
-		return nil
+		var firstErr error
+		for _, c := range privacyItems(root) {
+			if c.PrivacyError == nil {
+				return nil
+			}
+			if firstErr == nil {
+				firstErr = c.PrivacyError
+			}
+		}
+		return firstErr
 	}
 	for i, state := range states {
 		if !state.enabled && privacyItems(root)[i].PrivacyError == nil {
@@ -558,7 +569,7 @@ func PreparePrivacy(ctx context.Context, path string, root *RootConfig) error {
 		return err
 	}
 	items := privacyItems(root)
-	if current, err := os.ReadFile(path); err != nil || !bytes.Equal(current, before) {
+	if current, err := privacy.ReadRegularFile(path, 96<<20); err != nil || !bytes.Equal(current, before) {
 		return errors.New("配置已变化，稍后重新保护")
 	}
 	if err := ctx.Err(); err != nil {
@@ -707,17 +718,21 @@ func WriteRootData(path string, data []byte, root *RootConfig) error {
 		return err
 	}
 	defer unlock()
-	if root.ExportLegacy {
-		return privacy.WriteRaw(path, data, 0o600)
-	}
-	if root.sourcePath == path {
-		current, err := ReadConfigData(path)
+	if root.sourcePath != "" {
+		current, err := ReadConfigData(root.sourcePath)
 		if err != nil {
 			return err
 		}
 		if root.sourceHash != sha256.Sum256(current) {
 			return errors.New("配置已变化，拒绝覆盖其他修改")
 		}
+		data, err = preserveConfigFields(current, data)
+		if err != nil {
+			return err
+		}
+	}
+	if root.ExportLegacy || root.IsBindingIdle() {
+		return privacy.WriteRaw(path, data, 0o600)
 	}
 	protected := root.wrapped
 	for _, c := range privacyItems(root) {
@@ -751,6 +766,70 @@ func WriteRootData(path string, data []byte, root *RootConfig) error {
 	}
 	root.sourceHash, root.sourcePath = sha256.Sum256(encoded), path
 	return nil
+}
+
+func preserveConfigFields(before, after []byte) ([]byte, error) {
+	var original, updated map[string]any
+	if err := yaml.Unmarshal(before, &original); err != nil {
+		return nil, err
+	}
+	if err := yaml.Unmarshal(after, &updated); err != nil {
+		return nil, err
+	}
+	oldEntries, multi := original["instances"].([]any)
+	if !multi {
+		oldEntries = []any{original}
+	}
+	keyOf := func(entry map[string]any) string {
+		data, err := yaml.Marshal(entry)
+		if err != nil {
+			return ""
+		}
+		var cfg Config
+		if yaml.Unmarshal(data, &cfg) != nil {
+			return ""
+		}
+		if cfg.Panel.URL == "" && !cfg.IsStandalone() {
+			return ""
+		}
+		id, _ := cfg.AutoInstanceID()
+		return id
+	}
+	retained := make(map[string]map[string]any)
+	for _, value := range oldEntries {
+		entry, _ := value.(map[string]any)
+		if id := keyOf(entry); id != "" && entry["protected"] == nil {
+			retained[id] = entry
+		}
+	}
+	if entries, ok := updated["instances"].([]any); ok {
+		for i, value := range entries {
+			entry, _ := value.(map[string]any)
+			merged := mergeFields(retained[keyOf(entry)], entry)
+			for _, key := range []string{"panel", "machine"} {
+				if fields, ok := merged[key].(map[string]any); ok && fields["token_env"] != nil {
+					delete(fields, "token")
+				}
+			}
+			entries[i] = merged
+		}
+	}
+	defaults := mergeFields(nil, original)
+	for _, key := range []string{"instances", "binding_idle", "id", "panel", "machine", "nodes", "standalone", "protected", "privacy_defaults", "privacy_node_id"} {
+		delete(defaults, key)
+	}
+	if !multi && keyOf(original) != "" {
+		// A single instance's fields are carried into its matching entry above.
+		// Only process-wide fields remain defaults when converting the layout.
+		for key := range defaults {
+			switch key {
+			case "health_port", "runtime", "time_sync", "firewall":
+			default:
+				delete(defaults, key)
+			}
+		}
+	}
+	return yaml.Marshal(mergeFields(defaults, updated))
 }
 
 // 策略变化或面板恢复后自动重试；已运行的实例不因一次领取失败被停止。

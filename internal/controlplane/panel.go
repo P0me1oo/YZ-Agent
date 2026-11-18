@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
@@ -23,7 +24,8 @@ type PanelControlPlane struct {
 }
 
 type panelPushClient struct {
-	inner *panel.WSClient
+	inner       *panel.WSClient
+	needsResync atomic.Bool
 }
 
 func NewPanelControlPlane(panelCfg config.PanelConfig, wsCfg config.WSConfig) *PanelControlPlane {
@@ -176,33 +178,45 @@ func (p *PanelControlPlane) newPushClient(metricsFn func() map[string]interface{
 		BackoffInitial:   time.Duration(p.wsCfg.BackoffInitial) * time.Second,
 		BackoffMax:       time.Duration(p.wsCfg.BackoffMax) * time.Second,
 	}
-	inner := panel.NewWSClient(
+	push := &panelPushClient{}
+	push.inner = panel.NewWSClient(
 		wsURL,
 		p.cfg.Token,
 		p.cfg.NodeID,
 		cfg,
 		func(event panel.WSEvent) {
+			p.pushMu.Lock()
+			defer p.pushMu.Unlock()
+			if p.pushClient != push {
+				return
+			}
 			translated := TranslateWSEvent(event)
 			select {
 			case events <- translated:
 			default:
+				push.needsResync.Store(true)
 				nlog.Core().Warn("ws event channel full, dropping event", "type", translated.Type)
 				select {
-				case statuses <- StatusChange{Connected: true, NeedsResync: true}:
+				case statuses <- StatusChange{ReadCurrent: true}:
 				default:
 				}
 			}
 		},
 		func(status panel.WSStatusChange) {
+			p.pushMu.Lock()
+			defer p.pushMu.Unlock()
+			if p.pushClient != push {
+				return
+			}
 			select {
-			case statuses <- StatusChange{Connected: status.Connected}:
+			case statuses <- StatusChange{Connected: status.Connected, ReadCurrent: true}:
 			default:
 			}
 		},
 		metricsFn,
 	)
-	p.client.SetWebSocketProvider(func() *panel.WSClient { return inner })
-	p.pushClient, p.pushURL, p.pushRealtime = &panelPushClient{inner: inner}, wsURL, p.client.RealtimeEnabled()
+	p.client.SetWebSocketProvider(func() *panel.WSClient { return push.inner })
+	p.pushClient, p.pushURL, p.pushRealtime = push, wsURL, p.client.RealtimeEnabled()
 	return p.pushClient
 }
 
@@ -223,6 +237,7 @@ func TranslateWSEvent(event panel.WSEvent) Event {
 
 func (p *panelPushClient) Run(ctx context.Context) { p.inner.Run(ctx) }
 func (p *panelPushClient) IsConnected() bool       { return p.inner.IsConnected() }
+func (p *panelPushClient) TakeResync() bool        { return p.needsResync.Swap(false) }
 func (p *panelPushClient) SendDeviceReport(devices map[int][]string) {
 	p.inner.SendDeviceReport(devices)
 }

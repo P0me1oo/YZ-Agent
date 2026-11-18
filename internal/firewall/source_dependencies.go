@@ -40,15 +40,23 @@ func sourceToolsAvailable(available func(string) bool, driver string) bool {
 
 // 只为确实托管来源限制的节点补装工具；普通端口放行和手工模式不触发安装。
 func (b *systemBackend) prepareSourceTools(ctx context.Context, plans map[string]Plan) error {
+	provision, err := b.planSourceTools(ctx, plans)
+	if err != nil || provision == nil {
+		return err
+	}
+	return provision(ctx)
+}
+
+func (b *systemBackend) planSourceTools(ctx context.Context, plans map[string]Plan) (func(context.Context) error, error) {
 	if !b.cfg.IsEnabled() {
-		return nil
+		return nil, nil
 	}
 	required := false
 	for _, plan := range plans {
 		required = required || plan.Restricted
 	}
 	if !required {
-		return nil
+		return nil, nil
 	}
 	driver := b.state.SourceDriver
 	if driver == "" {
@@ -57,17 +65,22 @@ func (b *systemBackend) prepareSourceTools(ctx context.Context, plans map[string
 	automatic := driver == "" || driver == "auto"
 	if automatic {
 		if err := b.checkSourceEnvironment(ctx); err != nil {
-			return err
+			return nil, err
 		}
 		driver = "nftables"
 	}
 	if sourceToolsAvailable(b.commands.Available, driver) {
-		return nil
+		return nil, nil
 	}
+	commands := b.commands
+	return func(ctx context.Context) error { return provisionSourceTools(ctx, commands, driver, automatic) }, nil
+}
+
+func provisionSourceTools(ctx context.Context, runner commands, driver string, automatic bool) error {
 	var err error = errSourceToolsMissing
-	if installer, ok := b.commands.(sourceToolProvisioner); ok {
+	if installer, ok := runner.(sourceToolProvisioner); ok {
 		err = installer.InstallSourceTools(ctx, driver)
-		if err == nil && !sourceToolsAvailable(b.commands.Available, driver) {
+		if err == nil && !sourceToolsAvailable(runner.Available, driver) {
 			err = fmt.Errorf("安装 %s 后仍未找到完整的来源过滤工具", driver)
 		}
 	}
@@ -78,7 +91,7 @@ func (b *systemBackend) prepareSourceTools(ctx context.Context, plans map[string
 		return ctx.Err()
 	}
 	// 仅新建自动后端允许回退，已有规则及显式后端不在运行中切换。
-	if automatic && b.sourceIPTablesAvailable() {
+	if automatic && sourceToolsAvailable(runner.Available, "iptables") {
 		nlog.Core().Warn("nftables 不可用，沿用已有的 iptables/ipset 来源过滤", "error", err)
 		return nil
 	}

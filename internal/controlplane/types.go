@@ -30,6 +30,7 @@ type Event struct {
 type StatusChange struct {
 	Connected   bool
 	NeedsResync bool
+	ReadCurrent bool
 }
 
 type APIMetrics struct {

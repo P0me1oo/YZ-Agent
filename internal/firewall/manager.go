@@ -33,7 +33,13 @@ type sourceReconciler interface {
 
 type Manager struct {
 	mu        sync.Mutex
+	lifecycle sync.Mutex
+	ctx       context.Context
+	shutdown  context.CancelFunc
+	closing   bool
 	plans     map[string]Plan
+	revisions map[string]uint64
+	revision  uint64
 	backend   reconciler
 	enabled   bool
 	linux     bool
@@ -87,6 +93,11 @@ func New(cfg config.FirewallConfig, configPath string) (*Manager, error) {
 
 // Start 定期检查规则，恢复防火墙重载或外部删除造成的缺失，并重试清理失败。
 func (m *Manager) Start(parent context.Context) {
+	m.lifecycle.Lock()
+	defer m.lifecycle.Unlock()
+	if m.closing {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.done != nil || m.closed || m.backend == nil {
@@ -94,6 +105,9 @@ func (m *Manager) Start(parent context.Context) {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	m.cancel, m.done = cancel, make(chan struct{})
+	if m.ctx == nil {
+		m.ctx, m.shutdown = context.WithCancel(context.Background())
+	}
 	go func() {
 		defer close(m.done)
 		ticker := time.NewTicker(30 * time.Second)
@@ -104,7 +118,7 @@ func (m *Manager) Start(parent context.Context) {
 				return
 			case <-ticker.C:
 				m.mu.Lock()
-				err := m.reconcile(ctx)
+				err := m.reconcileWithProvision(ctx, "", 0)
 				m.mu.Unlock()
 				if err != nil && ctx.Err() == nil {
 					nlog.Core().Warn("防火墙规则同步失败，将自动重试", "error", err)
@@ -130,9 +144,11 @@ func (m *Manager) apply(ctx context.Context, owner string, node *model.NodeSpec,
 	if !node.ManagesFirewall() {
 		return m.Release(ctx, owner)
 	}
+	ctx, finish := m.operationContext(ctx)
+	defer finish()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closed {
+	if m.closed || ctx.Err() != nil {
 		return fmt.Errorf("防火墙管理器已停止")
 	}
 	if !m.enabled {
@@ -180,8 +196,40 @@ func (m *Manager) apply(ctx context.Context, owner string, node *model.NodeSpec,
 	}
 	m.plans = candidate
 	delete(m.confirm, owner)
+	if m.revisions == nil {
+		m.revisions = make(map[string]uint64)
+	}
+	m.revision++
+	m.revisions[owner] = m.revision
 	// 来源已明确的计划仍参与下一轮核对。后端在写入前检查冲突并保留旧规则，
 	// 不能把暂等其他节点发现的计划也标成来源未知，否则相邻端口会互相等待。
+	return m.reconcileWithProvision(ctx, owner, m.revision)
+}
+
+// 调用方持有管理锁。安装依赖期间允许其他节点变更计划，返回后重新计算当前计划。
+func (m *Manager) reconcileWithProvision(ctx context.Context, owner string, revision uint64) error {
+	if backend, ok := m.backend.(*systemBackend); ok {
+		provision, err := backend.planSourceTools(ctx, m.plans)
+		if err != nil {
+			m.lastErr = err
+			return err
+		}
+		if provision != nil {
+			m.mu.Unlock()
+			err = provision(ctx)
+			m.mu.Lock()
+			if m.closed || ctx.Err() != nil {
+				return context.Canceled
+			}
+			if revision != 0 && m.revisions[owner] != revision {
+				return errors.New("防火墙计划已被替换或撤回")
+			}
+			if err != nil {
+				m.lastErr = err
+				return err
+			}
+		}
+	}
 	return m.reconcile(ctx)
 }
 
@@ -189,6 +237,8 @@ func (m *Manager) Release(ctx context.Context, owner string) error {
 	if m == nil {
 		return nil
 	}
+	ctx, finish := m.operationContext(ctx)
+	defer finish()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -201,6 +251,7 @@ func (m *Manager) Release(ctx context.Context, owner string) error {
 		m.expected[owner] = true
 	}
 	delete(m.plans, owner)
+	delete(m.revisions, owner)
 	m.updateProtection()
 	if backend, ok := m.backend.(*systemBackend); ok &&
 		(len(backend.state.Owned) > 0 || backend.state.SourceDriver != "" || backend.state.Redirect != "") {
@@ -232,11 +283,6 @@ func (m *Manager) reconcile(parent context.Context) error {
 		allows, redirects, _ := combinePlans(active)
 		if backend, ok := m.backend.(*systemBackend); ok {
 			backend.plans = active
-			// 软件包安装单独限时，不占用规则写入与核验的 30 秒预算。
-			if err = backend.prepareSourceTools(parent, m.plans); err != nil {
-				m.lastErr = err
-				return err
-			}
 		}
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
@@ -262,16 +308,16 @@ func (m *Manager) Close() error {
 	if m == nil {
 		return nil
 	}
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return nil
+	m.lifecycle.Lock()
+	m.closing = true
+	if m.shutdown != nil {
+		m.shutdown()
 	}
 	if m.cancel != nil {
 		m.cancel()
 	}
 	done := m.done
-	m.mu.Unlock()
+	m.lifecycle.Unlock()
 	if done != nil {
 		<-done
 	}
@@ -281,6 +327,7 @@ func (m *Manager) Close() error {
 		return nil
 	}
 	m.plans = map[string]Plan{}
+	m.revisions = nil
 	m.confirm, m.discovery, m.expected = nil, nil, nil
 	err := m.reconcile(context.Background())
 	m.closed = true
@@ -290,4 +337,18 @@ func (m *Manager) Close() error {
 		}
 	}
 	return err
+}
+
+func (m *Manager) operationContext(parent context.Context) (context.Context, func()) {
+	m.lifecycle.Lock()
+	if m.ctx == nil {
+		m.ctx, m.shutdown = context.WithCancel(context.Background())
+	}
+	ctx, cancel := context.WithCancel(parent)
+	if m.closing {
+		cancel()
+	}
+	stop := context.AfterFunc(m.ctx, cancel)
+	m.lifecycle.Unlock()
+	return ctx, func() { stop(); cancel() }
 }

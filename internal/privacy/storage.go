@@ -431,14 +431,67 @@ func OpenFor(path string, data []byte) ([]byte, error) {
 }
 
 func ReadFile(path string) ([]byte, error) {
-	if info, err := os.Stat(path); err == nil && info.Size() > 96<<20 {
-		return nil, errors.New("加密数据文件过大")
-	}
-	data, err := os.ReadFile(path)
+	data, err := ReadRegularFile(path, 96<<20)
 	if err != nil {
 		return nil, err
 	}
 	return OpenFor(path, data)
+}
+
+func ReadFileIn(root, path string) ([]byte, error) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, errors.New("文件路径超出指定目录")
+	}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	file, err := openRootForRead(dir, rel)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := readRegular(file, 96<<20)
+	if err != nil {
+		return nil, err
+	}
+	return OpenFor(path, data)
+}
+
+func ReadRegularFile(path string, limit int64) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("只允许读取普通文件")
+	}
+	file, err := openForRead(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return readRegular(file, limit)
+}
+
+func readRegular(file *os.File, limit int64) ([]byte, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("只允许读取普通文件")
+	}
+	if info.Size() > limit {
+		return nil, errors.New("数据文件过大")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if int64(len(data)) > limit {
+		return nil, errors.New("数据文件过大")
+	}
+	return data, err
 }
 
 func WriteFile(path string, data []byte, perm os.FileMode) error {

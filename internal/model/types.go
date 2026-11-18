@@ -38,6 +38,7 @@ type NodeSpec struct {
 	CustomOutbounds  []OutboundConfig
 	CustomRoutes     []map[string]any
 	CustomRouteRules []CustomRouteRule
+	PanelManaged     bool `json:"-"`
 	CertConfig       *config.CertConfig
 	AutoTLS          bool
 	Domain           string

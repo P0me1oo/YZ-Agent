@@ -68,7 +68,8 @@ func NewClient(cfg config.PanelConfig) *Client {
 		nodeType:  cfg.NodeType,
 		machineID: cfg.MachineID,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:       30 * time.Second,
+			CheckRedirect: sameOriginRedirect,
 			Transport: &http.Transport{
 				MaxIdleConns:        10,
 				MaxIdleConnsPerHost: 10,
@@ -76,6 +77,14 @@ func NewClient(cfg config.PanelConfig) *Client {
 			},
 		},
 	}
+}
+
+func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	origin := via[0].URL
+	if len(via) >= 10 || req.URL.User != nil || req.URL.Scheme != origin.Scheme || !strings.EqualFold(req.URL.Host, origin.Host) {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }
 
 // ForNode returns a new client bound to a specific node_id, sharing the
@@ -140,6 +149,14 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	var hs HandshakeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&hs); err != nil {
 		return nil, fmt.Errorf("decode handshake: %w", err)
+	}
+	if hs.WebSocket.Enabled {
+		ws, err := url.Parse(hs.WebSocket.WSURL)
+		if err != nil || ws.Hostname() == "" || ws.User != nil ||
+			(ws.Scheme != "ws" && ws.Scheme != "wss") || (strings.HasPrefix(strings.ToLower(c.baseURL), "https://") && ws.Scheme != "wss") {
+			hs.WebSocket.Enabled, hs.WebSocket.WSURL = false, ""
+			nlog.Core().Warn("面板返回的 WebSocket 地址无效，继续使用 HTTP 接口")
+		}
 	}
 	c.applyLogPolicy(hs.LogPolicy)
 	c.applyHostMonitoring(hs.HostMonitoring)
@@ -514,6 +531,10 @@ func (c *Client) GetMachineNodesContext(ctx context.Context) (*MachineNodesRespo
 // ReportMachineStatus sends machine-level load metrics to the panel.
 // netIn/netOut are bytes/sec; negative values mean "unavailable" (first sample).
 func (c *Client) ReportMachineStatus(cpu float64, mem, swap, disk [2]uint64, netIn, netOut float64) error {
+	return c.ReportMachineStatusContext(context.Background(), cpu, mem, swap, disk, netIn, netOut)
+}
+
+func (c *Client) ReportMachineStatusContext(ctx context.Context, cpu float64, mem, swap, disk [2]uint64, netIn, netOut float64) error {
 	if !c.HostMonitoringEnabled() {
 		return nil
 	}
@@ -526,7 +547,7 @@ func (c *Client) ReportMachineStatus(cpu float64, mem, swap, disk [2]uint64, net
 	if netIn >= 0 && netOut >= 0 {
 		payload["net"] = map[string]interface{}{"in_speed": netIn, "out_speed": netOut}
 	}
-	return c.postJSON("/api/v2/server/machine/status", payload)
+	return c.postJSONContext(ctx, "/api/v2/server/machine/status", payload)
 }
 
 // injectAuth writes authentication fields into a payload map.
@@ -629,6 +650,13 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 		c.apiFailure.Add(1)
 		return nil, panelRequestError(err, method, path)
 	}
+	const maxPanelResponse = 32 << 20
+	if resp.ContentLength > maxPanelResponse {
+		resp.Body.Close()
+		c.apiFailure.Add(1)
+		return nil, errors.New("面板响应超过大小限制")
+	}
+	resp.Body = &boundedPanelBody{body: resp.Body, remaining: maxPanelResponse}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		c.apiSuccess.Add(1)
@@ -641,6 +669,27 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 	}
 	return resp, nil
 }
+
+type boundedPanelBody struct {
+	body      io.ReadCloser
+	remaining int64
+}
+
+func (b *boundedPanelBody) Read(p []byte) (int, error) {
+	if b.remaining == 0 && len(p) != 0 {
+		var extra [1]byte
+		n, err := b.body.Read(extra[:])
+		if n != 0 {
+			return 0, errors.New("面板响应超过大小限制")
+		}
+		return 0, err
+	}
+	n, err := b.body.Read(p[:min(int64(len(p)), b.remaining)])
+	b.remaining -= int64(n)
+	return n, err
+}
+
+func (b *boundedPanelBody) Close() error { return b.body.Close() }
 
 // 请求失败只保留接口路径与底层原因，避免认证查询参数进入调用方日志。
 func panelRequestError(err error, method, path string) error {

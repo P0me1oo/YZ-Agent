@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestUpgradeRejectsMalformedTargetBeforeDownload(t *testing.T) {
+	for _, version := range []string{"dev", "v01.13.0", "v2.40.1-beta.1"} {
+		t.Run(version, func(t *testing.T) {
+			paths, ops := upgradeFixture(t)
+			ops.download = func(string, string) error {
+				t.Fatal("目标版本无效时仍尝试下载")
+				return nil
+			}
+			if _, err := upgradeBinaries(paths, version, ops); upgradeErrorCode(err) != "latest_version_invalid" {
+				t.Fatalf("未在升级入口拒绝无效目标版本: %v", err)
+			}
+			requireNoUpgradeStage(t, paths)
+		})
+	}
+}
+
 func TestWrongReleaseVersionCannotReplaceOrMigrateInstallation(t *testing.T) {
 	for _, output := range []string{"yz-agent v0.0.1", "xboard-node v0.0.1", "invalid", "yz-agent dev"} {
 		t.Run(output, func(t *testing.T) {

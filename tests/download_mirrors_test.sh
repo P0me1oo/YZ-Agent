@@ -138,6 +138,44 @@ verify_release_checksum "$TEST_ROOT/unverified-agent" yz-agent-linux-amd64
     stage_binary
 )
 
+# 两种程序都只使用显式本地来源。当前目录的同名文件存在时仍走下载路径。
+(
+    BIN_STAGE_DIR="$TEST_ROOT/explicit-sources/stage" ARCH=amd64
+    RELEASE_VERSION=v1.13-yz.24 BIN_DIR="$DEFAULT_BIN_DIR"
+    UPGRADE_FROM_RELEASE=0 BINARY_SOURCE="" CLI_BINARY_SOURCE=""
+    CHECKSUMS_UNAVAILABLE=0 TMP_DIR="$TEST_ROOT/explicit-sources/checksums"
+    mkdir -p "$BIN_STAGE_DIR" "$TMP_DIR"
+    cd "$TEST_ROOT/explicit-sources"
+    for name in yz-agent yz-agent-linux-amd64 xboard-node xboard-node-linux-amd64 xbctl xbctl-linux-amd64; do
+        printf 'unused fixture\n' > "$name"
+    done
+    printf '#!/usr/bin/env bash\nprintf "xboard-node v1.13-yz.24\\n"\n' > 'node fixture'
+    printf '#!/usr/bin/env bash\nprintf "xbctl v1.13-yz.24\\n"\n' > 'cli fixture'
+    {
+        printf '%s  xboard-node-linux-amd64\n' "$(sha256sum < 'node fixture' | awk '{print $1}')"
+        printf '%s  xbctl-linux-amd64\n' "$(sha256sum < 'cli fixture' | awk '{print $1}')"
+    } > "$TMP_DIR/SHA256SUMS"
+    download_release_file() {
+        case "${1##*/}" in
+            xboard-node-linux-amd64) cp 'node fixture' "$2" ;;
+            xbctl-linux-amd64) cp 'cli fixture' "$2" ;;
+            *) return 22 ;;
+        esac
+        printf '%s\n' "${1##*/}" >> downloaded
+    }
+    stage_binary
+    stage_xbctl
+    [ "$(cat downloaded)" = $'xboard-node-linux-amd64\nxbctl-linux-amd64' ]
+
+    rm -f "$BIN_STAGE_DIR/xboard-node" "$BIN_STAGE_DIR/xbctl" downloaded
+    BINARY_SOURCE='node fixture' CLI_BINARY_SOURCE='cli fixture'
+    stage_binary
+    stage_xbctl
+    cmp "$BINARY_SOURCE" "$BIN_STAGE_DIR/xboard-node"
+    cmp "$CLI_BINARY_SOURCE" "$BIN_STAGE_DIR/xbctl"
+    [ ! -e downloaded ]
+)
+
 # 已拿到清单但哈希不匹配时仍停止，不能转为自动跳过。
 if (
     CHECKSUMS_UNAVAILABLE=0

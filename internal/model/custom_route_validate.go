@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -45,6 +46,19 @@ func ValidateCustomRouteRules(rules []CustomRouteRule, kernelType string, availa
 		}
 		if err := validateNetworks(rule.Match.Networks, fmt.Sprintf("custom_route_rules[%d].match.networks", i)); err != nil {
 			return err
+		}
+		for _, values := range [][]string{rule.Match.IPCIDRs, rule.Match.SourceCIDRs} {
+			for _, value := range values {
+				if kernelType == "xray" && strings.HasPrefix(value, "geoip:") && len(value) > len("geoip:") {
+					continue
+				}
+				if _, err := netip.ParsePrefix(value); err == nil {
+					continue
+				}
+				if _, err := netip.ParseAddr(value); err != nil {
+					return fmt.Errorf("custom_route_rules[%d] has an unsupported IP or prefix: %q", i, value)
+				}
+			}
 		}
 
 		actionType := strings.ToLower(strings.TrimSpace(rule.Action.Type))

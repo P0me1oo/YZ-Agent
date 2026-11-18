@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,28 +51,21 @@ func RemoteAvailable() bool {
 	if _, err := exec.LookPath(name); err != nil {
 		return false
 	}
-	// 容器或手工运行进程不冒充受服务管理器管理的安装。
-	paths, err := loadInstallPaths(defaultBinDirFile)
-	if err != nil {
-		return false
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	a, err := os.Stat(executable)
-	if err != nil {
-		return false
-	}
-	b, err := os.Stat(paths.installedBinary())
-	if err != nil || !os.SameFile(a, b) {
-		return false
-	}
-	servicePath := "/etc/init.d/yz-agent"
+	// 已替换的旧二进制仍可请求重启，但只有服务管理器确认的节点进程有权限。
+	pid := strconv.Itoa(os.Getpid())
 	if manager == serviceManagerSystemd {
-		servicePath = "/etc/systemd/system/yz-agent.service"
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "systemctl", "show", "--property=MainPID", "--value", systemdServiceName).Output()
+		return err == nil && strings.TrimSpace(string(out)) == pid
 	}
-	return fileExists(servicePath)
+	name = "/run/" + serviceName + ".pid"
+	info, err := os.Lstat(name)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 || info.Size() > 64 {
+		return false
+	}
+	data, err := os.ReadFile(name)
+	return err == nil && strings.TrimSpace(string(data)) == pid
 }
 
 func readRemote(key string) (*remoteRecord, error) {
@@ -178,10 +172,11 @@ func startRemote(key string, operation panel.MachineOperation, available func() 
 }
 
 func launchRemote(key string, operation panel.MachineOperation) error {
-	executable, err := os.Executable()
+	paths, err := loadInstallPaths(defaultBinDirFile)
 	if err != nil {
 		return err
 	}
+	executable := paths.installedBinary()
 	manager, err := detectServiceManager()
 	if err != nil {
 		return err

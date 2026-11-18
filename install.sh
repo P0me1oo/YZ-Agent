@@ -192,7 +192,7 @@ load_health_port_from_config() {
         return
     fi
     local parsed
-    local reader="${PREVIOUS_CLI_PATH:-$CLI_PATH}"
+    local reader="${2:-${PREVIOUS_CLI_PATH:-$CLI_PATH}}"
     if [ -x "$reader" ]; then
         parsed=$("$reader" config health-port --config "$cfg_path" 2>/dev/null)
     else
@@ -381,7 +381,7 @@ usage() {
     --node-type, -T     指定节点协议类型
     --kernel, -k        xray 或 singbox；新建默认 singbox，VLESS 默认 xray，已有实例保留原内核
     --version           正式发布版本或 latest（默认：latest）
-    --binary            使用本地 yz-agent 程序，跳过下载
+    --binary            显式指定本地节点程序路径
     --xbctl-binary      为历史版本指定本地管理程序
     --bin-dir           程序目录，默认 /usr/local/bin；升级时可迁移已有安装
     --health-port       本机健康检查端口（默认：65530，0 表示禁用）
@@ -450,6 +450,10 @@ parse_args() {
                 shift 2
                 ;;
             --version)
+                if [ "$2" != latest ] && ! upgrade_version_key "$2" >/dev/null; then
+                    log_error "目标版本格式无效，请指定 latest、正式版本或受支持的历史版本" >&2
+                    return 1
+                fi
                 RELEASE_VERSION="$2"
                 shift 2
                 ;;
@@ -1079,34 +1083,6 @@ require_reconfigure_confirmation() {
     return
 }
 
-select_binary_source() {
-    if [ -n "$BINARY_SOURCE" ]; then
-        if [ ! -f "$BINARY_SOURCE" ]; then
-            log_error "未找到本地程序：$BINARY_SOURCE" >&2
-            exit 1
-        fi
-        echo "$BINARY_SOURCE"
-        return
-    fi
-    if [ -f "./yz-agent" ]; then
-        echo "./yz-agent"
-        return
-    fi
-    if [ -f "./yz-agent-linux-${ARCH}" ]; then
-        echo "./yz-agent-linux-${ARCH}"
-        return
-    fi
-    if [ -f "./xboard-node" ]; then
-        echo "./xboard-node"
-        return
-    fi
-    if [ -f "./xboard-node-linux-${ARCH}" ]; then
-        echo "./xboard-node-linux-${ARCH}"
-        return
-    fi
-    echo ""
-}
-
 cleanup_mirror_probe() {
     if [ -n "$MIRROR_PROBE_DIR" ] && [ -d "$MIRROR_PROBE_DIR" ]; then
         rm -rf "$MIRROR_PROBE_DIR"
@@ -1204,7 +1180,7 @@ query_latest_release() {
 download_release_file() {
     local url="$1" destination="$2" status index source checksum_url kind=checksum
     if [ "$GITHUB_TIMED_OUT" -eq 0 ]; then
-        if curl -q -fsSL --connect-timeout 10 --max-time 120 "$url" -o "$destination.part"; then
+        if curl -q -fsSL --connect-timeout 10 --max-time 120 --max-filesize 536870912 "$url" -o "$destination.part"; then
             if [[ "$url" != */SHA256SUMS ]] || grep -Eq '^[[:xdigit:]]{64}[[:blank:]]+\*?[^[:space:]]' "$destination.part"; then
                 mv "$destination.part" "$destination"
                 return
@@ -1243,7 +1219,7 @@ download_release_file() {
             cleanup_mirror_probe
             return 1
         fi
-        if curl -q -fsSL --connect-timeout 10 --max-time 120 "${source}${url}" -o "$destination.part"; then
+        if curl -q -fsSL --connect-timeout 10 --max-time 120 --max-filesize 536870912 "${source}${url}" -o "$destination.part"; then
             mv "$destination.part" "$destination" || { cleanup_mirror_probe; return 1; }
             cleanup_mirror_probe
             return 0
@@ -1326,17 +1302,16 @@ validate_staged_version() {
 
 stage_binary() {
     local staged="$BIN_STAGE_DIR/xboard-node"
-    local local_src
-    local_src=""
-    if [ "${UPGRADE_FROM_RELEASE:-0}" -ne 1 ]; then
-        local_src=$(select_binary_source)
-    fi
-    if [ -n "$local_src" ]; then
-        log_info "使用本地程序：${local_src}"
+    if [ "${UPGRADE_FROM_RELEASE:-0}" -ne 1 ] && [ -n "$BINARY_SOURCE" ]; then
+        if [ ! -f "$BINARY_SOURCE" ]; then
+            log_error "未找到本地程序：$BINARY_SOURCE" >&2
+            return 1
+        fi
+        log_info "使用本地程序：${BINARY_SOURCE}"
         if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ]; then
-            ln "$local_src" "$staged"
+            ln -- "$BINARY_SOURCE" "$staged"
         else
-            cp "$local_src" "$staged"
+            cp -- "$BINARY_SOURCE" "$staged"
         fi
     else
         download_release_checksums || return $?
@@ -1386,26 +1361,16 @@ stage_xbctl() {
         "$staged" config bin-dir >/dev/null
         return
     fi
-    local local_src=""
-    if [ "${UPGRADE_FROM_RELEASE:-0}" -eq 1 ]; then
-        local_src=""
-    elif [ -n "$CLI_BINARY_SOURCE" ]; then
+    if [ "${UPGRADE_FROM_RELEASE:-0}" -ne 1 ] && [ -n "$CLI_BINARY_SOURCE" ]; then
         if [ ! -f "$CLI_BINARY_SOURCE" ]; then
-            log_error "未找到历史版管理程序：$CLI_BINARY_SOURCE"
-            exit 1
+            log_error "未找到历史版管理程序：$CLI_BINARY_SOURCE" >&2
+            return 1
         fi
-        local_src="$CLI_BINARY_SOURCE"
-    elif [ -f "./xbctl" ]; then
-        local_src="./xbctl"
-    elif [ -f "./xbctl-linux-${ARCH}" ]; then
-        local_src="./xbctl-linux-${ARCH}"
-    fi
-    if [ -n "$local_src" ]; then
-        log_info "使用本地历史版管理程序：${local_src}"
+        log_info "使用本地历史版管理程序：${CLI_BINARY_SOURCE}"
         if [ "${YZ_INSTALL_PARENT_LOCK:-}" = 1 ]; then
-            ln "$local_src" "$staged"
+            ln -- "$CLI_BINARY_SOURCE" "$staged"
         else
-            cp "$local_src" "$staged"
+            cp -- "$CLI_BINARY_SOURCE" "$staged"
         fi
     else
         local artifact="xbctl-linux-${ARCH}"
@@ -1773,6 +1738,7 @@ perform_install() {
     log_step "保存恢复文件并安装"
     backup_existing_state
     install_staged_files
+    load_health_port_from_config "$CONFIG_FILE" "$CLI_PATH"
     log_step "启动服务并检查运行状态"
     start_service
     finish_install
@@ -1860,6 +1826,7 @@ perform_upgrade() {
     cleanup_installation_firewall
     migrate_install_root
     replace_binary_files
+    load_health_port_from_config "$CONFIG_FILE" "$CLI_PATH"
     install -m "$(service_file_mode)" "$TMP_DIR/service" "$SERVICE_PATH"
     service_reload
     if [ "$NAME_CHANGED" -eq 1 ] && [ "$OLD_SERVICE_ENABLED" -eq 1 ]; then service_enable; fi
@@ -1895,7 +1862,13 @@ perform_uninstall() {
     confirm_uninstall
     log_step "停止服务并移除程序"
     if [ -f "$SERVICE_PATH" ]; then
-        service_stop >/dev/null 2>&1 || true
+        service_stop >/dev/null 2>&1 || return 1
+    fi
+    if [ "$APP_NAME" = yz-agent ] && [ -x "$BINARY_PATH" ]; then
+        FIREWALL_CLEANUP_PROGRAM="$BINARY_PATH"
+        cleanup_installation_firewall || return 1
+    fi
+    if [ -f "$SERVICE_PATH" ]; then
         service_disable >/dev/null 2>&1 || true
         rm -f "$SERVICE_PATH"
         service_reload || true
@@ -1949,7 +1922,7 @@ perform_status() {
 }
 
 main() {
-    parse_args "$@"
+    parse_args "$@" || return 1
     case "$ACTION" in
         help)
             usage

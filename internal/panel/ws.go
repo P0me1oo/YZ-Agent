@@ -184,18 +184,20 @@ type WSClient struct {
 // token and nodeID are used for authentication via query parameters.
 func NewWSClient(wsURL string, token string, nodeID int, cfg WSClientConfig, onEvent func(WSEvent), onStatus func(WSStatusChange), onPing func() map[string]interface{}) *WSClient {
 	// Apply defaults
-	if cfg.StatusInterval == 0 {
+	if cfg.StatusInterval <= 0 {
 		cfg.StatusInterval = 10 * time.Second
 	}
-	if cfg.HandshakeTimeout == 0 {
+	if cfg.HandshakeTimeout <= 0 {
 		cfg.HandshakeTimeout = 15 * time.Second
 	}
-	if cfg.BackoffInitial == 0 {
+	if cfg.BackoffInitial <= 0 {
 		cfg.BackoffInitial = time.Second
 	}
-	if cfg.BackoffMax == 0 {
+	if cfg.BackoffMax <= 0 {
 		cfg.BackoffMax = 60 * time.Second
 	}
+	cfg.BackoffMax = min(cfg.BackoffMax, time.Hour)
+	cfg.BackoffInitial = min(cfg.BackoffInitial, cfg.BackoffMax)
 	if cfg.HeartbeatTimeout <= 0 {
 		cfg.HeartbeatTimeout = 130 * time.Second
 		if cfg.Realtime {
@@ -235,11 +237,8 @@ func (w *WSClient) Run(ctx context.Context) {
 			w.notifyStatus(false)
 		}
 
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			nlog.Core().Warn("ws disconnected", "error", err)
-			if !wasConnected {
-				w.notifyStatus(false)
-			}
 		}
 
 		select {
@@ -254,7 +253,7 @@ func (w *WSClient) Run(ctx context.Context) {
 		}
 
 		// Apply exponential backoff with jitter to prevent thundering herd.
-		jitter := time.Duration(rand.Int63n(int64(backoff / 5)))
+		jitter := time.Duration(rand.Int63n(max(1, int64(backoff/5))))
 		wait := backoff + jitter
 
 		timer := time.NewTimer(wait)
@@ -291,7 +290,7 @@ func (w *WSClient) connect(ctx context.Context) error {
 	dialer := websocket.Dialer{HandshakeTimeout: w.cfg.HandshakeTimeout}
 	conn, _, err := dialer.DialContext(ctx, u.String(), nil)
 	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		return fmt.Errorf("dial: %w", panelRequestError(err, "GET", "WebSocket"))
 	}
 	defer conn.Close()
 	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
