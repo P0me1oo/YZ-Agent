@@ -1,0 +1,36 @@
+{
+  "source_commit": "c9a7d18e4d3207197ef35ce16a817185cbd78326",
+  "version": "v2.41.0",
+  "go": "1.27.3",
+  "compiler": "Zig 0.15.2",
+  "tested_packages": 41,
+  "top_level_pass": 1081,
+  "skipped_tests": [
+    [
+      "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "TestNativeClientProbe"
+    ],
+    [
+      "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "TestNativeFirewallLifecycle"
+    ],
+    [
+      "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "TestNativeSourceFirewallLifecycle"
+    ],
+    [
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+      "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+    ],
+    [
+      "github.com/P0me1oo/YZ-Agent/internal/service",
+      "TestNativeSourceSOCKSProbe"
+    ],
+    [
+      "github.com/P0me1oo/YZ-Agent/internal/service",
+      "TestNativeSourceSOCKSRuntime"
+    ]
+  ],
+  "race_detected": false,
+  "source_note": "源码内容在测试期间保持一致；发布提交固定上述相同源码，正式构建 vcs.modified=false。"
+}
