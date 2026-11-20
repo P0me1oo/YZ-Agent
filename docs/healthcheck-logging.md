@@ -1,5 +1,34 @@
 # 健康检查日志修复
 
+## v2.42.0 双栈监听识别修复
+
+面板下发 `0.0.0.0` 时，Xray 的 TCP 监听可能实际绑定到 IPv6 通配地址 `::`，同时接受 IPv4 连接。此前仅比较地址族，导致客户端可以使用、默认出站与中转检查正常，本机监听却显示失败。
+
+Linux 遇到这种跨地址族匹配时，读取该进程实际监听套接字的 `IPV6_V6ONLY`：只有值为 `0` 才确认覆盖 IPv4，值为 `1` 时仍判 IPv4 监听不匹配。先复制描述符，再核对实际地址、端口、TCP 类型和监听状态，避免检查期间描述符关闭或复用导致错误。已经关闭或复用为其它对象的记录不算有效监听；无法读取设置时按原规则显示未检查。
+
+保留同一进程归属、当前线程网络空间、HOST_PROC 隔离及取消检查，不建立探测连接，也不更改核心监听或系统网络设置。非 Linux 平台遇到需要核对双栈设置的监听时返回未检查，不假定 IPv6 通配地址一定接受 IPv4。
+
+回归覆盖强制双栈与仅 IPv6、Go 自动选择的双栈监听、IPv4 映射地址、重复读取与关闭、旧描述符复用为普通文件、UDP、未监听套接字、错误地址和端口、其它进程归属。双核心 Reality 用例采用面板的 IPv4 通配配置，验证实际监听识别、普通与隐私日志、检查不制造握手错误及核心停止后的结果。
+
+2026-11-20，Go 1.27.4 / Linux amd64 下验证：新增双栈用例在旧实现稳定失败，修复后健康检查与服务层测试通过；双核心 Reality 的普通／隐私模式及不计用户流量的出站检查通过；相关静态检查、Linux arm64 与 Windows amd64 的健康检查模块编译通过。
+
+```sh
+go test -mod=readonly -count=1 -timeout 5m \
+  -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' \
+  ./internal/healthcheck ./internal/service
+go test -mod=readonly -count=1 -timeout 3m \
+  -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' \
+  -run '^(TestHealthListenerInspectionKeepsRealityLogsForRealConnections|TestOperationsProbeBothCoresExcludesUserAccounting)$' \
+  ./internal/kernel/singbox
+go vet -mod=readonly \
+  -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' \
+  ./internal/healthcheck ./internal/service ./internal/kernel/singbox
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -mod=readonly ./internal/healthcheck
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -mod=readonly ./internal/healthcheck
+```
+
+初次竞态检查因缺少 C 编译器未启动；发布阶段在任务临时目录校验并使用 Zig 0.15.2 后，监听专项竞态检查已通过。完整发布验证与安装包见[发布记录](release-v2.42.0.md)。核心与模块依赖保持原固定版本，运行节点未在本次发布中更新。
+
 ## v2.40.1 网络空间监听归属修复
 
 发布完整检查确认：WireGuard 创建隔离网络空间的锁定线程可能是进程主线程，线程退出后 `/proc/<进程编号>/net/tcp` 不再代表运行线程的网络空间。此前仅使用进程编号读取时，真实 Reality 监听会被误报为缺失；独立场景通过而前序 WireGuard 场景后失败。

@@ -161,6 +161,10 @@ systemd 日志由 journal 提供；OpenRC 的 `yz-agent` 日志写入 `/var/log/
 - 自定义出站：[docs-custom-outbounds.md](docs-custom-outbounds.md)
 - DNS 服务商与 ACME DNS-01：[docs-dns-providers.md](docs-dns-providers.md)
 
+## YZboard Next 的 Shadowsocks 插件
+
+Xray 入站支持 `v2ray-plugin` WebSocket（可带 TLS）。面板需下发 `plugin: v2ray-plugin`、`plugin_opts: mode=websocket;mux=0`、`network: ws` 及对应路径、Host 和 TLS 配置；客户端同步禁用插件复用。插件链路仅保证 TCP。sing-box 入站和其他插件组合会在配置校验时明确拒绝。
+
 ## 许可证
 
 MPL-2.0.

@@ -39,7 +39,8 @@ func listener(
 		return false, err
 	}
 	for _, connection := range connections {
-		if connection.Pid != pid || connection.Status != "LISTEN" || connection.Laddr.Port != uint32(wanted.Port()) {
+		ownedListener := connection.Pid == pid && connection.Status == "LISTEN"
+		if !ownedListener || connection.Laddr.Port != uint32(wanted.Port()) {
 			continue
 		}
 		bound, err := netip.ParseAddr(connection.Laddr.IP)
@@ -49,6 +50,17 @@ func listener(
 		bound, target := bound.Unmap(), wanted.Addr().Unmap()
 		if bound == target || bound.IsUnspecified() && bound.Is4() == target.Is4() {
 			return true, nil
+		}
+		ipv6Wildcard := bound.Is6() && bound.IsUnspecified()
+		if !ipv6Wildcard || !target.Is4() {
+			continue
+		}
+		listening, err := dualStackListener(connection)
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if err != nil || listening {
+			return listening, err
 		}
 	}
 	return false, nil

@@ -336,7 +336,11 @@ func buildInbound(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Us
 	case "trojan":
 		return buildTrojan(base, kcfg, nc, users, tc)
 	case "shadowsocks":
-		return buildShadowsocks(base, nc, users)
+		inbound := buildShadowsocks(base, nc, users)
+		if nc.Plugin == "v2ray-plugin" {
+			applyStreamSettings(inbound, kcfg, nc, tc)
+		}
+		return inbound
 	case "socks":
 		return buildSocks(base, users)
 	case "http":

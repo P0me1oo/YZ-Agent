@@ -76,6 +76,12 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if err := validateXHTTPNode(n); err != nil {
 		return err
 	}
+	if n.Plugin != "" {
+		supported := n.Protocol == "shadowsocks" && kernelType == "xray" && n.Plugin == "v2ray-plugin"
+		if !supported || n.Network != "ws" || n.PluginOpt != "mode=websocket;mux=0" {
+			return fmt.Errorf("SS 插件需要 Xray、v2ray-plugin、WebSocket 传输及 mode=websocket;mux=0")
+		}
+	}
 	if err := validateTransportKernel(n.Network, kernelType); err != nil {
 		return err
 	}

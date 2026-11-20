@@ -54,6 +54,8 @@ func TestHealthListenerInspectionKeepsRealityLogsForRealConnections(t *testing.T
 				t.Cleanup(stop)
 				fixture := realitytest.Start(t, true)
 				node := runtimeNode(t, "vless")
+				// 复现面板的 IPv4 通配配置，Xray 可实际创建 IPv6 双栈监听。
+				node.ListenIP = "0.0.0.0"
 				node.TLS = 2
 				node.TLSSettings = map[string]any{
 					"server_name": "reality.test",
@@ -75,8 +77,11 @@ func TestHealthListenerInspectionKeepsRealityLogsForRealConnections(t *testing.T
 				t.Cleanup(core.Stop)
 				address := net.JoinHostPort("127.0.0.1", strconv.Itoa(node.ServerPort))
 				for range 3 {
-					if ok, err := healthcheck.Listener(t.Context(), address); !ok || err != nil {
-						t.Fatalf("未确认真实 Reality 监听：%v %v", ok, err)
+					for _, host := range []string{node.ListenIP, "127.0.0.1"} {
+						wanted := net.JoinHostPort(host, strconv.Itoa(node.ServerPort))
+						if ok, err := healthcheck.Listener(t.Context(), wanted); !ok || err != nil {
+							t.Fatalf("未确认真实 Reality 监听 %s：%v %v", wanted, ok, err)
+						}
 					}
 				}
 				select {
