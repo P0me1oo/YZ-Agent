@@ -1,0 +1,169 @@
+{
+  "version": "v2.42.0",
+  "go": "1.27.4",
+  "compiler": "Zig 0.15.2",
+  "full": {
+    "passed_packages": [
+      "github.com/P0me1oo/YZ-Agent/cmd/yz-relay-perf",
+      "github.com/P0me1oo/YZ-Agent/internal/accesslog",
+      "github.com/P0me1oo/YZ-Agent/internal/agentcli",
+      "github.com/P0me1oo/YZ-Agent/internal/agentlog",
+      "github.com/P0me1oo/YZ-Agent/internal/autospeed",
+      "github.com/P0me1oo/YZ-Agent/internal/balancer",
+      "github.com/P0me1oo/YZ-Agent/internal/binding",
+      "github.com/P0me1oo/YZ-Agent/internal/buildinfo",
+      "github.com/P0me1oo/YZ-Agent/internal/cert",
+      "github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders",
+      "github.com/P0me1oo/YZ-Agent/internal/config",
+      "github.com/P0me1oo/YZ-Agent/internal/controlplane",
+      "github.com/P0me1oo/YZ-Agent/cmd/yz-agent",
+      "github.com/P0me1oo/YZ-Agent/internal/deviceip",
+      "github.com/P0me1oo/YZ-Agent/internal/devicegate",
+      "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "github.com/P0me1oo/YZ-Agent/internal/healthcheck",
+      "github.com/P0me1oo/YZ-Agent/internal/installroot",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel",
+      "github.com/P0me1oo/YZ-Agent/internal/directwg",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+      "github.com/P0me1oo/YZ-Agent/internal/limiter",
+      "github.com/P0me1oo/YZ-Agent/internal/logrotate",
+      "github.com/P0me1oo/YZ-Agent/internal/machine",
+      "github.com/P0me1oo/YZ-Agent/internal/machinetraffic",
+      "github.com/P0me1oo/YZ-Agent/internal/model",
+      "github.com/P0me1oo/YZ-Agent/internal/monitor",
+      "github.com/P0me1oo/YZ-Agent/internal/nlog",
+      "github.com/P0me1oo/YZ-Agent/internal/panel",
+      "github.com/P0me1oo/YZ-Agent/internal/portset",
+      "github.com/P0me1oo/YZ-Agent/internal/privacy",
+      "github.com/P0me1oo/YZ-Agent/internal/realityrelay",
+      "github.com/P0me1oo/YZ-Agent/internal/realityscan",
+      "github.com/P0me1oo/YZ-Agent/internal/scheduling",
+      "github.com/P0me1oo/YZ-Agent/internal/service",
+      "github.com/P0me1oo/YZ-Agent/internal/sourcepolicy",
+      "github.com/P0me1oo/YZ-Agent/internal/systemwg",
+      "github.com/P0me1oo/YZ-Agent/internal/timesync",
+      "github.com/P0me1oo/YZ-Agent/internal/tracker",
+      "github.com/P0me1oo/YZ-Agent/internal/xhttp",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/singbox"
+    ],
+    "top_level_pass": 1087,
+    "skipped_tests": [
+      [
+        "github.com/P0me1oo/YZ-Agent/internal/firewall",
+        "TestNativeClientProbe"
+      ],
+      [
+        "github.com/P0me1oo/YZ-Agent/internal/firewall",
+        "TestNativeFirewallLifecycle"
+      ],
+      [
+        "github.com/P0me1oo/YZ-Agent/internal/firewall",
+        "TestNativeSourceFirewallLifecycle"
+      ],
+      [
+        "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+        "TestAllocateLoopbackPort_SkipsOccupiedAndReserved"
+      ],
+      [
+        "github.com/P0me1oo/YZ-Agent/internal/service",
+        "TestNativeSourceSOCKSProbe"
+      ],
+      [
+        "github.com/P0me1oo/YZ-Agent/internal/service",
+        "TestNativeSourceSOCKSRuntime"
+      ]
+    ],
+    "race_detected": false
+  },
+  "dependencies": {
+    "passed_packages": [
+      "github.com/anytls/sing-anytls/session",
+      "github.com/sagernet/sing-vmess/vless",
+      "github.com/sagernet/sing-shadowsocks/shadowaead_2022",
+      "github.com/xtls/xray-core/proxy/shadowsocks_2022",
+      "github.com/sagernet/sing-box/common/listener",
+      "github.com/xtls/xray-core/transport/internet/hysteria",
+      "github.com/sagernet/sing-box/transport/v2raygrpclite",
+      "github.com/sagernet/sing-box/third_party/sing-shadowsocks/shadowaead_2022"
+    ],
+    "top_level_pass": 43,
+    "skipped_tests": [],
+    "race_detected": false
+  },
+  "mihomo": {
+    "passed_packages": [
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/singbox",
+      "github.com/P0me1oo/YZ-Agent/internal/directwg"
+    ],
+    "top_level_pass": 2,
+    "skipped_tests": [],
+    "race_detected": false
+  },
+  "installer": [
+    {
+      "script": "install_output_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "install_dependencies_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "upgrade_version_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "download_mirrors_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "install_service_manager_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "install_health_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "install_kernel_defaults_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "install_privacy_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "install_paths_test.sh",
+      "exit_code": 0
+    },
+    {
+      "script": "install_name_migration_test.sh",
+      "exit_code": 0
+    }
+  ],
+  "static_check": {
+    "passed": [
+      "internal/healthcheck",
+      "internal/model",
+      "internal/kernel/singbox",
+      "internal/service"
+    ],
+    "existing_warning": "internal/kernel/xray/dispatcher.go:267 possible context leak; unchanged in this release"
+  },
+  "source_note": "测试期间产品源码保持一致；发布提交固定相同源码，构建使用干净提交。",
+  "source_commit": "01a591230317864929a3c8e78dcfad76656f8efc",
+  "commands": {
+    "full": "CGO_ENABLED=1 CC='zig cc -target x86_64-linux-gnu.2.36' go test -json -mod=readonly -race -p 2 -count=1 -timeout 20m -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api' ./...",
+    "dependencies": "go test -mod=readonly -race -p 2 -count=1，正式标签；包列表见 dependencies.passed_packages",
+    "mihomo": "WG_MIHOMO_BIN=<已校验的 v1.19.31 程序> go test -mod=readonly -race -p 1 -count=1 -timeout 3m -tags 'with_quic with_utls with_wireguard with_gvisor with_acme with_clash_api with_mihomo_integration' -run '^(TestWireGuardRealityClients|TestDirectWireGuardMihomo)$' ./internal/kernel/singbox ./internal/directwg"
+  },
+  "github_actions": {
+    "runs": [
+      44660095336,
+      44660095190
+    ],
+    "status": "account locked due to billing issue",
+    "test_steps_executed": 0,
+    "docker": "skipped"
+  }
+}

@@ -1,6 +1,6 @@
 # YZ-Agent 兼容矩阵
 
-v2.42.0 包含 Linux 双栈监听检查修复，以及 Xray 的 SS2022 v2ray-plugin WebSocket／TLS 入站适配。客户端必须关闭插件复用，插件链路仅保证 TCP。正式版本、固定源码、检查与附件以[发布记录](docs/release-v2.42.0.md)为准；核心保持 YZ-sing-box v1.16.0 和 YZ-Xray-core v26.12.0。以下保留历史版本的验证记录。
+[v2.42.0](docs/release-v2.42.0.md) 已正式发布并设为 Latest，包含 Linux 双栈监听检查修复，以及 Xray 的 SS2022 v2ray-plugin WebSocket／TLS 入站适配。客户端必须关闭插件复用，插件链路仅保证 TCP。正式版本、固定源码、检查与附件以[发布记录](docs/release-v2.42.0.md)为准；核心保持 YZ-sing-box v1.16.0 和 YZ-Xray-core v26.12.0。以下保留历史版本的验证记录。
 
 ## v2.41.0 审查修复正式发布（2026-11-19）
 
