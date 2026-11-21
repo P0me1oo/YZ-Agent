@@ -884,3 +884,28 @@ func TestExtractECHInbound(t *testing.T) {
 		})
 	}
 }
+
+func TestNaiveUUIDIdentityRoundTrip(t *testing.T) {
+	n := &panel.NodeConfig{Protocol: "naive", ServerPort: 443, TLS: 1, NaiveUsername: "uuid"}
+	spec := testNodeSpec(n)
+	if spec.ToPanel().NaiveUsername != "uuid" {
+		t.Fatal("Naive username mode lost")
+	}
+	inbound := buildInbound(spec, testUsers, kernel.TLSCert{CertPEM: []byte("CERT"), KeyPEM: []byte("KEY")})
+	users := inbound["users"].([]M)
+	if users[0]["username"] != testUsers[0].UUID {
+		t.Fatal("authentication identity differs from accounting identity")
+	}
+	tracker := NewConnTracker(0)
+	tracker.setNodeUsers(spec, testUsers)
+	canonical, id, _, _, allowed := tracker.resolveUser(testUsers[0].UUID, nil)
+	if !allowed || id != testUsers[0].ID || canonical != testUsers[0].UUID {
+		t.Fatal("Naive authenticated user rejected")
+	}
+	rotated := append([]model.UserSpec{}, testUsers...)
+	rotated[0].UUID = "22222222-3333-4444-5555-666666666666"
+	tracker.setNodeUsers(spec, rotated)
+	if _, _, _, _, allowed = tracker.resolveUser(testUsers[0].UUID, nil); allowed {
+		t.Fatal("rotated Naive session accepted")
+	}
+}

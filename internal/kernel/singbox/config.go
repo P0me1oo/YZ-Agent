@@ -840,8 +840,12 @@ func buildNaive(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TL
 
 	userList := make([]M, 0, len(users))
 	for _, u := range users {
+		username := strconv.Itoa(u.ID)
+		if nc.NaiveUsername == "uuid" {
+			username = u.UUID
+		}
 		userList = append(userList, M{
-			"username": strconv.Itoa(u.ID),
+			"username": username,
 			"password": u.UUID,
 		})
 	}

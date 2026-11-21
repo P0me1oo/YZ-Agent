@@ -209,7 +209,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 func (c *Client) reportRealtime(ctx context.Context, original map[string]interface{}) error {
 	// 流量重试不再携带原批次中的旧设备和负载状态。
 	payload := make(map[string]interface{})
-	for _, name := range []string{"report_id", "traffic", "relay_traffic", "relay_user_traffic", "limit_events"} {
+	for _, name := range []string{"report_id", "traffic", "relay_traffic", "relay_user_traffic", "traffic_accounting", "limit_events"} {
 		if value, ok := original[name]; ok {
 			payload[name] = value
 		}

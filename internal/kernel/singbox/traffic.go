@@ -70,7 +70,7 @@ func (c relayCounters) download(n int64) {
 }
 
 func (t *trafficTotals) relayCounters(userID, nodeID int) relayCounters {
-	if userID <= 0 || nodeID <= 0 {
+	if userID <= 0 || nodeID < 0 {
 		return relayCounters{}
 	}
 	t.mu.Lock()

@@ -148,6 +148,9 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 					settings = v.RealitySettings
 				}
 				tls := M{"enabled": true}
+				if certificate, _ := settings["certificate"].(string); v.TLS == 1 && certificate != "" {
+					tls["certificate"] = []string{certificate}
+				}
 				if name, _ := settings["server_name"].(string); name != "" {
 					tls["server_name"] = name
 				}
@@ -394,6 +397,7 @@ func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpe
 	t.usersMu.Lock()
 	t.uuidMap, t.identities, t.relayNodes = userMap, identities, nodes
 	t.relayEntry = nc.IsRelayEntry()
+	t.relayAccounting = nc.IsRelayEntry() && nc.Relay.Accounting == "routes"
 	t.anonymous = nc.IsDirectWireGuard() || nc.IsRelayLanding()
 	for _, uid := range userMap {
 		if t.users[uid] == nil {
@@ -426,6 +430,10 @@ func (t *ConnTracker) resolveUser(name string, outbound adapter.Outbound) (strin
 	}
 	// 旧 QUIC 会话保留原认证名称；普通节点也必须拒绝已删除或轮换的身份。
 	allowed := uid > 0 || t.anonymous
+	countDirect := t.relayAccounting
 	t.usersMu.RUnlock()
+	if nodeID == 0 && !countDirect {
+		return canonical, uid, user, relayCounters{}, allowed
+	}
 	return canonical, uid, user, t.traffic.relayCounters(uid, nodeID), allowed
 }

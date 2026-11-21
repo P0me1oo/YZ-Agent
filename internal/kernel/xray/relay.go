@@ -187,6 +187,10 @@ func buildRelayVLESSClientStream(v *model.RelayVLESSConfig) M {
 	switch v.TLS {
 	case 1:
 		tlsSettings := M{}
+		if certificate := stringSetting(v.TLSSettings, "certificate"); certificate != "" {
+			tlsSettings["certificates"] = []M{{"certificate": []string{certificate}, "usage": "verify"}}
+			tlsSettings["disableSystemRoot"] = true
+		}
 		if xhttp.Is(v.Network) {
 			if alpn := xhttp.ALPN(v.TLSSettings); len(alpn) > 0 {
 				tlsSettings["alpn"] = alpn

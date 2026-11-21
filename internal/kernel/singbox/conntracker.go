@@ -141,20 +141,21 @@ func (u *userStats) aliveIPList() map[string]bool {
 //   - Close callback to decrement IP refcounts
 //   - Per-connection rate limit token accumulation (amortized WaitN)
 type ConnTracker struct {
-	accessLog    *accesslog.Recorder
-	blockLog     *accesslog.Recorder
-	relayAccess  kernel.RelayAccess
-	deviceFilter *deviceip.Filter
-	deviceGate   atomic.Pointer[devicegate.Manager]
-	traffic      *trafficTotals
-	usersMu      sync.RWMutex
-	users        map[int]*userStats  // userID → stats
-	uuidMap      map[string]int      // UUID → userID (for lookup in RoutedConnection)
-	connMap      map[string]net.Conn // connID → conn (only for force-close support)
-	identities   map[string]relayIdentity
-	relayNodes   map[string]int
-	relayEntry   bool
-	anonymous    bool // 普通 WG 和私有中转落地由外层认证，不具有面板用户名称。
+	accessLog       *accesslog.Recorder
+	blockLog        *accesslog.Recorder
+	relayAccess     kernel.RelayAccess
+	deviceFilter    *deviceip.Filter
+	deviceGate      atomic.Pointer[devicegate.Manager]
+	traffic         *trafficTotals
+	usersMu         sync.RWMutex
+	users           map[int]*userStats  // userID → stats
+	uuidMap         map[string]int      // UUID → userID (for lookup in RoutedConnection)
+	connMap         map[string]net.Conn // connID → conn (only for force-close support)
+	identities      map[string]relayIdentity
+	relayNodes      map[string]int
+	relayEntry      bool
+	relayAccounting bool
+	anonymous       bool // 普通 WG 和私有中转落地由外层认证，不具有面板用户名称。
 
 	// relaySources 按用户和实际出网节点登记来源 IP 引用计数，只在中转入口使用。
 	relaySourceMu sync.Mutex

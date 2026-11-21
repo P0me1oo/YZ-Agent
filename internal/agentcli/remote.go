@@ -59,13 +59,7 @@ func RemoteAvailable() bool {
 		out, err := exec.CommandContext(ctx, "systemctl", "show", "--property=MainPID", "--value", systemdServiceName).Output()
 		return err == nil && strings.TrimSpace(string(out)) == pid
 	}
-	name = "/run/" + serviceName + ".pid"
-	info, err := os.Lstat(name)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 || info.Size() > 64 {
-		return false
-	}
-	data, err := os.ReadFile(name)
-	return err == nil && strings.TrimSpace(string(data)) == pid
+	return openRCManagedProcess(serviceName)
 }
 
 func readRemote(key string) (*remoteRecord, error) {

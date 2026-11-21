@@ -852,3 +852,21 @@ func TestBuildConfig_RealityAcceptedByXray(t *testing.T) {
 		}
 	}
 }
+
+func TestSocksTLSAndExplicitALPN(t *testing.T) {
+	for _, protocol := range []string{"socks", "http", "trojan", "vless"} {
+		t.Run(protocol, func(t *testing.T) {
+			n := &model.NodeSpec{Protocol: protocol, ServerPort: 24443, Network: "tcp", TLS: 1, TLSSettings: map[string]any{"server_name": "proxy.example", "alpn": []string{"http/1.1"}}}
+			inbound := buildInbound(testKernelCfg, n, testUsers, kernel.TLSCert{CertPEM: []byte("CERT"), KeyPEM: []byte("KEY")})
+			stream, ok := inbound["streamSettings"].(M)
+			if !ok || stream["security"] != "tls" {
+				t.Fatal("TLS setting ignored")
+			}
+			tls := stream["tlsSettings"].(M)
+			alpn := tls["alpn"].([]string)
+			if len(alpn) != 1 || alpn[0] != "http/1.1" {
+				t.Fatal("ALPN setting ignored")
+			}
+		})
+	}
+}

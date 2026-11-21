@@ -2,6 +2,12 @@
 
 [v2.42.0](docs/release-v2.42.0.md) 已正式发布并设为 Latest，包含 Linux 双栈监听检查修复，以及 Xray 的 SS2022 v2ray-plugin WebSocket／TLS 入站适配。客户端必须关闭插件复用，插件链路仅保证 TCP。正式版本、固定源码、检查与附件以[发布记录](docs/release-v2.42.0.md)为准；核心保持 YZ-sing-box v1.16.0 和 YZ-Xray-core v26.12.0。以下保留历史版本的验证记录。
 
+## v2.43.0 OpenRC 远程管理修复（2026-11-21，本地未发布、未部署）
+
+修复 v2.41.0 引入的 OpenRC 进程识别错误：`supervise-daemon` 的 PID 文件保存守护进程编号，Agent 是其子进程。新增核对 OpenRC 服务保存的实际子进程、父进程关系和守护程序身份；进程记录必须为当前运行用户持有的受保护普通文件，拒绝符号链接、可写或异常记录。systemd 继续使用服务主进程编号判断。
+
+配套面板及两个核心的固定依赖不变。当前源码候选版本沿用工作区已有的 v2.43.0；修复机制、验证和首次恢复边界见 [OpenRC 远程管理](docs/openrc-remote-management.md)。尚未发布安装包或更新 SID 56。
+
 ## v2.41.0 审查修复正式发布（2026-11-19）
 
 固定源码 `c9a7d18e4d3207197ef35ce16a817185cbd78326`。Go 1.27.3、Linux amd64、Zig 0.15.2 和正式功能标签下，41 包完整竞态回归的 1081 个顶层用例、10 组安装脚本检查通过，6 项既有环境用例按条件跳过；见[完整清单](docs/release-v2.41.0-tests.json)。双架构 13 份正式附件匿名下载与摘要核验通过，构建固定到干净提交，见[发布](docs/release-v2.41.0.md)及[附件](docs/release-v2.41.0-verification.json)。
@@ -1967,3 +1973,14 @@ make build-all VERSION=v2.30.0
 - Linux amd64、arm64 构建验证通过，属于当前未提交工作区验证产物，非已发布附件。临时文件位于 `/tmp/yz-operations-20261107-4v0nF4`。
 
 没有安装系统软件、开放防火墙、提交、推送、发布或操作生产。预览仅监听源码服务器本机 `127.0.0.1:4187`，每次启动24小时后自动停止。
+
+## 2.43.0 工作区：YZboard Next 中转
+
+尚未发布。新增可选完整线路计费和内部 TLS 公有证书验证，核心依赖不变。模型、通信、计数器、双核心和服务的相关竞态测试通过。使用 OVH-CA 面板、Huawei-SG sing-box、MeowBox-US Xray、YT-HK 两种客户端完成 270 项中转与生命周期真机检查；面板工作区验收见 `YZboard-Next/docs/relay-acceptance.md`。本次仅运行独立临时实例，未更新原有节点服务。
+
+
+## YZboard Next 协议补齐联调（2026-11-20）
+
+Next 的 Naive 下发 `naive_username=uuid`，与连接跟踪使用的 UUID 身份一致，凭据轮换撤销旧身份；未发送该字段的旧面板保留数字用户名。Xray SOCKS 支持显式 TLS，通用 TLS 配置保留 ALPN。
+
+本次协议联调的 HTTPUpgrade 首包修复位于相邻 YZ-sing-box 工作区。正式 go.mod 尚未切换，联调使用 Next 的 `tools/build-protocol-test-agent.sh` 创建临时模块文件显式替换核心，不修改正式依赖或已有模块缓存。实际结果与远端授权状态见 Next 的 `docs/protocol-expansion-acceptance.md`。

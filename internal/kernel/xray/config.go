@@ -342,7 +342,11 @@ func buildInbound(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Us
 		}
 		return inbound
 	case "socks":
-		return buildSocks(base, users)
+		inbound := buildSocks(base, users)
+		if nc.TLS == 1 {
+			applyStreamSettings(inbound, kcfg, nc, tc)
+		}
+		return inbound
 	case "http":
 		return buildHTTP(base, kcfg, nc, users, tc)
 	case "hysteria":
@@ -612,10 +616,8 @@ func applyStreamSettings(base M, kcfg config.KernelConfig, nc *model.NodeSpec, t
 	// TLS
 	if nc.TLS == 1 {
 		tlsSettings := M{}
-		if xhttp.Is(nc.Network) {
-			if alpn := xhttp.ALPN(nc.TLSSettings); len(alpn) > 0 {
-				tlsSettings["alpn"] = alpn
-			}
+		if alpn := xhttp.ALPN(nc.TLSSettings); len(alpn) > 0 {
+			tlsSettings["alpn"] = alpn
 		}
 		serverName := nc.ServerName
 		if serverName == "" && nc.Host != "" {

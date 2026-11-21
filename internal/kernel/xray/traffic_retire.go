@@ -16,6 +16,9 @@ func (x *Xray) RetireTraffic(candidates model.TrafficCounters) model.TrafficCoun
 		keepUsers[user.ID] = true
 	}
 	if x.nodeConfig != nil && x.nodeConfig.Relay != nil {
+		if x.nodeConfig.IsRelayEntry() && x.nodeConfig.Relay.Accounting == "routes" {
+			keepNodes[0] = true
+		}
 		for _, child := range x.nodeConfig.Relay.Children {
 			keepNodes[child.NodeID] = true
 		}

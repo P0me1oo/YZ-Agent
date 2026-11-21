@@ -98,6 +98,7 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 	if nc.Relay != nil {
 		relay = &RelayConfig{
 			Mode:            nc.Relay.Mode,
+			Accounting:      nc.Relay.Accounting,
 			RouteID:         nc.Relay.RouteID,
 			BlockedRouteIDs: append([]int(nil), nc.Relay.BlockedRouteIDs...),
 			Protocol:        nc.Relay.Protocol,
@@ -165,6 +166,7 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 		Obfs:                nc.Obfs,
 		ObfsPassword:        nc.ObfsPassword,
 		CongestionControl:   nc.CongestionControl,
+		NaiveUsername:       nc.NaiveUsername,
 		PaddingScheme:       string(nc.PaddingScheme),
 		Transport:           nc.Transport,
 		TrafficPattern:      nc.TrafficPattern,
@@ -295,6 +297,7 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 	if n.Relay != nil {
 		relay = &panel.RelayConfig{
 			Mode:            n.Relay.Mode,
+			Accounting:      n.Relay.Accounting,
 			RouteID:         n.Relay.RouteID,
 			BlockedRouteIDs: append([]int(nil), n.Relay.BlockedRouteIDs...),
 			Protocol:        n.Relay.Protocol,
@@ -361,6 +364,7 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 		Obfs:                n.Obfs,
 		ObfsPassword:        n.ObfsPassword,
 		CongestionControl:   n.CongestionControl,
+		NaiveUsername:       n.NaiveUsername,
 		PaddingScheme:       panel.StringOrArray(n.PaddingScheme),
 		Transport:           n.Transport,
 		TrafficPattern:      n.TrafficPattern,

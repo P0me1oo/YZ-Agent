@@ -62,6 +62,7 @@ type NodeSpec struct {
 	Obfs         string
 	ObfsPassword string
 
+	NaiveUsername     string
 	CongestionControl string
 	PaddingScheme     string
 	Transport         string
@@ -89,7 +90,8 @@ const (
 
 // RelayConfig mirrors panel.RelayConfig in kernel-agnostic form.
 type RelayConfig struct {
-	Mode string
+	Mode       string
+	Accounting string
 
 	// Entry-side.
 	RouteID         int

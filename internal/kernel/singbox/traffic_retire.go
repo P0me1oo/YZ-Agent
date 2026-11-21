@@ -11,6 +11,9 @@ func (s *SingBox) RetireTraffic(candidates model.TrafficCounters) model.TrafficC
 		keepUsers[user.ID] = true
 	}
 	if s.nodeConfig != nil && s.nodeConfig.Relay != nil {
+		if s.nodeConfig.IsRelayEntry() && s.nodeConfig.Relay.Accounting == "routes" {
+			keepNodes[0] = true
+		}
 		for _, child := range s.nodeConfig.Relay.Children {
 			keepNodes[child.NodeID] = true
 		}

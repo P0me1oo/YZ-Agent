@@ -40,7 +40,7 @@ func TestSingBoxRelayRuntime(t *testing.T) {
 				ssCore := relayStartCore(t, landingKernel, ss, nil, kernel.TLSCert{}, relayMarkerEcho(t, "ss"))
 				vlessCore := relayStartCore(t, landingKernel, vless, nil, kernel.TLSCert{}, relayMarkerEcho(t, "vless"))
 				node := runtimeNode(t, protocol)
-				node.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{
+				node.Relay = &model.RelayConfig{Mode: "entry", Accounting: "routes", RouteID: 11, Children: []model.RelayChild{
 					{NodeID: 7, Tag: "relay-7", RouteID: 12, Protocol: "shadowsocks", Address: "127.0.0.1", Port: ss.ServerPort,
 						Cipher: ss.Relay.Cipher, Password: ss.Relay.Password},
 					{NodeID: 9, Tag: "relay-9", RouteID: 13, Protocol: "vless", Address: "127.0.0.1", Port: vless.ServerPort,
@@ -58,7 +58,7 @@ func TestSingBoxRelayRuntime(t *testing.T) {
 					delta := [2]int64{int64(len(runtimePayload)), int64(len(runtimePayload) + len(marker) + 1)}
 					value := want[user.ID]
 					want[user.ID] = [2]int64{value[0] + delta[0], value[1] + delta[1]}
-					if nodeID > 0 {
+					if nodeID >= 0 {
 						if wantLines[user.ID] == nil {
 							wantLines[user.ID] = map[int][2]int64{}
 						}
@@ -168,6 +168,32 @@ func TestSingBoxRelayRuntime(t *testing.T) {
 				}
 				exchange(second, 12, 7, "ss", "tcp")
 				runtimeWaitTraffic(t, entry, second.ID, want[second.ID])
+			})
+		}
+	}
+}
+
+// Internal TLS uses the configured public certificate, independent of system roots.
+func TestRelayInternalTLSCertificate(t *testing.T) {
+	for _, entryKind := range []string{"singbox", "xray"} {
+		for _, landingKind := range []string{"singbox", "xray"} {
+			t.Run(entryKind+"/"+landingKind, func(t *testing.T) {
+				cert := runtimeCertificate(t)
+				landing := runtimeNode(t, "vless")
+				landing.TLS = 1
+				landing.TLSSettings = map[string]any{"server_name": "localhost"}
+				landing.Relay = &model.RelayConfig{Mode: "landing", Protocol: "vless", VLESS: &model.RelayVLESSConfig{ID: runtimeUser(t, 2701).UUID}}
+				relayStartCore(t, landingKind, landing, nil, cert, relayMarkerEcho(t, "tls"))
+				node := runtimeNode(t, "vless")
+				node.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{{NodeID: 7, RouteID: 12, Tag: "relay-7", Protocol: "vless", Address: "127.0.0.1", Port: landing.ServerPort,
+					VLESS: &model.RelayVLESSConfig{ID: landing.Relay.VLESS.ID, Network: "tcp", Encryption: "none", TLS: 1, TLSSettings: map[string]any{"server_name": "localhost", "certificate": string(cert.CertPEM)}}}}}
+				user := runtimeUser(t, 2702)
+				user.RelayRoutes = []int{12}
+				relayStartCore(t, entryKind, node, []model.UserSpec{user}, kernel.TLSCert{}, relayMarkerEcho(t, "direct"))
+				user.UUID = relayCredential(user, 12)
+				for _, network := range []string{"tcp", "udp"} {
+					relayMarkerExchange(t, runtimeClient(t, node, user), "tls", network)
+				}
 			})
 		}
 	}

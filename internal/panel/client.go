@@ -130,7 +130,7 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 	return c.HandshakeContext(context.Background())
 }
 func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, error) {
-	payload := map[string]interface{}{"device_handover": 1}
+	payload := map[string]interface{}{"device_handover": 1, "traffic_accounting": "routes-v1"}
 	c.injectAuth(payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -207,6 +207,7 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 	limitEvents []LimitEvent, counts ...ConnectionSnapshot,
 ) error {
 	payload := make(map[string]interface{})
+	payload["traffic_accounting"] = "routes-v1"
 	if reportID != "" {
 		payload["report_id"] = reportID
 	}

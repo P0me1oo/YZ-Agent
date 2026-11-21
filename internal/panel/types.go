@@ -173,6 +173,9 @@ type NodeConfig struct {
 	Obfs         string `json:"obfs,omitempty"`
 	ObfsPassword string `json:"obfs-password,omitempty"`
 
+	// Naive: empty preserves the legacy numeric username; uuid opts into revocable identities.
+	NaiveUsername string `json:"naive_username,omitempty"`
+
 	// TUIC
 	CongestionControl string `json:"congestion_control,omitempty"`
 
@@ -209,7 +212,8 @@ const (
 
 // RelayConfig carries the transit topology for a node.
 type RelayConfig struct {
-	Mode string `json:"mode"`
+	Mode       string `json:"mode"`
+	Accounting string `json:"accounting,omitempty"`
 
 	// Entry-side fields.
 	RouteID         int          `json:"route_id,omitempty"`
