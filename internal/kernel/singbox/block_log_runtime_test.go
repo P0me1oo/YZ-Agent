@@ -78,7 +78,7 @@ func TestBlockLogRelayKeepsLandingUnknownAndEntryUser(t *testing.T) {
 				landingLog.Enable(true)
 				landing := runtimeNode(t, "vless")
 				landing.Relay = &model.RelayConfig{Mode: "landing", Protocol: "vless", VLESS: &model.RelayVLESSConfig{ID: runtimeUser(t, 1800).UUID}}
-				landing.Routes = []model.RouteRule{{ID: 801, Action: "block", Ports: []string{"25"}}}
+				landing.Routes = []model.RouteRule{{ID: 801, Action: "block", Ports: []string{"25", "465"}}}
 				relayStartCore(t, landingKind, landing, nil, kernel.TLSCert{}, relayMarkerEcho(t, "landing"), nil, landingLog)
 				entry := runtimeNode(t, "vless")
 				entry.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{
@@ -87,29 +87,38 @@ func TestBlockLogRelayKeepsLandingUnknownAndEntryUser(t *testing.T) {
 				entry.Routes = []model.RouteRule{{ID: 802, Action: "block", Ports: []string{"25"}}}
 				user := runtimeUser(t, 1801)
 				relayStartCore(t, entryKind, entry, []model.UserSpec{user}, kernel.TLSCert{}, relayMarkerEcho(t, "direct"), nil, entryLog)
-				for route, recorder := range map[int]*accesslog.Recorder{11: entryLog, 12: landingLog} {
-					routed := user
-					routed.UUID = relayCredential(user, route)
-					client := runtimeClient(t, entry, routed)
-					for _, network := range []string{"tcp", "udp"} {
-						routeExpectBlocked(t, client, network, singM.ParseSocksaddr("198.51.100.10:25"), []byte(runtimePayload))
-					}
-					records := accessRecords(t, recorder, 2)
-					if len(records) != 2 {
-						t.Fatalf("重复记录: %+v", records)
-					}
-					for _, record := range records {
-						wantUser, wantNode, wantRule := user.ID, 3, 802
-						if route == 12 {
-							wantUser, wantNode, wantRule = 0, 7, 801
+				for _, scenario := range []struct {
+					name                                string
+					route, port, userID, nodeID, ruleID int
+					recorder                            *accesslog.Recorder
+				}{
+					{"entry direct", 11, 25, user.ID, 3, 802, entryLog},
+					{"entry blocks relay first", 12, 25, user.ID, 3, 802, entryLog},
+					{"landing only", 12, 465, 0, 7, 801, landingLog},
+				} {
+					t.Run(scenario.name, func(t *testing.T) {
+						routed := user
+						routed.UUID = relayCredential(user, scenario.route)
+						client := runtimeClient(t, entry, routed)
+						for _, network := range []string{"tcp", "udp"} {
+							target := singM.Socksaddr{Addr: singM.ParseSocksaddr("198.51.100.10:25").Addr, Port: uint16(scenario.port)}
+							routeExpectBlocked(t, client, network, target, []byte(runtimePayload))
 						}
-						if record.UserID != wantUser || record.NodeID != wantNode || record.RuleID != wantRule {
-							t.Fatalf("中转记录归属不正确: %+v", record)
+						records := accessRecords(t, scenario.recorder, 2)
+						if len(records) != 2 {
+							t.Fatalf("重复记录: %+v", records)
 						}
-					}
-				}
-				if batch, _ := entryLog.Next(); batch != nil {
-					t.Fatal("入口重复记录落地拦截")
+						for _, record := range records {
+							if record.UserID != scenario.userID || record.NodeID != scenario.nodeID || record.RuleID != scenario.ruleID {
+								t.Fatalf("中转记录归属不正确: %+v", record)
+							}
+						}
+						for _, recorder := range []*accesslog.Recorder{entryLog, landingLog} {
+							if batch, _ := recorder.Next(); batch != nil {
+								t.Fatal("入口或落地重复记录拦截")
+							}
+						}
+					})
 				}
 			})
 		}
