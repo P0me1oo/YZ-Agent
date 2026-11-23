@@ -102,12 +102,12 @@ func TestBuildRoutes_SniffBeforeFirstProtocolRule(t *testing.T) {
 			domainAt = i
 		}
 	}
-	if sniffAt < 0 || sniffAt+1 != firstProtocolAt || domainAt > sniffAt {
+	if sniffAt < 0 || sniffAt+1 != firstProtocolAt || domainAt < firstProtocolAt {
 		t.Fatalf("sniff=%d protocol=%d domain=%d: %#v", sniffAt, firstProtocolAt, domainAt, rules)
 	}
 }
 
-// 中转入口：落地线路在解析前选路，入口自身线路的直连排在面板路由之后。
+// 中转入口：先执行 BT 拦截，再中转；没有 IP 禁令时仍由落地解析。
 func TestBuildRoutes_RelayEntryPanelRoutesApplyToEntryUsers(t *testing.T) {
 	node := testRelayNode()
 	node.Routes = testRouteRules([]panel.RouteRule{{ID: 1, Action: "block", Protocol: []string{"bittorrent"}}})
@@ -125,7 +125,7 @@ func TestBuildRoutes_RelayEntryPanelRoutesApplyToEntryUsers(t *testing.T) {
 			directAt = i
 		}
 	}
-	if !(relayAt >= 0 && relayAt < resolveAt && resolveAt < btAt && btAt < directAt && directAt == len(rules)-1) {
+	if !(btAt >= 0 && btAt < relayAt && relayAt < resolveAt && resolveAt < directAt && directAt == len(rules)-1) {
 		t.Fatalf("relay=%d resolve=%d bt=%d direct=%d: %#v", relayAt, resolveAt, btAt, directAt, rules)
 	}
 }
@@ -167,5 +167,31 @@ func TestBuildConfig_ProtocolRoutesAcceptedBySingBox(t *testing.T) {
 			}
 			_ = instance.Close()
 		})
+	}
+}
+
+func TestBuildRoutesIPBlockBeforeRelay(t *testing.T) {
+	rules := buildRoutes([]model.RouteRule{
+		{ID: 1, Action: "direct", Match: []string{"example.test"}},
+		{ID: 2, Action: "block", Match: []string{"geoip:cn"}},
+	}, nil, nil, M{"outbound": "relay-7"})["rules"].([]M)
+	resolveAt, blockAt, relayAt, directAt := -1, -1, -1, -1
+	for i, rule := range rules {
+		switch {
+		case rule["action"] == "resolve":
+			if resolveAt >= 0 {
+				t.Fatal("duplicate resolution")
+			}
+			resolveAt = i
+		case rule["outbound"] == "yz-panel-block-2":
+			blockAt = i
+		case rule["outbound"] == "relay-7":
+			relayAt = i
+		case rule["outbound"] == "direct":
+			directAt = i
+		}
+	}
+	if !(resolveAt >= 0 && resolveAt < blockAt && blockAt < relayAt && relayAt < directAt) {
+		t.Fatalf("resolve=%d block=%d relay=%d direct=%d", resolveAt, blockAt, relayAt, directAt)
 	}
 }

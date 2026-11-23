@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	singM "github.com/sagernet/sing/common/metadata"
@@ -32,11 +31,12 @@ func TestBuildRoutesBlocksUnspecifiedAddresses(t *testing.T) {
 	}
 }
 
+// 使用本机测试 DNS 固定 IPv4，避免宿主 localhost 双栈解析影响 IPv4 应答服务。
 // 默认规则必须先解析域名再拦截；显式放行的自定义规则保持优先。
 func TestSingBoxRuntimeDirectGuardBlocksPrivateDomains(t *testing.T) {
 	echo := runtimeEcho(t)
 	literal := echo
-	domain := singM.Socksaddr{Fqdn: "localhost", Port: echo.Port}
+	domain := singM.Socksaddr{Fqdn: "ipv4-only.test", Port: echo.Port}
 
 	for _, tc := range []struct {
 		name    string
@@ -51,7 +51,7 @@ func TestSingBoxRuntimeDirectGuardBlocksPrivateDomains(t *testing.T) {
 				node.CustomRoutes = nil
 			}
 			user := runtimeUser(t, 311)
-			s := New(config.KernelConfig{Type: "singbox", LogLevel: "fatal", ConfigDir: t.TempDir()})
+			s := New(directCompatDNSConfig(t, "singbox"))
 			if err := s.Start(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
 				t.Fatal(err)
 			}
@@ -98,13 +98,13 @@ func TestPrivateDomainGuardReloadAndNoPrivateDial(t *testing.T) {
 	allow := node.CustomRoutes
 	node.CustomRoutes = nil
 	user := runtimeUser(t, 312)
-	s := New(config.KernelConfig{Type: "singbox", LogLevel: "fatal", ConfigDir: t.TempDir()})
+	s := New(directCompatDNSConfig(t, "singbox"))
 	if err := s.Start(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
 		t.Fatal(err)
 	}
 	defer s.Stop()
 	client := runtimeClient(t, node, user)
-	destination := singM.Socksaddr{Fqdn: "localhost", Port: uint16(l.Addr().(*net.TCPAddr).Port)}
+	destination := singM.Socksaddr{Fqdn: "ipv4-only.test", Port: uint16(l.Addr().(*net.TCPAddr).Port)}
 	check := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()

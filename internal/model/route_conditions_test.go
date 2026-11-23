@@ -114,3 +114,30 @@ func TestStandaloneRouteConditions(t *testing.T) {
 		t.Fatalf("standalone route = %#v, want %#v", spec.Routes[0], want)
 	}
 }
+
+func TestValidatePanelRouteTargets(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		target    string
+		wantError bool
+	}{
+		{"local WARP", "warp", false},
+		{"panel exit", "ai-exit", false},
+		{"relay exit", "relay-7", false},
+		{"direct", "direct", false},
+		{"missing", "missing", true},
+		{"empty", "", true},
+		{"case mismatch", "WARP", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := &NodeSpec{
+				Routes:          []RouteRule{{ID: 7, Action: "proxy", ActionValue: tc.target, Match: []string{"geosite:openai"}}},
+				CustomOutbounds: []OutboundConfig{{Tag: "ai-exit"}},
+				Relay:           &RelayConfig{Children: []RelayChild{{Tag: "relay-7"}}},
+			}
+			if err := validatePanelRouteTargets(node, []string{"warp"}); (err != nil) != tc.wantError {
+				t.Fatalf("target %q: %v", tc.target, err)
+			}
+		})
+	}
+}

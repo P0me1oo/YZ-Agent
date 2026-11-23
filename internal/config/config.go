@@ -267,8 +267,7 @@ type KernelConfig struct {
 	LogLevel  string `yaml:"log_level"`
 
 	// GeoDataDir is the directory that contains GeoIP/GeoSite database files.
-	// For sing-box: geoip.db and geosite.db (geoip2-format).
-	// For xray:     geoip.dat and geosite.dat.
+	// 两种核心共用 geoip.dat / geosite.dat；sing-box 转换为内联规则集。
 	// Defaults to config_dir for a single instance and the shared config root
 	// for multiple instances. Xray instances in one process share the cache.
 	GeoDataDir string `yaml:"geo_data_dir"`

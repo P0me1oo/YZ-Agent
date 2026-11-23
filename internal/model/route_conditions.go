@@ -140,3 +140,31 @@ func appendUnique(values []string, value string) []string {
 	}
 	return append(values, value)
 }
+
+// validatePanelRouteTargets 防止缺少预设出口时误用默认直连，不创建任何出站。
+func validatePanelRouteTargets(node *NodeSpec, additionalTags []string) error {
+	available := map[string]bool{"direct": true, "block": true}
+	for _, tag := range additionalTags {
+		available[tag] = true
+	}
+	for _, outbound := range node.CustomOutbounds {
+		available[outbound.Tag] = true
+	}
+	if node.Relay != nil {
+		for _, child := range node.Relay.Children {
+			available[child.Tag] = true
+		}
+	}
+	for _, route := range node.Routes {
+		if route.Action != "proxy" {
+			continue
+		}
+		if _, err := PanelRouteConditions(route); err != nil {
+			continue
+		}
+		if route.ActionValue == "" || !available[route.ActionValue] {
+			return fmt.Errorf("面板路由 %d 的转发出口 %q 不存在，请配置已有出口标签", route.ID, route.ActionValue)
+		}
+	}
+	return nil
+}

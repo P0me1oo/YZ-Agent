@@ -742,8 +742,8 @@ func buildRealitySettings(kcfg config.KernelConfig, nc *model.NodeSpec) M {
 //  1. structured custom route rules (explicit panel overrides)
 //  2. raw custom routes (native escape hatch)
 //  3. built-in private/loopback blocklist
-//  4. relay rules — a logical node's exit must not be overridden by generic panel routes
-//  5. panel routes
+//  4. 面板拦截规则 — 同时约束入口直出与中转流量
+//  5. 中转规则，再执行面板直连与分流规则
 //  6. 中转入口自身编号的直连规则 — 排在面板路由之后，入口绑定的路由才能作用于入口自身用户
 func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteRule, customRules []map[string]any, relayRules []M, guardRules []M, relayEntryRules ...M) M {
 	var xrayRules []M
@@ -782,16 +782,27 @@ func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteR
 		"outboundTag": "block",
 	})
 
-	xrayRules = append(xrayRules, relayRules...)
-
+	// 面板禁令先执行，避免中转线路的整体匹配跳过入口拦截。
 	for _, rule := range rules {
-		xrayRules = append(xrayRules, compilePanelRouteRule(rule)...)
+		if rule.Action == "block" {
+			xrayRules = append(xrayRules, compilePanelRouteRule(rule)...)
+		}
+	}
+	xrayRules = append(xrayRules, relayRules...)
+	for _, rule := range rules {
+		if rule.Action != "block" {
+			xrayRules = append(xrayRules, compilePanelRouteRule(rule)...)
+		}
 	}
 
 	xrayRules = append(xrayRules, relayEntryRules...)
 
+	domainStrategy := "AsIs"
+	if kernel.BlockRoutesNeedIP(rules) {
+		domainStrategy = "IPOnDemand"
+	}
 	return M{
-		"domainStrategy": "AsIs",
+		"domainStrategy": domainStrategy,
 		"rules":          xrayRules,
 	}
 }

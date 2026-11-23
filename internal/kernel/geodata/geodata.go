@@ -6,21 +6,24 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 )
 
 const (
-	singboxGeoIPURL   = "https://github.com/SagerNet/sing-geoip/releases/latest/download/geoip.db"
-	singboxGeoSiteURL = "https://github.com/SagerNet/sing-geosite/releases/latest/download/geosite.db"
-	xrayGeoIPURL      = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
-	xrayGeoSiteURL    = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+	xrayGeoIPURL   = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+	xrayGeoSiteURL = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
 )
 
 var httpClient = &http.Client{Timeout: 10 * time.Minute}
+var ensureMu sync.Mutex
 
-func Ensure(dir string, needGeoIP, needGeoSite bool, kernelType string) error {
+func Ensure(dir string, needGeoIP, needGeoSite bool, _ string) error {
+	// 多个核心实例可能同时准备同一份数据，避免并发下载覆盖临时文件。
+	ensureMu.Lock()
+	defer ensureMu.Unlock()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create geo_data_dir %q: %w", dir, err)
 	}
@@ -31,20 +34,12 @@ func Ensure(dir string, needGeoIP, needGeoSite bool, kernelType string) error {
 	}
 
 	var files []entry
-	if kernelType == "singbox" {
-		if needGeoIP {
-			files = append(files, entry{"geoip.db", singboxGeoIPURL})
-		}
-		if needGeoSite {
-			files = append(files, entry{"geosite.db", singboxGeoSiteURL})
-		}
-	} else {
-		if needGeoIP {
-			files = append(files, entry{"geoip.dat", xrayGeoIPURL})
-		}
-		if needGeoSite {
-			files = append(files, entry{"geosite.dat", xrayGeoSiteURL})
-		}
+	// 两种核心共用 dat 数据，sing-box 在配置阶段转换为内联规则集。
+	if needGeoIP {
+		files = append(files, entry{"geoip.dat", xrayGeoIPURL})
+	}
+	if needGeoSite {
+		files = append(files, entry{"geosite.dat", xrayGeoSiteURL})
 	}
 
 	var firstErr error

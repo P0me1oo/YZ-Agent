@@ -101,7 +101,7 @@ func TestBuildConfig_SniffingFollowsProtocolRoutes(t *testing.T) {
 	}
 }
 
-// 中转入口：落地编号规则排在面板路由前，入口自身编号的直连规则排在面板路由之后。
+// 中转入口：面板拦截先于落地编号规则，入口自身直连仍在最后。
 func TestBuildConfig_RelayEntryPanelRoutesApplyToEntryUsers(t *testing.T) {
 	cfg := buildConfig(testKernelCfg, testNodeSpec(btRouteNode(relayEntryNode())), testUsers, kernel.TLSCert{})
 	rules := cfg["routing"].(M)["rules"].([]M)
@@ -119,13 +119,33 @@ func TestBuildConfig_RelayEntryPanelRoutesApplyToEntryUsers(t *testing.T) {
 			t.Fatalf("missing %s in %#v", key, rules)
 		}
 	}
-	if position["route-12"] > position["bt"] || position["route-13"] > position["bt"] {
-		t.Fatalf("落地编号规则必须排在面板路由之前: %v", position)
+	if position["route-12"] < position["bt"] || position["route-13"] < position["bt"] {
+		t.Fatalf("面板拦截必须排在落地编号规则之前: %v", position)
 	}
 	if position["route-11"] < position["bt"] {
 		t.Fatalf("入口自身的直连规则必须排在面板路由之后: %v", position)
 	}
 	if position["route-11"] != len(rules)-1 {
 		t.Fatalf("入口直连规则应为最后一条: %v of %d", position, len(rules))
+	}
+}
+
+func TestBuildRoutingIPBlockBeforeRelay(t *testing.T) {
+	routes := testRouteRules([]panel.RouteRule{
+		{ID: 1, Action: "direct", Match: []string{"example.test"}},
+		{ID: 2, Action: "block", Match: []string{"geoip:cn"}},
+	})
+	routing := buildRouting(routes, nil, nil, []M{{"type": "field", "outboundTag": "relay-7"}}, nil)
+	if routing["domainStrategy"] != "IPOnDemand" {
+		t.Fatal("IP block must resolve domain targets")
+	}
+	rules := routing["rules"].([]M)
+	for i, want := range []string{"block", "yz-panel-block-2", "relay-7", "direct"} {
+		if rules[i]["outboundTag"] != want {
+			t.Fatalf("rule %d = %#v, want %s", i, rules[i], want)
+		}
+	}
+	if got := buildRouting(routes[:1], nil, nil, nil, nil)["domainStrategy"]; got != "AsIs" {
+		t.Fatalf("domain-only routing should retain AsIs: %v", got)
 	}
 }

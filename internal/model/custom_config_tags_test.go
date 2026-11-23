@@ -128,3 +128,29 @@ func TestValidateOutboundTagCollisions_RejectsDuplicateRawSources(t *testing.T) 
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestNodeSpecFromPanelValidated_PanelRoutesUseExistingExits(t *testing.T) {
+	for _, kind := range []string{"xray", "singbox"} {
+		t.Run(kind, func(t *testing.T) {
+			node := &panel.NodeConfig{Protocol: "vless", ServerPort: 24443,
+				Routes: []panel.RouteRule{{ID: 1, Action: "proxy", ActionValue: "warp", Match: []string{"geosite:google"}}},
+			}
+			cfg := config.KernelConfig{Type: kind}
+			if _, err := NodeSpecFromPanelValidated(node, cfg); err == nil {
+				t.Fatal("missing WARP accepted")
+			}
+			cfg.CustomOutbound = []map[string]any{{"tag": "warp"}}
+			if _, err := NodeSpecFromPanelValidated(node, cfg); err != nil {
+				t.Fatal(err)
+			}
+			cfg.CustomOutbound = nil
+			cfg.CustomConfig = filepath.Join(t.TempDir(), "custom.json")
+			if err := os.WriteFile(cfg.CustomConfig, []byte(`{"outbounds":[{"tag":"warp"}]}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := NodeSpecFromPanelValidated(node, cfg); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

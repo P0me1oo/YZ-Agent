@@ -70,6 +70,9 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if err := ValidateCustomOutboundsForKernel(n.CustomOutbounds, kernelType, additionalTags); err != nil {
 		return fmt.Errorf("validate custom outbounds: %w", err)
 	}
+	if err := validatePanelRouteTargets(n, additionalTags); err != nil {
+		return err
+	}
 	if err := ValidateCustomRouteRules(n.CustomRouteRules, kernelType, availableTags); err != nil {
 		return fmt.Errorf("validate custom route rules: %w", err)
 	}

@@ -24,8 +24,8 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 	if err := kernel.ValidateSourcePolicy(nc); err != nil {
 		return nil, err
 	}
-	if kernel.NeedsGeoIP(nc.Routes) || kernel.NeedsGeoSite(nc.Routes) || kernel.NeedsGeoIPRules(nc.CustomRouteRules) || kernel.NeedsGeoSiteRules(nc.CustomRouteRules) {
-		return nil, fmt.Errorf("sing-box 不支持旧版 geoip/geosite 写法，请使用规则集或明确的域名和网段")
+	if kernel.NeedsGeoIPRules(nc.CustomRouteRules) || kernel.NeedsGeoSiteRules(nc.CustomRouteRules) {
+		return nil, fmt.Errorf("sing-box 高级自定义路由请使用规则集或明确的域名和网段")
 	}
 	if nc.TLS == 2 && model.RealityProtectionEnabled(nc.TLSSettings["anti_abuse"]) {
 		return nil, fmt.Errorf("此 Reality 防盗用选项需要 Xray 内核")
@@ -104,6 +104,9 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 
 	mergeCustomSingbox(cfg, kcfg)
 	applySourcePolicy(cfg, nc)
+	if err := prepareGeoRuleSets(cfg, kcfg.GeoDataDir); err != nil {
+		return nil, err
+	}
 	prepareDNSAccounting(cfg)
 	// 原始输出交给受面板策略控制的运行日志出口，避免核心直接写标准错误或文件。
 	cfg["log"].(M)["output"] = os.DevNull
@@ -192,7 +195,7 @@ func mergeRouteList(a, b []map[string]any) []map[string]any {
 }
 
 func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteRule, custom []map[string]any, relayRules ...M) M {
-	// 自定义规则优先；中转域名必须保持原样交给落地解析。
+	// 自定义规则优先；面板拦截先于中转，只有 IP 拦截需要提前解析。
 	rules := []M{}
 	var postResolveCustom []M
 
@@ -232,7 +235,29 @@ func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteR
 		M{"outbound": "block", "ip_cidr": privateV6},
 	)
 
-	// 中转出站不在入口解析目标域名；本机直连仍需在解析后再拦截。
+	// 入口禁令先于中转。仅在禁令包含 IP 条件时提前解析目标域名。
+	resolveBeforeRelay := kernel.BlockRoutesNeedIP(panelRoutes)
+	if resolveBeforeRelay {
+		rules = append(rules, M{"action": "resolve"})
+		rules = append(rules, postResolveCustom...)
+	}
+	sniffProtocols := model.RouteSniffProtocols(panelRoutes)
+	sniffAdded := false
+	appendPanelRules := func(block bool) {
+		for _, pr := range panelRoutes {
+			if (pr.Action == "block") != block {
+				continue
+			}
+			compiled := compilePanelRouteRule(pr)
+			if !sniffAdded && len(sniffProtocols) > 0 && len(compiled) > 0 && compiled[0]["protocol"] != nil {
+				rules = append(rules, M{"action": "sniff", "sniffer": sniffProtocols})
+				sniffAdded = true
+			}
+			rules = append(rules, compiled...)
+		}
+	}
+	appendPanelRules(true)
+	// 没有 IP 禁令时，中转仍把原始域名交给落地解析。
 	var directRelayRules []M
 	for _, relayRule := range relayRules {
 		if relayRule["outbound"] == "direct" {
@@ -241,24 +266,15 @@ func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteR
 			rules = append(rules, relayRule)
 		}
 	}
-	rules = append(rules, M{"action": "resolve"})
-	rules = append(rules, postResolveCustom...)
+	if !resolveBeforeRelay {
+		rules = append(rules, M{"action": "resolve"})
+		rules = append(rules, postResolveCustom...)
+	}
 	rules = append(rules,
 		M{"outbound": "block", "ip_cidr": privateV4},
 		M{"outbound": "block", "ip_cidr": privateV6},
 	)
-	// 协议匹配依赖嗅探。只在第一条按协议匹配的面板路由前识别一次，
-	// 前面已经命中的连接和中转流量不再等待嗅探。
-	sniffProtocols := model.RouteSniffProtocols(panelRoutes)
-	sniffAdded := false
-	for _, pr := range panelRoutes {
-		compiled := compilePanelRouteRule(pr)
-		if !sniffAdded && len(sniffProtocols) > 0 && len(compiled) > 0 && compiled[0]["protocol"] != nil {
-			rules = append(rules, M{"action": "sniff", "sniffer": sniffProtocols})
-			sniffAdded = true
-		}
-		rules = append(rules, compiled...)
-	}
+	appendPanelRules(false)
 	// 入口自身线路的直连排在面板路由之后，入口绑定的路由才能作用于入口自身用户。
 	rules = append(rules, directRelayRules...)
 
@@ -278,7 +294,7 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 		return nil
 	}
 
-	var domains, cidrs []string
+	var domains, cidrs, siteRefs, ipRefs []string
 	hasAddress := false
 	for _, item := range pr.Match {
 		item = strings.TrimSpace(item)
@@ -286,6 +302,14 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 			continue
 		}
 		hasAddress = true
+		if strings.HasPrefix(item, "geosite:") {
+			siteRefs = append(siteRefs, item)
+			continue
+		}
+		if strings.HasPrefix(item, "geoip:") {
+			ipRefs = append(ipRefs, item)
+			continue
+		}
 		item = strings.TrimSpace(strings.TrimPrefix(item, "*."))
 		if item == "" {
 			continue
@@ -301,7 +325,7 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 		domains = append(domains, item)
 	}
 	// 填写的目标地址全部无效时整条跳过，不能退化成只按附加条件匹配。
-	if hasAddress && len(domains) == 0 && len(cidrs) == 0 {
+	if hasAddress && len(domains)+len(cidrs)+len(siteRefs)+len(ipRefs) == 0 {
 		return nil
 	}
 	if !hasAddress && conditions.Empty() {
@@ -356,6 +380,11 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 		cidrRule := newRule()
 		cidrRule["ip_cidr"] = cidrs
 		compiled = append(compiled, cidrRule)
+	}
+	for _, ref := range append(siteRefs, ipRefs...) {
+		entry := newRule()
+		entry["rule_set"] = []string{ref}
+		compiled = append(compiled, entry)
 	}
 	if !hasAddress {
 		compiled = append(compiled, newRule())

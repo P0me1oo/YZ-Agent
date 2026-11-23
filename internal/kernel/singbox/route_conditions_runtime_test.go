@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
+	xrayKernel "github.com/P0me1oo/YZ-Agent/internal/kernel/xray"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
@@ -63,7 +64,7 @@ func TestRouteConditionsRuntime(t *testing.T) {
 	}
 }
 
-// 中转入口绑定的路由作用于入口自身用户；经入口转到落地的流量只受落地自己的路由约束。
+// 入口拦截同时约束直出与中转用户；非拦截流量继续按原线路转发。
 func TestRouteConditionsRelayEntryRuntime(t *testing.T) {
 	for _, kind := range []string{"singbox", "xray"} {
 		t.Run(kind, func(t *testing.T) {
@@ -93,8 +94,10 @@ func TestRouteConditionsRelayEntryRuntime(t *testing.T) {
 			routeExpectPassMarker(t, entryClient, "udp", web, []byte(runtimePayload), "direct")
 			routeExpectBlocked(t, entryClient, "tcp", web, routeTestBTHandshake())
 			routeExpectBlocked(t, entryClient, "udp", web, routeTestUTPSyn())
-			routeExpectPassMarker(t, client(12), "tcp", web, routeTestBTHandshake(), "ss")
-			routeExpectPassMarker(t, client(12), "udp", web, routeTestUTPSyn(), "ss")
+			routeExpectBlocked(t, client(12), "tcp", web, routeTestBTHandshake())
+			routeExpectPassMarker(t, client(12), "tcp", web, []byte(runtimePayload), "ss")
+			routeExpectBlocked(t, client(12), "udp", web, routeTestUTPSyn())
+			routeExpectPassMarker(t, client(12), "udp", web, []byte(runtimePayload), "ss")
 		})
 	}
 }
@@ -219,4 +222,53 @@ func routeTestExchange(client adapter.Outbound, network string, destination sing
 		return errors.New("UDP 应答不匹配")
 	}
 	return nil
+}
+
+// 本机 DNS 把测试域名解析到私网；入口开启 IP 禁令后必须在中转之前拒绝。
+func TestRouteIPBlockBeforeRelayRuntime(t *testing.T) {
+	for _, kind := range []string{"singbox", "xray"} {
+		t.Run(kind, func(t *testing.T) {
+			landing := runtimeNode(t, "shadowsocks")
+			landing.Cipher = "aes-128-gcm"
+			landing.Relay = &model.RelayConfig{Mode: "landing", Protocol: "shadowsocks", Cipher: "aes-128-gcm", Password: runtimeUser(t, 1500).UUID}
+			landing.CustomRouteRules = []model.CustomRouteRule{{Match: model.RouteMatch{DomainSuffixes: []string{"test"}}, Action: model.RouteAction{Type: "direct"}}}
+			relayStartCore(t, kind, landing, nil, kernel.TLSCert{}, relayMarkerEcho(t, "landing"))
+			node := runtimeNode(t, "vless")
+			node.CustomRoutes = nil
+			node.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{{
+				NodeID: 7, Tag: "relay-7", RouteID: 12, Protocol: "shadowsocks", Address: "127.0.0.1", Port: landing.ServerPort,
+				Cipher: landing.Relay.Cipher, Password: landing.Relay.Password,
+			}}}
+			user := runtimeUser(t, 1501)
+			cfg := directCompatDNSConfig(t, kind)
+			var core kernel.Kernel
+			if kind == "xray" {
+				core = xrayKernel.New(cfg)
+			} else {
+				core = New(cfg)
+			}
+			if err := core.Start(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(core.Stop)
+			routed := user
+			routed.UUID = relayCredential(user, 12)
+			client := routeTestClient(t, node, routed)
+			target := singM.ParseSocksaddr("ipv4-only.test:80")
+			routeExpectPassMarker(t, client, "tcp", target, []byte(runtimePayload), "landing")
+			blocked := *node
+			blocked.Routes = []model.RouteRule{{ID: 1, Action: "block", Match: []string{"127.0.0.1/32"}}}
+			for range 2 {
+				if err := core.Reload(&blocked, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
+					t.Fatal(err)
+				}
+				routeExpectBlocked(t, client, "tcp", target, []byte(runtimePayload))
+				routeExpectPassMarker(t, client, "tcp", singM.ParseSocksaddr("198.51.100.10:80"), []byte(runtimePayload), "landing")
+			}
+			if err := core.Reload(node, []model.UserSpec{user}, kernel.TLSCert{}); err != nil {
+				t.Fatal(err)
+			}
+			routeExpectPassMarker(t, client, "tcp", target, []byte(runtimePayload), "landing")
+		})
+	}
 }

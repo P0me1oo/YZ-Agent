@@ -1,10 +1,33 @@
 package kernel
 
 import (
+	"net/netip"
 	"strings"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 )
+
+// BlockRoutesNeedIP 表示有效的面板拦截需要检查目标 IP，域名目标也需要先解析。
+func BlockRoutesNeedIP(routes []model.RouteRule) bool {
+	for _, route := range routes {
+		if route.Action != "block" {
+			continue
+		}
+		if _, err := model.PanelRouteConditions(route); err != nil {
+			continue
+		}
+		for _, value := range route.Match {
+			value = strings.TrimSpace(value)
+			if strings.HasPrefix(value, "geoip:") || strings.Contains(value, "/") {
+				return true
+			}
+			if _, err := netip.ParseAddr(value); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // NeedsGeoIP returns true when any panel route rule contains a "geoip:" match entry.
 func NeedsGeoIP(routes []model.RouteRule) bool {
