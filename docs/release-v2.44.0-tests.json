@@ -1,0 +1,151 @@
+{
+  "version": "v2.44.0",
+  "source_commit": "b9d1602e532bb11a6f8cd98ae187fe59500e92cb",
+  "go": "1.27.3",
+  "full": {
+    "passed_packages": [
+      "github.com/P0me1oo/YZ-Agent/cmd/yz-agent",
+      "github.com/P0me1oo/YZ-Agent/cmd/yz-relay-perf",
+      "github.com/P0me1oo/YZ-Agent/internal/accesslog",
+      "github.com/P0me1oo/YZ-Agent/internal/agentcli",
+      "github.com/P0me1oo/YZ-Agent/internal/agentlog",
+      "github.com/P0me1oo/YZ-Agent/internal/autospeed",
+      "github.com/P0me1oo/YZ-Agent/internal/balancer",
+      "github.com/P0me1oo/YZ-Agent/internal/binding",
+      "github.com/P0me1oo/YZ-Agent/internal/buildinfo",
+      "github.com/P0me1oo/YZ-Agent/internal/cert",
+      "github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders",
+      "github.com/P0me1oo/YZ-Agent/internal/config",
+      "github.com/P0me1oo/YZ-Agent/internal/controlplane",
+      "github.com/P0me1oo/YZ-Agent/internal/devicegate",
+      "github.com/P0me1oo/YZ-Agent/internal/deviceip",
+      "github.com/P0me1oo/YZ-Agent/internal/directwg",
+      "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "github.com/P0me1oo/YZ-Agent/internal/healthcheck",
+      "github.com/P0me1oo/YZ-Agent/internal/installroot",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/geodata",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+      "github.com/P0me1oo/YZ-Agent/internal/limiter",
+      "github.com/P0me1oo/YZ-Agent/internal/logrotate",
+      "github.com/P0me1oo/YZ-Agent/internal/machine",
+      "github.com/P0me1oo/YZ-Agent/internal/machinetraffic",
+      "github.com/P0me1oo/YZ-Agent/internal/model",
+      "github.com/P0me1oo/YZ-Agent/internal/monitor",
+      "github.com/P0me1oo/YZ-Agent/internal/nlog",
+      "github.com/P0me1oo/YZ-Agent/internal/panel",
+      "github.com/P0me1oo/YZ-Agent/internal/portset",
+      "github.com/P0me1oo/YZ-Agent/internal/privacy",
+      "github.com/P0me1oo/YZ-Agent/internal/realityrelay",
+      "github.com/P0me1oo/YZ-Agent/internal/realityscan",
+      "github.com/P0me1oo/YZ-Agent/internal/scheduling",
+      "github.com/P0me1oo/YZ-Agent/internal/service",
+      "github.com/P0me1oo/YZ-Agent/internal/sourcepolicy",
+      "github.com/P0me1oo/YZ-Agent/internal/systemwg",
+      "github.com/P0me1oo/YZ-Agent/internal/timesync",
+      "github.com/P0me1oo/YZ-Agent/internal/tracker",
+      "github.com/P0me1oo/YZ-Agent/internal/xhttp"
+    ],
+    "top_level_pass": 1106,
+    "skipped_tests": [
+      "TestNativeClientProbe",
+      "TestNativeFirewallLifecycle",
+      "TestNativeSourceFirewallLifecycle",
+      "TestAllocateLoopbackPort_SkipsOccupiedAndReserved",
+      "TestNativeSourceSOCKSProbe",
+      "TestNativeSourceSOCKSRuntime"
+    ],
+    "initial_failures": [
+      "TestBlockLogRelayKeepsLandingUnknownAndEntryUser"
+    ]
+  },
+  "block_log_recheck": {
+    "passed": [
+      "TestBlockLogRulesTCPUDPReloadAndDisabled",
+      "TestBlockLogRelayKeepsLandingUnknownAndEntryUser"
+    ],
+    "failures": []
+  },
+  "dependencies": {
+    "packages": [
+      "github.com/anytls/sing-anytls/session",
+      "github.com/sagernet/sing-vmess/vless",
+      "github.com/sagernet/sing-shadowsocks/shadowaead_2022",
+      "github.com/xtls/xray-core/proxy/shadowsocks_2022",
+      "github.com/xtls/xray-core/transport/internet/hysteria",
+      "github.com/sagernet/sing-box/common/listener",
+      "github.com/sagernet/sing-box/transport/v2raygrpclite",
+      "github.com/sagernet/sing-box/third_party/sing-shadowsocks/shadowaead_2022"
+    ],
+    "tests": 43
+  },
+  "mihomo": {
+    "tests": [
+      "TestWireGuardRealityClients",
+      "TestDirectWireGuardMihomo"
+    ]
+  },
+  "note": "首轮全库仅旧中转日志契约失败；修正测试后该专项通过，产品源码未变，复用其余成功结果。",
+  "final_distinct_top_level_pass": 1107,
+  "full_package_scope": 42,
+  "result": "全库成功分项与修正后的日志专项组合通过；首轮单次全库并非全部通过",
+  "github_main_test": {
+    "run_id": 45156153592,
+    "job_id": 137629464956,
+    "conclusion": "success",
+    "source_commit": "b9d1602e532bb11a6f8cd98ae187fe59500e92cb",
+    "top_level_pass": 1107,
+    "passed_packages": [
+      "github.com/P0me1oo/YZ-Agent/cmd/yz-agent",
+      "github.com/P0me1oo/YZ-Agent/cmd/yz-relay-perf",
+      "github.com/P0me1oo/YZ-Agent/internal/accesslog",
+      "github.com/P0me1oo/YZ-Agent/internal/agentcli",
+      "github.com/P0me1oo/YZ-Agent/internal/agentlog",
+      "github.com/P0me1oo/YZ-Agent/internal/autospeed",
+      "github.com/P0me1oo/YZ-Agent/internal/balancer",
+      "github.com/P0me1oo/YZ-Agent/internal/binding",
+      "github.com/P0me1oo/YZ-Agent/internal/buildinfo",
+      "github.com/P0me1oo/YZ-Agent/internal/cert",
+      "github.com/P0me1oo/YZ-Agent/internal/cert/dnsproviders",
+      "github.com/P0me1oo/YZ-Agent/internal/config",
+      "github.com/P0me1oo/YZ-Agent/internal/controlplane",
+      "github.com/P0me1oo/YZ-Agent/internal/devicegate",
+      "github.com/P0me1oo/YZ-Agent/internal/deviceip",
+      "github.com/P0me1oo/YZ-Agent/internal/directwg",
+      "github.com/P0me1oo/YZ-Agent/internal/firewall",
+      "github.com/P0me1oo/YZ-Agent/internal/healthcheck",
+      "github.com/P0me1oo/YZ-Agent/internal/installroot",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/geodata",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/singbox",
+      "github.com/P0me1oo/YZ-Agent/internal/kernel/xray",
+      "github.com/P0me1oo/YZ-Agent/internal/limiter",
+      "github.com/P0me1oo/YZ-Agent/internal/logrotate",
+      "github.com/P0me1oo/YZ-Agent/internal/machine",
+      "github.com/P0me1oo/YZ-Agent/internal/machinetraffic",
+      "github.com/P0me1oo/YZ-Agent/internal/model",
+      "github.com/P0me1oo/YZ-Agent/internal/monitor",
+      "github.com/P0me1oo/YZ-Agent/internal/nlog",
+      "github.com/P0me1oo/YZ-Agent/internal/panel",
+      "github.com/P0me1oo/YZ-Agent/internal/portset",
+      "github.com/P0me1oo/YZ-Agent/internal/privacy",
+      "github.com/P0me1oo/YZ-Agent/internal/realityrelay",
+      "github.com/P0me1oo/YZ-Agent/internal/realityscan",
+      "github.com/P0me1oo/YZ-Agent/internal/scheduling",
+      "github.com/P0me1oo/YZ-Agent/internal/service",
+      "github.com/P0me1oo/YZ-Agent/internal/sourcepolicy",
+      "github.com/P0me1oo/YZ-Agent/internal/systemwg",
+      "github.com/P0me1oo/YZ-Agent/internal/timesync",
+      "github.com/P0me1oo/YZ-Agent/internal/tracker",
+      "github.com/P0me1oo/YZ-Agent/internal/xhttp"
+    ],
+    "skipped_tests": [
+      "TestNativeClientProbe",
+      "TestNativeFirewallLifecycle",
+      "TestNativeSourceFirewallLifecycle",
+      "TestAllocateLoopbackPort_SkipsOccupiedAndReserved",
+      "TestNativeSourceSOCKSProbe",
+      "TestNativeSourceSOCKSRuntime"
+    ]
+  }
+}

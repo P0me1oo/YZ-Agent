@@ -1,0 +1,100 @@
+{
+  "project": "YZ-Agent",
+  "tag": "v2.44.0",
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.44.0",
+  "assets": [
+    {
+      "name": "install.sh",
+      "bytes": 69986,
+      "sha256": "664ccab98b57e1b3c5fc2464bfe522147774786a43e1d3edf0ce307278581b68",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "release.json",
+      "bytes": 302,
+      "sha256": "585c3f4183092b2aff9c70e57c217c76a40a47419d265a4b50add7e124c1be4e",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "SHA256SUMS",
+      "bytes": 1076,
+      "sha256": "b4233f4bb216cece37f4539dca7896ba904c6e9cde65240f7d81f62f4d4f2995",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "bytes": 33210528,
+      "sha256": "a8a8f7dc87dcc37cdd1c1d37e92c6f9d0435a823ac0ab8d88e4d01ac31f87c35",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "bytes": 4981,
+      "sha256": "525c33186bae60f4f330053d8e6a466e6b1bc9293fb07792748a627ec2ced425",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "bytes": 30867616,
+      "sha256": "6b37029b7d46f66c6ee57facb5c3b941e1f2f5eb44dd15acfed9c8f9f716c28b",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "bytes": 4983,
+      "sha256": "8e74e6c5e9238ce43cca178a703e4cd2d5c69fe30cb6a70c305232f84de78c41",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "bytes": 79327392,
+      "sha256": "876457755af2b3a1324148f570a841bbdf55cc128bf4ff0ca4d0a0e8a72f4595",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "bytes": 73269408,
+      "sha256": "a8917b5d41fa30b86964025aa3982a63892b82480890c673153dc5e776f80823",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "bytes": 79327392,
+      "sha256": "876457755af2b3a1324148f570a841bbdf55cc128bf4ff0ca4d0a0e8a72f4595",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "bytes": 18457,
+      "sha256": "a609a7d6ae4078ab66c1cac4580611d3599fe6e66806c67b006df41d4e97735d",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "bytes": 73269408,
+      "sha256": "a8917b5d41fa30b86964025aa3982a63892b82480890c673153dc5e776f80823",
+      "download_verified": true,
+      "github_digest_verified": true
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "bytes": 18459,
+      "sha256": "d5fa42141caceb8375a894056764248d57fda73bb6d885e2d42681449f1ad318",
+      "download_verified": true,
+      "github_digest_verified": true
+    }
+  ],
+  "source_commit": "b9d1602e532bb11a6f8cd98ae187fe59500e92cb",
+  "published": true
+}
