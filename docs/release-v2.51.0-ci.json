@@ -1,0 +1,12 @@
+{
+  "conclusion": "success",
+  "headSha": "c93f3b3102086b654aeb320f831e3c3993696ee0",
+  "status": "completed",
+  "url": "https://github.com/P0me1oo/YZ-Agent/actions/runs/45672883483",
+  "full_test_top_level": {
+    "passed": 1198,
+    "skipped": 9
+  },
+  "native_firewall_matrices": 4,
+  "docker_published": false
+}
