@@ -114,16 +114,17 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 			relay.Children = make([]RelayChild, 0, len(nc.Relay.Children))
 			for _, child := range nc.Relay.Children {
 				relay.Children = append(relay.Children, RelayChild{
-					NodeID:    child.NodeID,
-					Tag:       child.Tag,
-					RouteID:   child.RouteID,
-					Protocol:  child.Protocol,
-					Address:   child.Address,
-					Port:      child.Port,
-					Cipher:    child.Cipher,
-					Password:  child.Password,
-					VLESS:     relayVLESSFromPanel(child.VLESS),
-					WireGuard: cloneRelayWireGuard(child.WireGuard),
+					NodeID:          child.NodeID,
+					Tag:             child.Tag,
+					RouteID:         child.RouteID,
+					Protocol:        child.Protocol,
+					Address:         child.Address,
+					ResolvedAddress: child.ResolvedAddress,
+					Port:            child.Port,
+					Cipher:          child.Cipher,
+					Password:        child.Password,
+					VLESS:           relayVLESSFromPanel(child.VLESS),
+					WireGuard:       cloneRelayWireGuard(child.WireGuard),
 				})
 			}
 		}
@@ -314,16 +315,17 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 			relay.Children = make([]panel.RelayChild, 0, len(n.Relay.Children))
 			for _, child := range n.Relay.Children {
 				relay.Children = append(relay.Children, panel.RelayChild{
-					NodeID:    child.NodeID,
-					Tag:       child.Tag,
-					RouteID:   child.RouteID,
-					Protocol:  child.Protocol,
-					Address:   child.Address,
-					Port:      child.Port,
-					Cipher:    child.Cipher,
-					Password:  child.Password,
-					VLESS:     relayVLESSToPanel(child.VLESS),
-					WireGuard: cloneRelayWireGuard(child.WireGuard),
+					NodeID:          child.NodeID,
+					Tag:             child.Tag,
+					RouteID:         child.RouteID,
+					Protocol:        child.Protocol,
+					Address:         child.Address,
+					ResolvedAddress: child.ResolvedAddress,
+					Port:            child.Port,
+					Cipher:          child.Cipher,
+					Password:        child.Password,
+					VLESS:           relayVLESSToPanel(child.VLESS),
+					WireGuard:       cloneRelayWireGuard(child.WireGuard),
 				})
 			}
 		}

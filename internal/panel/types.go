@@ -250,16 +250,17 @@ type RelayEgressTarget struct {
 
 // RelayChild is one logical node reachable through an internal outbound on the entry.
 type RelayChild struct {
-	NodeID    int                   `json:"node_id"`
-	Tag       string                `json:"tag"`
-	RouteID   int                   `json:"route_id"`
-	Protocol  string                `json:"protocol"`
-	Address   string                `json:"address"`
-	Port      int                   `json:"port"`
-	Cipher    string                `json:"cipher"`
-	Password  string                `json:"password"`
-	VLESS     *RelayVLESSConfig     `json:"vless,omitempty"`
-	WireGuard *RelayWireGuardConfig `json:"wireguard,omitempty"`
+	NodeID          int                   `json:"node_id"`
+	Tag             string                `json:"tag"`
+	RouteID         int                   `json:"route_id"`
+	Protocol        string                `json:"protocol"`
+	Address         string                `json:"address"`
+	ResolvedAddress string                `json:"resolved_address,omitempty"`
+	Port            int                   `json:"port"`
+	Cipher          string                `json:"cipher"`
+	Password        string                `json:"password"`
+	VLESS           *RelayVLESSConfig     `json:"vless,omitempty"`
+	WireGuard       *RelayWireGuardConfig `json:"wireguard,omitempty"`
 }
 
 // RelayWireGuardConfig 仅包含本端私钥、对端公钥和用户态隧道参数。

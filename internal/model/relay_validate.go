@@ -131,6 +131,9 @@ func validateRelayEntry(n *NodeSpec, kernelType string, availableTags map[string
 		if strings.TrimSpace(child.Address) == "" {
 			return fmt.Errorf("relay child %d: address must not be empty", child.NodeID)
 		}
+		if err := child.validateResolvedAddress(); err != nil {
+			return fmt.Errorf("relay child %d: %w", child.NodeID, err)
+		}
 		if child.Port <= 0 || child.Port > 65535 {
 			return fmt.Errorf("relay child %d: invalid port %d", child.NodeID, child.Port)
 		}

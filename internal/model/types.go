@@ -111,16 +111,17 @@ type RelayConfig struct {
 }
 
 type RelayChild struct {
-	NodeID    int
-	Tag       string
-	RouteID   int
-	Protocol  string
-	Address   string
-	Port      int
-	Cipher    string
-	Password  string
-	VLESS     *RelayVLESSConfig
-	WireGuard *RelayWireGuardConfig
+	NodeID          int
+	Tag             string
+	RouteID         int
+	Protocol        string
+	Address         string
+	ResolvedAddress string
+	Port            int
+	Cipher          string
+	Password        string
+	VLESS           *RelayVLESSConfig
+	WireGuard       *RelayWireGuardConfig
 }
 
 type RelayWireGuardConfig = panel.RelayWireGuardConfig

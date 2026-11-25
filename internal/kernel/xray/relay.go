@@ -36,7 +36,7 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 				continue
 			}
 			settings := relayWireGuardSettings(child.WireGuard)
-			settings["peers"].([]M)[0]["endpoint"] = net.JoinHostPort(child.Address, strconv.Itoa(child.Port))
+			settings["peers"].([]M)[0]["endpoint"] = net.JoinHostPort(child.ConnectAddress(), strconv.Itoa(child.Port))
 			outbounds = append(outbounds, M{"protocol": "wireguard", "tag": child.Tag, "settings": settings})
 		case "shadowsocks":
 			outbounds = append(outbounds, M{
@@ -44,7 +44,7 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 				"tag":      child.Tag,
 				"settings": M{
 					"servers": []M{{
-						"address":  child.Address,
+						"address":  child.ConnectAddress(),
 						"port":     child.Port,
 						"method":   child.Cipher,
 						"password": child.Password,
@@ -67,7 +67,7 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 				"tag":      child.Tag,
 				"settings": M{
 					"vnext": []M{{
-						"address": child.Address,
+						"address": child.ConnectAddress(),
 						"port":    child.Port,
 						"users":   []M{user},
 					}},

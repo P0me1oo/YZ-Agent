@@ -130,7 +130,7 @@ func buildRelayOutbounds(nc *model.NodeSpec) []M {
 		if protocol == "wireguard" {
 			continue
 		}
-		outbound := M{"tag": child.Tag, "type": protocol, "server": child.Address, "server_port": child.Port}
+		outbound := M{"tag": child.Tag, "type": protocol, "server": child.ConnectAddress(), "server_port": child.Port}
 		if protocol == "shadowsocks" {
 			outbound["method"], outbound["password"] = child.Cipher, child.Password
 		} else if child.VLESS != nil {
@@ -237,7 +237,7 @@ func buildRelayWireGuardEndpoints(nc *model.NodeSpec) []M {
 			}
 			e := endpoint(child.Tag, child.WireGuard)
 			peer := e["peers"].([]M)[0]
-			peer["address"], peer["port"] = child.Address, child.Port
+			peer["address"], peer["port"] = child.ConnectAddress(), child.Port
 			endpoints = append(endpoints, e)
 		}
 	}
