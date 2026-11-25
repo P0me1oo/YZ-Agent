@@ -45,7 +45,7 @@ func TestSamplingFailureVisibleAtNormalLevelAndRateLimited(t *testing.T) {
 		t.Fatalf("expected one warning per operation, got %d", len(events))
 	}
 	for _, e := range events {
-		if e.Level != "warn" || e.NodeID != 7 || strings.Contains(e.Message, "test-secret") {
+		if e.Level != "warn" || e.NodeID != 7 || !strings.Contains(e.Message, "test-secret") {
 			t.Fatal("invalid diagnostic", e)
 		}
 	}

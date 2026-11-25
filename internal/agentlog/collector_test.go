@@ -85,19 +85,20 @@ func TestAgentLogCorruptCachePreserved(t *testing.T) {
 		t.Fatal("corruption must be reported")
 	}
 }
-func TestAgentLogDoesNotRecurseAndSanitizes(t *testing.T) {
+func TestAgentLogPreservesDiagnosticsBeforeQueueing(t *testing.T) {
 	nlog.Init(io.Discard, 0, false)
 	scope := "test-only-scope"
 	c := &collector{}
 	stop := nlog.Subscribe(scope, c.add)
 	defer stop()
-	nlog.Scoped(scope, 7, "node").Warn("connect token=temporary-test-secret url=https://test.invalid/path?key=temporary-test-secret")
+	message := "connect token=temporary-test-secret url=https://test.invalid/path?key=temporary-test-secret"
+	nlog.Scoped(scope, 7, "node").Warn(message)
 	batch := c.next()
 	if batch == nil || batch.Records[0].NodeID != 7 {
 		t.Fatal("node scope missing")
 	}
-	if batch.Records[0].Message == "" || containsSecret(batch.Records[0].Message) {
-		t.Fatal("secret must be removed before queueing")
+	if batch.Records[0].Message != message {
+		t.Fatal("diagnostic content changed before queueing")
 	}
 }
 

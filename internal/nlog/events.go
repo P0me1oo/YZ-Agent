@@ -34,7 +34,7 @@ func Subscribe(scope string, callback func(Event)) func() {
 	return SubscribeFiltered(scope, nil, callback)
 }
 
-// 在脱敏和队列分配前筛选上传等级，本地日志出口仍按原等级记录。
+// 在文本整理和队列分配前筛选上传等级，本地日志出口仍按原等级记录。
 func SubscribeFiltered(scope string, accept func(Event) bool, callback func(Event)) func() {
 	eventMu.Lock()
 	subscriptions[scope] = subscription{accept: accept, callback: callback}
@@ -42,26 +42,11 @@ func SubscribeFiltered(scope string, accept func(Event) bool, callback func(Even
 	return func() { eventMu.Lock(); delete(subscriptions, scope); eventMu.Unlock() }
 }
 
-var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)-----BEGIN [^-]*(?:PRIVATE KEY|CERTIFICATE)-----[\s\S]*`),
-	regexp.MustCompile(`(?i)-----BEGIN [^-]*(?:PRIVATE KEY|CERTIFICATE)-----[\s\S]*?(?:-----END [^-]+-----|$)`),
-	regexp.MustCompile(`(?i)(?:https?|wss?|ss|vmess|vless|trojan|hysteria2?|tuic)://[^\s"'<>]+`),
-	regexp.MustCompile(`(?i)(?:proxy-)?authorization["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n}]+)`),
-	regexp.MustCompile(`(?i)\b(?:Basic|Digest)\s+[^\r\n}]+`),
-	regexp.MustCompile(`(?i)\bBearer\s+[^\s,"'}]+`),
-	regexp.MustCompile(`(?i)\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b`),
-	regexp.MustCompile(`\b[A-Za-z0-9+/_=-]{32,}`),
-	regexp.MustCompile(`(?i)["']?[a-z_]*(?:password|passwd|token|secret|cookie|authorization|private_key|api_key|uuid|auth_data)[a-z_]*["']?\s*[=:]\s*(?:"[^"\n]*"|'[^'\n]*'|[^\s,;}]+)`),
-	regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`),
-}
+var logANSI = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
+// Sanitize 仅清理终端控制字符并限制长度，保留日志正文；隐私策略由日志出口独立执行。
 func Sanitize(message string) string {
-	for _, pattern := range secretPatterns {
-		message = pattern.ReplaceAllString(message, "[已隐藏]")
-	}
-	if i := strings.Index(message, "{\""); i >= 0 {
-		message = message[:i] + "[配置已隐藏]"
-	}
+	message = logANSI.ReplaceAllString(message, "")
 	message = strings.Map(func(r rune) rune {
 		if r < 32 && r != '\n' && r != '\t' || r == 127 {
 			return -1

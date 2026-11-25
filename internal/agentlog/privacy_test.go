@@ -18,6 +18,7 @@ import (
 )
 
 func TestPrivateCollectorEncryptsQueueAndRetriesOriginalBatch(t *testing.T) {
+	const message = `private cached runtime token=fixture-value https://example.invalid/api uuid=00000000-0000-0000-0000-000000000000 {"config":"original"}`
 	received := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v2/server/handshake" {
@@ -27,6 +28,9 @@ func TestPrivateCollectorEncryptsQueueAndRetriesOriginalBatch(t *testing.T) {
 		var batch panel.AgentLogBatch
 		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
 			t.Error(err)
+		}
+		if len(batch.Records) != 1 || batch.Records[0].Message != message {
+			t.Error("original diagnostics lost during encrypted cache recovery or upload")
 		}
 		received = append(received, batch.ID)
 		if len(received) == 1 {
@@ -53,7 +57,9 @@ func TestPrivateCollectorEncryptsQueueAndRetriesOriginalBatch(t *testing.T) {
 	}
 	path := filepath.Join(dir, "pending-agent.json")
 	c := &collector{path: path, scope: scope, key: state}
-	c.add(nlog.Event{Source: "agent", Level: "error", Message: "private cached runtime", OccurredAt: time.Now().Unix()})
+	stop := nlog.Subscribe(scope, c.add)
+	defer stop()
+	nlog.Publish(scope, nlog.Event{Source: "agent", Level: "error", Message: message, OccurredAt: time.Now().Unix()})
 	c.flush(t.Context(), client)
 	raw, err := os.ReadFile(path)
 	if err != nil || !privacy.IsEncrypted(raw) || bytes.Contains(raw, []byte("private cached runtime")) {

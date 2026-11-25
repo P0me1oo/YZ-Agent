@@ -48,8 +48,8 @@ func TestXrayCrashStartReloadRecoveryAndDuplicateFailure(t *testing.T) {
 		t.Fatal("未恢复的故障重复通知")
 	}
 	event := (*events)[0]
-	if event.NodeID != 7 || event.Event != "xray.crash" || event.Source != "xray" || event.Level != "error" || event.OccurredAt == 0 || strings.Contains(event.Message, "temporary-test-secret") {
-		t.Fatal("故障事件身份、时间或敏感内容处理错误")
+	if event.NodeID != 7 || event.Event != "xray.crash" || event.Source != "xray" || event.Level != "error" || event.OccurredAt == 0 || !strings.Contains(event.Message, "temporary-test-secret") {
+		t.Fatal("故障事件身份、时间或原始诊断内容错误")
 	}
 	k.startErr = nil
 	s.lastConfig = &model.NodeSpec{Protocol: "vless", ServerPort: 21443}

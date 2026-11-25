@@ -35,8 +35,8 @@ func TestStartupFailureConfirmsPolicyBeforePrinting(t *testing.T) {
 			if strings.Contains(out.String(), "startup failed") != tc.visible {
 				t.Fatalf("wrong policy output: %q", out.String())
 			}
-			if strings.Contains(out.String(), "test-secret") || strings.Contains(out.String(), "secret.example") {
-				t.Fatal("startup log leaked credentials")
+			if strings.Contains(out.String(), "test-secret") != tc.visible || strings.Contains(out.String(), "secret.example") != tc.visible {
+				t.Fatal("startup diagnostic content does not match log policy")
 			}
 		})
 	}

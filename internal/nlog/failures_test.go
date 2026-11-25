@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestFailureDiagnosticsAreBoundedPrivateAndRespectPolicy(t *testing.T) {
+func TestFailureDiagnosticsAreBoundedAndRespectPrivacyPolicy(t *testing.T) {
 	var out bytes.Buffer
 	Init(&out, slog.LevelInfo, false)
 	t.Cleanup(func() { Init(os.Stdout, slog.LevelInfo, false); ConfigureLogPolicies(nil) })
@@ -34,8 +34,8 @@ func TestFailureDiagnosticsAreBoundedPrivateAndRespectPolicy(t *testing.T) {
 	if len(events) != 1 || strings.Count(out.String(), "probe failed") != 1 {
 		t.Fatal("failure must be visible and bounded")
 	}
-	if strings.Contains(out.String(), "test-secret") || strings.Contains(out.String(), "secret.example") || strings.Contains(out.String(), "short-credential") {
-		t.Fatal("diagnostic leaked credentials")
+	if !strings.Contains(out.String(), "test-secret") || !strings.Contains(out.String(), "secret.example") || !strings.Contains(out.String(), "short-credential") {
+		t.Fatal("diagnostic content was hidden")
 	}
 	failures.Local(logger, "uploader failed", err)
 	if len(events) != 1 || !strings.Contains(out.String(), "uploader failed") {
