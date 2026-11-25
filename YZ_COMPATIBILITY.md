@@ -1,6 +1,6 @@
 # YZ-Agent 兼容矩阵
 
-**v2.48.0** 为配套 Next / Dash 0.24.0 的本地验证版本，未发布、未部署。增加来源限制能力声明、必要实时测量与独立执行状态；保持旧面板版本化防火墙协议与固定核心依赖。完整数据库、受影响包竞态、原生双栈及双核心快照验证见 [Next 验收记录](../YZboard-Next/YZboard-Next/docs/relay-firewall-acceptance.md)。
+**v2.48.0** 已正式发布，配套 YZboard 2.28.0 / Dash 0.110.0，并兼容 Next / Dash 0.24.0；未更新运行节点。固定来源、完整 CI 与 13 份附件核验见[发布记录](docs/release-v2.48.0.md)。增加来源限制能力声明、必要实时测量与独立执行状态；保持旧面板版本化防火墙协议与固定核心依赖。完整数据库、受影响包竞态、原生双栈及双核心快照验证见 [Next 验收记录](../YZboard-Next/YZboard-Next/docs/relay-firewall-acceptance.md)。
 
 **v2.47.0** 为配套面板 2.28.0 / Dash 0.110.0 的本地开发版本，未发布、未部署。中转来源核对及独立端口限制见[说明](docs/relay-firewall.md)，正式核心依赖不变，旧面板无版本策略时保持原行为。包含工作区已有 Next 适配改动，验证范围见[记录](../YZboard/docs/relay-firewall-validation.md)。
 

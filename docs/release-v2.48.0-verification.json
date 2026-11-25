@@ -1,0 +1,146 @@
+{
+  "repository": "P0me1oo/YZ-Agent",
+  "tag": "v2.48.0",
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.48.0",
+  "source_commit": "1017613a04454362a08b3c3a0f19e07bb3d5a6e5",
+  "published_at": "2026-11-25T11:29:15Z",
+  "visibility": "public",
+  "docker_published": false,
+  "assets": [
+    {
+      "name": "install.sh",
+      "size": 69986,
+      "sha256": "664ccab98b57e1b3c5fc2464bfe522147774786a43e1d3edf0ce307278581b68",
+      "github_digest": "sha256:664ccab98b57e1b3c5fc2464bfe522147774786a43e1d3edf0ce307278581b68",
+      "download": "anonymous"
+    },
+    {
+      "name": "release.json",
+      "size": 345,
+      "sha256": "0bf7dd667e188b4116712b874e0781976fd1e3bd2a512f252f29c31068aec691",
+      "github_digest": "sha256:0bf7dd667e188b4116712b874e0781976fd1e3bd2a512f252f29c31068aec691",
+      "download": "anonymous"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 1076,
+      "sha256": "bef1b7098345a7b8d77331d310776203bc0e8407fde760baf9aa89ec0e98cff5",
+      "github_digest": "sha256:bef1b7098345a7b8d77331d310776203bc0e8407fde760baf9aa89ec0e98cff5",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "size": 33259680,
+      "sha256": "78d45ed36b52c763f422c5df9d96bef886f67162d8ed93666c7643313eb61af9",
+      "github_digest": "sha256:78d45ed36b52c763f422c5df9d96bef886f67162d8ed93666c7643313eb61af9",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "size": 5116,
+      "sha256": "a5cf15443e73476d1832656a0a28fa651ab2f6e4dbcb33a5557cee81efccd709",
+      "github_digest": "sha256:a5cf15443e73476d1832656a0a28fa651ab2f6e4dbcb33a5557cee81efccd709",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "size": 30998688,
+      "sha256": "12edcf72a0a7f90b6c2ac6aae43e83c9cb6f298fa3526ec54187045dec6ce010",
+      "github_digest": "sha256:12edcf72a0a7f90b6c2ac6aae43e83c9cb6f298fa3526ec54187045dec6ce010",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "size": 5118,
+      "sha256": "7b1bfff680e8447107a83b681b2193d6f2a46e28d55103fcab93ef1828d1cb8e",
+      "github_digest": "sha256:7b1bfff680e8447107a83b681b2193d6f2a46e28d55103fcab93ef1828d1cb8e",
+      "download": "anonymous"
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "size": 79503520,
+      "sha256": "d7c32bc698e75b569e0863c280dc59e8f19d043c1467fb5367eaafc67dc0b91a",
+      "github_digest": "sha256:d7c32bc698e75b569e0863c280dc59e8f19d043c1467fb5367eaafc67dc0b91a",
+      "download": "anonymous"
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "size": 73400480,
+      "sha256": "4c50b32f50ed67c4ae3085196c900bed1df1dff21f95613b2cd1ea6b6807d84d",
+      "github_digest": "sha256:4c50b32f50ed67c4ae3085196c900bed1df1dff21f95613b2cd1ea6b6807d84d",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "size": 79503520,
+      "sha256": "d7c32bc698e75b569e0863c280dc59e8f19d043c1467fb5367eaafc67dc0b91a",
+      "github_digest": "sha256:d7c32bc698e75b569e0863c280dc59e8f19d043c1467fb5367eaafc67dc0b91a",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "size": 18411,
+      "sha256": "a3799f2395a13e3238c1c65ad2ef846bf692c9cdac5cdce569f08d524820a0c4",
+      "github_digest": "sha256:a3799f2395a13e3238c1c65ad2ef846bf692c9cdac5cdce569f08d524820a0c4",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "size": 73400480,
+      "sha256": "4c50b32f50ed67c4ae3085196c900bed1df1dff21f95613b2cd1ea6b6807d84d",
+      "github_digest": "sha256:4c50b32f50ed67c4ae3085196c900bed1df1dff21f95613b2cd1ea6b6807d84d",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "size": 18413,
+      "sha256": "2762ebf1281cdb6e656d22913101093f052d0060f8101f1a44d53b8f05a5d062",
+      "github_digest": "sha256:2762ebf1281cdb6e656d22913101093f052d0060f8101f1a44d53b8f05a5d062",
+      "download": "anonymous"
+    }
+  ],
+  "builds": [
+    {
+      "name": "yz-agent-linux-amd64",
+      "go": "go1.27.3",
+      "source_commit": "1017613a04454362a08b3c3a0f19e07bb3d5a6e5",
+      "vcs_modified": false,
+      "goos": "linux",
+      "goarch": "amd64",
+      "cgo_enabled": false,
+      "sha256": "d7c32bc698e75b569e0863c280dc59e8f19d043c1467fb5367eaafc67dc0b91a",
+      "reported_version": "yz-agent v2.48.0 (built 2026-11-25T11:26:54Z, commit 1017613a04454362a08b3c3a0f19e07bb3d5a6e5)\nxray-core: fork v26.12.0 (upstream v26.10.31 @ a4a3dff5b20c2faae567b742c172c7b95e75c083; fork commit 36f4516090e3e2fe88dcbe0840126582cd6fb795; module github.com/P0me1oo/YZ-Xray-core@v0.0.0-20261116081756-36f4516090e3)\nsing-box: requested v1.14.0, resolved v1.16.0 (upstream commit 0b8995879f29a9b98ee027bc17b75e101445b238; fork commit ad0c0cfbc7c3827f3058aa666d9f1a3b0e0fd085; module github.com/P0me1oo/YZ-sing-box@v1.16.0)\nsing-shadowsocks: upstream v0.2.8 @ e0612494bafdd1429e9632bc52fd278585d28690; Node compatibility source ./compat/sing-shadowsocks@(devel)\nanytls: upstream v0.0.11 @ 130d2e61b8895727bfed4942c535e91b246a9603; Node compatibility source ./compat/sing-anytls@(devel)"
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "go": "go1.27.3",
+      "source_commit": "1017613a04454362a08b3c3a0f19e07bb3d5a6e5",
+      "vcs_modified": false,
+      "goos": "linux",
+      "goarch": "amd64",
+      "cgo_enabled": false,
+      "sha256": "78d45ed36b52c763f422c5df9d96bef886f67162d8ed93666c7643313eb61af9",
+      "reported_version": "xbctl v2.48.0 (built 2026-11-25T11:26:54Z, commit 1017613a04454362a08b3c3a0f19e07bb3d5a6e5)\nxray-core: fork v26.12.0 (upstream v26.10.31 @ a4a3dff5b20c2faae567b742c172c7b95e75c083; fork commit 36f4516090e3e2fe88dcbe0840126582cd6fb795; module github.com/P0me1oo/YZ-Xray-core@v0.0.0-20261116081756-36f4516090e3)\nsing-box: requested v1.14.0, resolved v1.16.0 (upstream commit 0b8995879f29a9b98ee027bc17b75e101445b238; fork commit ad0c0cfbc7c3827f3058aa666d9f1a3b0e0fd085; module not-linked)\nsing-shadowsocks: upstream v0.2.8 @ e0612494bafdd1429e9632bc52fd278585d28690; Node compatibility source not-linked\nanytls: upstream v0.0.11 @ 130d2e61b8895727bfed4942c535e91b246a9603; Node compatibility source not-linked"
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "go": "go1.27.3",
+      "source_commit": "1017613a04454362a08b3c3a0f19e07bb3d5a6e5",
+      "vcs_modified": false,
+      "goos": "linux",
+      "goarch": "arm64",
+      "cgo_enabled": false,
+      "sha256": "4c50b32f50ed67c4ae3085196c900bed1df1dff21f95613b2cd1ea6b6807d84d"
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "go": "go1.27.3",
+      "source_commit": "1017613a04454362a08b3c3a0f19e07bb3d5a6e5",
+      "vcs_modified": false,
+      "goos": "linux",
+      "goarch": "arm64",
+      "cgo_enabled": false,
+      "sha256": "12edcf72a0a7f90b6c2ac6aae43e83c9cb6f298fa3526ec54187045dec6ce010"
+    }
+  ]
+}

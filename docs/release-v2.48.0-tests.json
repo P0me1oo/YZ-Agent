@@ -1,0 +1,36 @@
+{
+  "source_commit": "1017613a04454362a08b3c3a0f19e07bb3d5a6e5",
+  "workflow": "https://github.com/P0me1oo/YZ-Agent/actions/runs/45601926300",
+  "go": "1.27.3",
+  "full_race": {
+    "passed_top_level": 1149,
+    "skipped_top_level": 9,
+    "failed": 0
+  },
+  "dependency_tests": {
+    "passed_top_level": 43,
+    "failed": 0
+  },
+  "mihomo_tests": {
+    "passed_top_level": 2,
+    "failed": 0
+  },
+  "native_matrix": [
+    "ufw/nftables",
+    "ufw/iptables",
+    "firewalld/nftables",
+    "firewalld/iptables"
+  ],
+  "skipped": [
+    "TestNativeClientProbe",
+    "TestNativeFirewallLifecycle",
+    "TestNativeRelayFirewallDualStackAndRollback",
+    "TestNativeSourceFirewallLifecycle",
+    "TestAllocateLoopbackPort_SkipsOccupiedAndReserved",
+    "TestNativeRelayNextTCPProbe",
+    "TestNativeRelayNextSnapshotsBothCores",
+    "TestNativeSourceSOCKSProbe",
+    "TestNativeSourceSOCKSRuntime"
+  ],
+  "installer_groups": 10
+}

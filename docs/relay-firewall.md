@@ -1,5 +1,7 @@
 # 中转落地端口来源限制
 
+v2.48.0 已正式发布，配套 YZboard 2.28.0 / Dash 0.110.0，兼容 Next 0.24.0；未升级运行节点，Next 面板不在本次发布范围。固定源码和附件见[发布记录](release-v2.48.0.md)，下文开发记录保留其原验证阶段。
+
 Agent v2.48.0 配套 Next / Dash 0.24.0，在握手声明 `relay_firewall=1`，必要实时状态通过 `state.relay_egress` 发送测量；旧的指标上报格式仍兼容。运行状态增加 `operations.relay_firewall`（applied/pending/disabled），与 `firewall_warning` 一起供管理端判断执行结果。来源变化不重载两核心。
 
 Next 规则和证据有效期见[Next 使用说明](../../YZboard-Next/YZboard-Next/docs/relay-firewall.md)，本地双端、双核心及原生防火墙结果见[验收](../../YZboard-Next/YZboard-Next/docs/relay-firewall-acceptance.md)。当前源码未发布、未部署，正式核心依赖保持不变。
