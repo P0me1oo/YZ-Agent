@@ -6,9 +6,11 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/portset"
+	"go4.org/netipx"
 )
 
 // Rule 只保存地址、协议和端口，不保存节点凭据或完整运行配置。
@@ -53,11 +55,13 @@ func (r Rule) key() string {
 }
 
 type Plan struct {
-	Ready      bool
-	Listeners  []Rule
-	Redirects  []Rule
-	Restricted bool
-	Blocked    []string
+	Ready           bool
+	Listeners       []Rule
+	Redirects       []Rule
+	Restricted      bool
+	Blocked         []string
+	RelayRestricted bool
+	ValidUntil      int64
 }
 
 // ConfirmationRequired 表示策略无法安全确定；调用方须保留现有监听和规则。
@@ -84,6 +88,10 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 	addresses, err := listenerAddresses(node.ListenIP)
 	if err != nil {
 		return Plan{}, err
+	}
+	// Go 的 IPv4 通配监听在双栈系统上可能实际创建 IPv6 socket。
+	if node.HasRelayFirewall() && strings.TrimSpace(node.ListenIP) == "0.0.0.0" {
+		addresses = []Rule{{Family: 4}, {Family: 6}}
 	}
 	protocols, err := listenerProtocols(&node, kernelType)
 	if err != nil {
@@ -113,6 +121,43 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 			rule.Ports = portset.Range{From: node.ServerPort, To: node.ServerPort}
 			plan.Listeners = append(plan.Listeners, rule)
 		}
+	}
+	if node.HasRelayFirewall() {
+		plan.RelayRestricted = true
+		plan.Restricted = true
+		policy := node.Relay.Firewall
+		if policy.Version != 1 || policy.Status != "ready" || policy.ValidUntil <= time.Now().Unix() || len(policy.Sources) == 0 {
+			if policy.Status == "pending" && policy.Message != "" && len(policy.Message) <= 1000 {
+				return plan, pending(policy.Message)
+			}
+			return plan, pending("前置出口策略未完成核对或已过期；保留原防火墙规则")
+		}
+		if len(policy.Sources) > 4096 {
+			return plan, pending("前置来源名单超过容量；保留原规则")
+		}
+		var blocked netipx.IPSetBuilder
+		blocked.AddPrefix(netip.MustParsePrefix("0.0.0.0/0"))
+		blocked.AddPrefix(netip.MustParsePrefix("::/0"))
+		for _, raw := range policy.Sources {
+			ip, err := netip.ParseAddr(raw)
+			if err != nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.Zone() != "" || ip.Is4In6() {
+				return plan, pending("前置出口不是有效的具体公网 IP；保留原规则")
+			}
+			blocked.Remove(ip)
+		}
+		// 与节点手工设置的来源限制取交集，不扩大手工许可。
+		for _, raw := range plan.Blocked {
+			blocked.AddPrefix(netip.MustParsePrefix(raw))
+		}
+		set, err := blocked.IPSet()
+		if err != nil {
+			return plan, err
+		}
+		plan.Blocked = []string{}
+		for _, prefix := range set.Prefixes() {
+			plan.Blocked = append(plan.Blocked, prefix.String())
+		}
+		plan.ValidUntil = policy.ValidUntil
 	}
 	if strings.TrimSpace(node.PortHopping) == "" {
 		return plan, nil

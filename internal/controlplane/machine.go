@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
-	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 )
 
@@ -59,7 +58,9 @@ func (p *MachinePanelControlPlane) Initial(
 	// can start immediately instead of waiting for a subsequent WS full-sync.
 	hs, err := p.client.HandshakeContext(ctx)
 	if err != nil {
-		nlog.Core().Debug("machine node handshake skipped, using REST", "error", err)
+		// User snapshots alone cannot prove whether global IP coordination is
+		// required. Retry initialization instead of starting a local-only gate.
+		return Bootstrap{}, fmt.Errorf("machine node handshake: %w", err)
 	}
 
 	bootstrap := Bootstrap{}

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (b *systemBackend) ownsSourceSetName(name string) bool {
@@ -321,6 +322,12 @@ func (b *systemBackend) syncSourceIPTables(ctx context.Context, plans []sourcePl
 	if !b.sourceIPTablesAvailable() {
 		return fmt.Errorf("缺少 iptables/ip6tables、restore 或 ipset")
 	}
+	// 双栈权限和归属必须在第一次写入前全部核对。
+	for _, name := range []string{"iptables", "ip6tables"} {
+		if _, err := b.readSourceIPTables(ctx, name); err != nil {
+			return err
+		}
+	}
 	desiredSets := map[string]bool{}
 	for _, plan := range plans {
 		for _, family := range []int{4, 6} {
@@ -340,7 +347,14 @@ func (b *systemBackend) syncSourceIPTables(ctx context.Context, plans []sourcePl
 	}
 	for _, name := range []string{"iptables", "ip6tables"} {
 		if err := b.syncSourceIPTablesFamily(ctx, name, plans); err != nil {
-			return err
+			restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			for _, family := range []string{"iptables", "ip6tables"} {
+				if restoreErr := b.syncSourceIPTablesFamily(restoreCtx, family, b.state.SourcePlans); restoreErr != nil {
+					return fmt.Errorf("来源规则更新失败（%v），恢复原规则失败: %w", err, restoreErr)
+				}
+			}
+			return fmt.Errorf("来源规则更新失败，已恢复原规则: %w", err)
 		}
 	}
 	names, err := b.sourceSetNames(ctx)

@@ -17,18 +17,19 @@ type NodeSpec struct {
 	HealthCheck      *healthcheck.Config `json:"health_check,omitempty"`
 	CertificateRenew string              `json:"certificate_renew,omitempty"`
 	// 探测清单独立于核心配置，更新测量目标不重建监听。
-	SchedulingTargets []scheduling.Target `json:"-"`
-	Balancer          *balancer.Config
-	BalancerReceiver  *balancer.ReceiverConfig
-	WireGuard         *panel.WireGuardConfig
-	Protocol          string
-	ListenIP          string
-	ServerPort        int
-	PortHopping       string
-	Network           string
-	NetworkSettings   map[string]any
-	Routes            []RouteRule
-	SourcePolicy      *sourcepolicy.Policy
+	SchedulingTargets  []scheduling.Target       `json:"-"`
+	RelayEgressTargets []panel.RelayEgressTarget `json:"relay_egress_targets,omitempty"`
+	Balancer           *balancer.Config
+	BalancerReceiver   *balancer.ReceiverConfig
+	WireGuard          *panel.WireGuardConfig
+	Protocol           string
+	ListenIP           string
+	ServerPort         int
+	PortHopping        string
+	Network            string
+	NetworkSettings    map[string]any
+	Routes             []RouteRule
+	SourcePolicy       *sourcepolicy.Policy
 	// 仅由运行层从来源名单和已校验的地区库生成，不接受面板直接填写网段。
 	SourceBlockCIDRs  []string
 	SourcePolicyReady bool

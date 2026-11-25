@@ -269,10 +269,20 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		o.runJob(func() { o.controlLoop(ctx) })
 		o.runJob(func() { o.addressLoop(ctx) })
 	}
+	forwardingManager, forwardingError := o.newForwardingManager()
+	if forwardingError == nil {
+		o.runJob(func() { o.forwardingLoop(ctx, forwardingManager) })
+	} else {
+		o.logger().Error("forwarding manager unavailable", "error", forwardingError)
+	}
 	nodesResp, err := o.client.GetMachineNodesContext(ctx)
 	if err != nil {
-		o.notifyStatus(service.RuntimeFailed)
-		return fmt.Errorf("initial node discovery: %w", err)
+		if forwardingError != nil {
+			o.notifyStatus(service.RuntimeFailed)
+			return fmt.Errorf("initial node discovery: %w", err)
+		}
+		o.logger().Warn("panel unavailable; waiting for authenticated node and forwarding policies", "error", err)
+		nodesResp = &panel.MachineNodesResponse{BaseConfig: panel.MachineBaseConfig{PullInterval: 30, PushInterval: 5}}
 	}
 
 	if err := o.initTraffic(ctx, nodesResp.Traffic); err != nil {

@@ -130,8 +130,9 @@ func NodeSpecFromPanel(nc *panel.NodeConfig) *NodeSpec {
 	}
 
 	return &NodeSpec{
-		SchedulingTargets: append([]scheduling.Target(nil), nc.SchedulingTargets...),
-		HealthCheck:       nc.HealthCheck, CertificateRenew: nc.CertificateRenew,
+		SchedulingTargets:  append([]scheduling.Target(nil), nc.SchedulingTargets...),
+		RelayEgressTargets: append([]panel.RelayEgressTarget(nil), nc.RelayEgressTargets...),
+		HealthCheck:        nc.HealthCheck, CertificateRenew: nc.CertificateRenew,
 		Balancer:            balancer.CloneConfig(nc.Balancer),
 		BalancerReceiver:    balancer.CloneReceiver(nc.BalancerReceiver),
 		Protocol:            nc.Protocol,
@@ -329,8 +330,9 @@ func (n *NodeSpec) ToPanel() *panel.NodeConfig {
 	}
 
 	return &panel.NodeConfig{
-		SchedulingTargets: append([]scheduling.Target(nil), n.SchedulingTargets...),
-		HealthCheck:       n.HealthCheck, CertificateRenew: n.CertificateRenew,
+		SchedulingTargets:  append([]scheduling.Target(nil), n.SchedulingTargets...),
+		RelayEgressTargets: append([]panel.RelayEgressTarget(nil), n.RelayEgressTargets...),
+		HealthCheck:        n.HealthCheck, CertificateRenew: n.CertificateRenew,
 		Balancer:            balancer.CloneConfig(n.Balancer),
 		BalancerReceiver:    balancer.CloneReceiver(n.BalancerReceiver),
 		Protocol:            n.Protocol,

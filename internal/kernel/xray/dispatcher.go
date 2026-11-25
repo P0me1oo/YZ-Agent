@@ -219,10 +219,7 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 		return nil, err
 	}
 
-	cancel := context.CancelFunc(func() {})
-	if d.relayRoutes.Load() != nil || permit != nil {
-		ctx, cancel = context.WithCancel(ctx)
-	}
+	ctx, cancel := trackedConnectionContext(ctx, email != "" && (d.relayRoutes.Load() != nil || permit != nil))
 	access := relayTrackingFor(ctx, cancel)
 	access.devicePermit = permit
 	permit.Bind(cancel)
@@ -262,10 +259,9 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 		return err
 	}
 
-	cancel := context.CancelFunc(func() {})
-	if d.relayRoutes.Load() != nil || permit != nil {
-		ctx, cancel = context.WithCancel(ctx)
-	}
+	// Successful dispatch transfers cancellation to trackLink's close callback;
+	// rejection and dispatch failure release the same owned connection below.
+	ctx, cancel := trackedConnectionContext(ctx, email != "" && (d.relayRoutes.Load() != nil || permit != nil))
 	var release func()
 	if email != "" {
 		access := relayTrackingFor(ctx, cancel)
@@ -273,6 +269,10 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 		release = d.trackLink(link, email, sourceIP, uid, isTCP, d.relaySourceSet(ctx, email), access)
 	}
 	if !permit.Valid() {
+		if release != nil {
+			release()
+		}
+		cancel()
 		return devicegate.ErrRevoked
 	}
 	ctx = d.accessContext(ctx, uid, dest)
@@ -285,6 +285,13 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 		cancel()
 	}
 	return err
+}
+
+func trackedConnectionContext(ctx context.Context, needed bool) (context.Context, context.CancelFunc) {
+	if needed {
+		return context.WithCancel(ctx)
+	}
+	return ctx, func() {}
 }
 
 // identifyAndCheck extracts user identity from the session context, enforces

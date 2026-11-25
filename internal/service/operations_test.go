@@ -7,6 +7,7 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/healthcheck"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"net"
 	"os"
@@ -14,6 +15,38 @@ import (
 	"testing"
 	"time"
 )
+
+func TestOperationsRelayFirewallDistinguishesExecution(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		configure  func(*Service)
+	}{
+		{name: "applied", want: "applied"},
+		{name: "missing manager", want: "pending", configure: func(s *Service) { s.firewall = nil }},
+		{name: "write failed", want: "pending", configure: func(s *Service) { message := "write failed"; s.firewallNotice.Store(&message) }},
+		{name: "expired", want: "pending", configure: func(s *Service) { s.lastConfig.Relay.Firewall.ValidUntil = time.Now().Unix() - 1 }},
+		{name: "pending", want: "pending", configure: func(s *Service) { s.lastConfig.Relay.Firewall.Status = "pending" }},
+		{name: "global disabled", want: "disabled", configure: func(s *Service) { s.cfg.Firewall.Enabled = new(false) }},
+		{name: "node disabled", want: "disabled", configure: func(s *Service) { s.lastConfig.AutoFirewall = new(false) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			core := &fakeKernel{running: true}
+			s := newTestService(core)
+			s.cfg.Firewall.Enabled = new(true)
+			s.lastConfig = landingConfig()
+			s.lastConfig.Relay.Firewall = &panel.RelayFirewallConfig{Version: 1, Status: "ready", ValidUntil: time.Now().Unix() + 120, Sources: []string{"8.8.8.8"}}
+			s.firewall = &lifecycleFirewall{kernel: core}
+			if tc.configure != nil {
+				tc.configure(s)
+			}
+			s.updateOperations(t.Context())
+			result := s.operations.snapshot.Load()
+			if result.RelayFirewall != tc.want || result.Runtime != "running" {
+				t.Fatalf("execution status: %+v", result)
+			}
+		})
+	}
+}
 
 func TestOperationsFieldsDoNotRebuildRuntime(t *testing.T) {
 	a := &model.NodeSpec{Protocol: "vless", ServerPort: 443}

@@ -18,6 +18,7 @@ const realtimeFallbackInterval = 10 * time.Second
 
 // StatePayload 只含当前状态，不含会累计结算的流量或超限事件。
 type StatePayload struct {
+	RelayEgress           any                      `json:"relay_egress,omitempty"`
 	IPConnectionCounts    map[int]map[string]int   `json:"ip_connection_counts,omitempty"`
 	Operations            any                      `json:"operations,omitempty"`
 	Alive                 map[int][]string         `json:"alive,omitempty"`
@@ -33,6 +34,9 @@ type StatePayload struct {
 // mapValue 保留非 nil 的空快照，空状态与不支持该采样不是一回事。
 func (s StatePayload) mapValue() map[string]interface{} {
 	out := make(map[string]interface{})
+	if s.RelayEgress != nil {
+		out["relay_egress"] = s.RelayEgress
+	}
 	if s.IPConnectionCounts != nil {
 		out["ip_connection_counts"] = s.IPConnectionCounts
 	}
@@ -310,6 +314,24 @@ func (c *Client) GetControlState(ctx context.Context) (*ControlState, error) {
 	result.Control.StateVersion = versions.Control
 	if result.Control.Epoch == "" || result.Control.Config.Protocol == "" {
 		return nil, fmt.Errorf("invalid realtime control snapshot")
+	}
+	var chunked struct {
+		Control struct {
+			UsersSnapshot *snapshotManifest `json:"users_snapshot"`
+		} `json:"control"`
+	}
+	if err := json.Unmarshal(response.Data, &chunked); err != nil {
+		return nil, err
+	}
+	if chunked.Control.UsersSnapshot != nil {
+		if result.Control.NodeID != c.nodeID {
+			return nil, errors.New("snapshot belongs to another node")
+		}
+		users, err := c.fetchSnapshotUsers(ctx, *chunked.Control.UsersSnapshot)
+		if err != nil {
+			return nil, err
+		}
+		result.Control.Users = users
 	}
 	if result.Control.Users == nil {
 		result.Control.Users = []User{}

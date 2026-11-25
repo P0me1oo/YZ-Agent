@@ -24,6 +24,10 @@ func (s *Service) prepareFirewall(ctx context.Context, node *model.NodeSpec, use
 
 func (s *Service) updateFirewall(ctx context.Context, node *model.NodeSpec, users []model.UserSpec, prepare bool) bool {
 	if s.firewall == nil {
+		if node.HasRelayFirewall() && node.ManagesFirewall() {
+			message := "中转来源限制未生效：系统防火墙管理器不可用；保留原规则"
+			s.firewallNotice.Store(&message)
+		}
 		if node != nil && node.ManagesFirewall() && node.SourcePolicy.Enabled() {
 			s.failRuntime("来源限制无法执行", node, users, errors.New("系统防火墙管理器不可用"))
 			s.firewallFailureHash = s.failedRuntimeHash
@@ -61,10 +65,14 @@ func (s *Service) updateFirewall(ctx context.Context, node *model.NodeSpec, user
 		apply = preflight.Prepare
 	}
 	if err := apply(ctx, s.timeConsumer, prepared, s.cfg.Kernel.Type); err != nil {
-		if !node.SourcePolicy.Enabled() && node.IsRelayLanding() && node.Relay.EntryNodeID > 0 {
-			message := fmt.Sprintf("落地端口放行失败，保留现有监听并重试：%v", err)
+		if node.HasRelayFirewall() || !node.SourcePolicy.Enabled() && node.IsRelayLanding() && node.Relay.EntryNodeID > 0 {
+			text := []rune(nlog.Sanitize(fmt.Sprintf("落地防火墙核对失败，保留原规则并重试：%v", err)))
+			if len(text) > 300 {
+				text = text[:300]
+			}
+			message := string(text)
 			s.firewallNotice.Store(&message)
-			nlog.Core().Warn(message)
+			s.logger().Warn(message)
 			return true
 		}
 		s.failRuntime("应用防火墙规则失败", node, users, err)
@@ -96,6 +104,7 @@ func computeKernelConfigHash(node *model.NodeSpec) string {
 	copy := *node
 	copy.HealthCheck = nil
 	copy.CertificateRenew = ""
+	copy.RelayEgressTargets = nil
 	if node.Relay != nil {
 		relay := *node.Relay
 		relay.Firewall = nil

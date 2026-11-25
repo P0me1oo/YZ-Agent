@@ -42,21 +42,23 @@ type renewResult struct {
 	Error  string `json:"error,omitempty"`
 }
 type operationsSnapshot struct {
-	Run            string                    `json:"run"`
-	Sequence       uint64                    `json:"sequence"`
-	ErrorID        string                    `json:"error_id,omitempty"`
-	SampledAt      int64                     `json:"sampled_at"`
-	Version        int                       `json:"version"`
-	Runtime        string                    `json:"runtime"`
-	Error          string                    `json:"error,omitempty"`
-	ConfigHash     string                    `json:"config_hash"`
-	Control        panel.StateVersion        `json:"control"`
-	Health         *healthcheck.Result       `json:"health,omitempty"`
-	Certificate    *cert.Status              `json:"certificate,omitempty"`
-	Renewal        *renewResult              `json:"renewal,omitempty"`
-	PendingBytes   int64                     `json:"pending_bytes"`
-	AutoSpeed      map[int]autospeed.Penalty `json:"auto_speed"`
-	AutoSpeedError string                    `json:"auto_speed_error,omitempty"`
+	Run             string                    `json:"run"`
+	Sequence        uint64                    `json:"sequence"`
+	ErrorID         string                    `json:"error_id,omitempty"`
+	SampledAt       int64                     `json:"sampled_at"`
+	Version         int                       `json:"version"`
+	Runtime         string                    `json:"runtime"`
+	Error           string                    `json:"error,omitempty"`
+	ConfigHash      string                    `json:"config_hash"`
+	Control         panel.StateVersion        `json:"control"`
+	Health          *healthcheck.Result       `json:"health,omitempty"`
+	Certificate     *cert.Status              `json:"certificate,omitempty"`
+	Renewal         *renewResult              `json:"renewal,omitempty"`
+	PendingBytes    int64                     `json:"pending_bytes"`
+	AutoSpeed       map[int]autospeed.Penalty `json:"auto_speed"`
+	AutoSpeedError  string                    `json:"auto_speed_error,omitempty"`
+	FirewallWarning string                    `json:"firewall_warning,omitempty"`
+	RelayFirewall   string                    `json:"relay_firewall,omitempty"`
 }
 
 func (s *Service) updateOperations(ctx context.Context) {
@@ -230,6 +232,19 @@ func (s *Service) updateOperations(ctx context.Context) {
 	}
 	s.operations.sequence++
 	snapshot := &operationsSnapshot{Run: s.operations.run, Sequence: s.operations.sequence, ErrorID: s.runtimeErrorID, Version: 1, SampledAt: time.Now().UnixMilli(), Runtime: "running", ConfigHash: computeKernelConfigHash(cfg), Control: s.controlVersion.Current(), Health: s.operations.probe.Load(), AutoSpeed: s.autoSpeed.manager.Snapshot(time.Now()), AutoSpeedError: s.autoSpeed.error, Renewal: s.operations.renewDone.Load()}
+	if warning := s.firewallNotice.Load(); warning != nil {
+		snapshot.FirewallWarning = *warning
+	}
+	if cfg.HasRelayFirewall() {
+		snapshot.RelayFirewall = "pending"
+		switch {
+		case !cfg.ManagesFirewall() || !s.cfg.Firewall.IsEnabled():
+			snapshot.RelayFirewall = "disabled"
+		case s.kernel.IsRunning() && snapshot.FirewallWarning == "" && s.firewall != nil &&
+			cfg.Relay.Firewall.Status == "ready" && cfg.Relay.Firewall.ValidUntil > time.Now().Unix():
+			snapshot.RelayFirewall = "applied"
+		}
+	}
 	if c == nil || !c.Enabled || snapshot.Health != nil && snapshot.Health.ConfigHash != snapshot.ConfigHash {
 		snapshot.Health = nil
 	}

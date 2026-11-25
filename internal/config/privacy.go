@@ -119,6 +119,9 @@ func (rc *RootConfig) openProtected(path string, strict bool) error {
 			value.Panel.URL = c.Panel.URL
 			value.Panel.TokenEnv = c.Panel.TokenEnv
 			value.Panel.Token = c.Panel.Token
+			// Forwarding exceptions are local policy. The readable local override
+			// must win over an older encrypted copy, including an explicit removal.
+			value.Forwarding = c.Forwarding
 			if c.Machine != nil && value.Machine != nil {
 				if c.Machine.MachineID != value.Machine.MachineID {
 					if strict {
@@ -371,7 +374,7 @@ func publicInstance(c *Config) map[string]any {
 		panel["node_type"] = c.Panel.NodeType
 	}
 	out := map[string]any{"id": c.InstanceID, "privacy_node_id": c.PrivacyNodeID, "panel": panel, "kernel": map[string]any{"type": c.Kernel.Type, "config_dir": c.Kernel.ConfigDir},
-		"health_port": c.HealthPort, "firewall": c.Firewall, "time_sync": c.TimeSync, "runtime": c.Runtime, "log": c.Log}
+		"health_port": c.HealthPort, "firewall": c.Firewall, "forwarding": c.Forwarding, "time_sync": c.TimeSync, "runtime": c.Runtime, "log": c.Log}
 	if c.IsMachineMode() {
 		machine := map[string]any{"machine_id": c.Machine.MachineID}
 		if c.Machine.TokenEnv != "" {

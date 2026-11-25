@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/P0me1oo/YZ-Agent/internal/monitor"
 	"github.com/P0me1oo/YZ-Agent/internal/realityscan"
 )
 
@@ -34,7 +35,7 @@ func (c *Client) ExchangeMachineControlContext(ctx context.Context, version, boo
 }
 
 func (c *Client) exchangeMachineControl(ctx context.Context, version, bootID string, manageable bool, operation *MachineOperation, scan *realityscan.Report, supported bool) (*MachineOperation, *realityscan.Task, error) {
-	payload := map[string]interface{}{"version": version, "boot_id": bootID, "manageable": manageable}
+	payload := map[string]interface{}{"version": version, "boot_id": bootID, "manageable": manageable, "tcp_congestion": monitor.TCPCongestion()}
 	if supported {
 		payload["reality_scan_supported"] = true
 	}

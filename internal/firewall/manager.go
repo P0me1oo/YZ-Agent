@@ -152,7 +152,7 @@ func (m *Manager) apply(ctx context.Context, owner string, node *model.NodeSpec,
 		return fmt.Errorf("防火墙管理器已停止")
 	}
 	if !m.enabled {
-		if node != nil && node.SourcePolicy.Enabled() {
+		if node != nil && (node.SourcePolicy.Enabled() || node.HasRelayFirewall()) {
 			return fmt.Errorf("来源限制已开启，但系统防火墙管理已关闭")
 		}
 		return nil
@@ -181,19 +181,27 @@ func (m *Manager) apply(ctx context.Context, owner string, node *model.NodeSpec,
 		candidate[key] = value
 	}
 	candidate[owner] = plan
+	claims := make(map[string]Plan, len(candidate)+len(m.confirm))
+	for key, value := range candidate {
+		claims[key] = value
+	}
 	for key, held := range m.confirm {
 		if key != owner {
-			candidate["pending:"+key] = held
+			// 同一节点的旧监听和待核对监听属于同一个声明，不能互相误报冲突。
+			if old, exists := candidate[key]; exists {
+				held.Listeners = append(append([]Rule{}, held.Listeners...), old.Listeners...)
+				held.Redirects = append(append([]Rule{}, held.Redirects...), old.Redirects...)
+				held.Restricted = held.Restricted || old.Restricted
+			}
+			claims[key] = held
 		}
 	}
-	if _, _, err := combinePlans(candidate); err != nil {
+	if _, _, err := combinePlans(claims); err != nil {
 		m.confirmPlan(owner, plan)
 		m.updateProtection()
 		return err
 	}
-	for key := range m.confirm {
-		delete(candidate, "pending:"+key)
-	}
+	previous := m.plans
 	m.plans = candidate
 	delete(m.confirm, owner)
 	if m.revisions == nil {
@@ -201,9 +209,20 @@ func (m *Manager) apply(ctx context.Context, owner string, node *model.NodeSpec,
 	}
 	m.revision++
 	m.revisions[owner] = m.revision
+	appliedRevision := m.revision
 	// 来源已明确的计划仍参与下一轮核对。后端在写入前检查冲突并保留旧规则，
 	// 不能把暂等其他节点发现的计划也标成来源未知，否则相邻端口会互相等待。
-	return m.reconcileWithProvision(ctx, owner, m.revision)
+	err = m.reconcileWithProvision(ctx, owner, appliedRevision)
+	if err != nil && plan.RelayRestricted && m.revisions[owner] == appliedRevision {
+		if old, exists := previous[owner]; exists {
+			m.plans[owner] = old
+		} else {
+			delete(m.plans, owner)
+		}
+		m.confirmPlan(owner, plan)
+		m.updateProtection()
+	}
+	return err
 }
 
 // 调用方持有管理锁。安装依赖期间允许其他节点变更计划，返回后重新计算当前计划。
@@ -286,6 +305,10 @@ func (m *Manager) reconcile(parent context.Context) error {
 		}
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
+		previousSources := []sourcePlan{}
+		if backend, ok := m.backend.(*systemBackend); ok {
+			previousSources = append(previousSources, backend.state.SourcePlans...)
+		}
 		if source, ok := m.backend.(sourceReconciler); ok {
 			err = source.ApplySources(ctx, m.plans)
 		} else {
@@ -298,6 +321,20 @@ func (m *Manager) reconcile(parent context.Context) error {
 		}
 		if err == nil {
 			err = m.backend.Apply(ctx, allows, redirects)
+			if err != nil {
+				if backend, ok := m.backend.(*systemBackend); ok {
+					restore := map[string]Plan{}
+					for _, old := range previousSources {
+						restore[old.Owner] = Plan{Restricted: true, Listeners: old.Listeners, Blocked: old.Blocked}
+					}
+					restoreCtx, stop := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
+					restoreErr := backend.ApplySources(restoreCtx, restore)
+					stop()
+					if restoreErr != nil {
+						err = fmt.Errorf("%w；恢复原来源规则失败: %v", err, restoreErr)
+					}
+				}
+			}
 		}
 	}
 	m.lastErr = err

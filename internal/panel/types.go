@@ -120,12 +120,13 @@ type MachineBaseConfig struct {
 
 // NodeConfig is the response from GET /api/v1/server/UniProxy/config
 type NodeConfig struct {
-	HealthCheck       *healthcheck.Config      `json:"health_check,omitempty"`
-	CertificateRenew  string                   `json:"certificate_renew,omitempty"`
-	SchedulingTargets []scheduling.Target      `json:"scheduling_targets,omitempty"`
-	Balancer          *balancer.Config         `json:"balancer,omitempty"`
-	BalancerReceiver  *balancer.ReceiverConfig `json:"balancer_receiver,omitempty"`
-	WireGuard         *WireGuardConfig         `json:"wireguard,omitempty"`
+	HealthCheck        *healthcheck.Config      `json:"health_check,omitempty"`
+	CertificateRenew   string                   `json:"certificate_renew,omitempty"`
+	SchedulingTargets  []scheduling.Target      `json:"scheduling_targets,omitempty"`
+	RelayEgressTargets []RelayEgressTarget      `json:"relay_egress_targets,omitempty"`
+	Balancer           *balancer.Config         `json:"balancer,omitempty"`
+	BalancerReceiver   *balancer.ReceiverConfig `json:"balancer_receiver,omitempty"`
+	WireGuard          *WireGuardConfig         `json:"wireguard,omitempty"`
 	// NodeID is populated in machine-mode WS events for routing.
 	NodeID          int                    `json:"node_id,omitempty"`
 	Protocol        string                 `json:"protocol"`
@@ -231,11 +232,20 @@ type RelayConfig struct {
 	WireGuard   *RelayWireGuardConfig `json:"wireguard,omitempty"`
 }
 
-// RelayFirewallConfig 仅兼容读取旧面板数据；新版不据此限制来源。
+// RelayFirewallConfig 仅 version=1 启用新策略，旧面板字段保持兼容。
 type RelayFirewallConfig struct {
-	Status  string   `json:"status"`
-	Sources []string `json:"sources"`
-	Message string   `json:"message"`
+	Version    int      `json:"version,omitempty"`
+	ValidUntil int64    `json:"valid_until,omitempty"`
+	Status     string   `json:"status"`
+	Sources    []string `json:"sources"`
+	Message    string   `json:"message"`
+}
+
+type RelayEgressTarget struct {
+	NodeID  int    `json:"node_id"`
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+	Token   string `json:"token"`
 }
 
 // RelayChild is one logical node reachable through an internal outbound on the entry.

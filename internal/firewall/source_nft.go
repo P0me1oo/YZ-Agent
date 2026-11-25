@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"go4.org/netipx"
 )
@@ -307,15 +308,36 @@ func (b *systemBackend) syncSourceNFT(ctx context.Context, plans []sourcePlan) e
 	if exists && b.sourceNFTMatches(objects, spec) {
 		return nil
 	}
+	previous, hadTable := objects, exists
 	if _, err := b.commands.Run(ctx, "nft", b.sourceNFTScript(spec, exists), "--json", "--file", "-"); err != nil {
 		return fmt.Errorf("写入 nftables 来源规则: %w", err)
 	}
 	objects, exists, err = b.readSourceNFT(ctx)
-	if err != nil {
-		return err
+	if err == nil && exists && b.sourceNFTMatches(objects, spec) {
+		return nil
 	}
-	if !exists || !b.sourceNFTMatches(objects, spec) {
-		return fmt.Errorf("nftables 来源规则回读核验未通过")
+	// nft 事务本身失败不会改变原表；事务成功但回读失败时恢复变更前的本实例表。
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	commands := []any{map[string]any{"delete": map[string]any{"table": map[string]any{"family": "inet", "name": b.sourceTable()}}}}
+	if hadTable {
+		for _, object := range previous {
+			for kind, raw := range object {
+				if kind == "metainfo" {
+					continue
+				}
+				var value map[string]any
+				if json.Unmarshal(raw, &value) != nil {
+					return fmt.Errorf("来源规则核验失败，原规则快照无法恢复")
+				}
+				delete(value, "handle")
+				commands = append(commands, map[string]any{"add": map[string]any{kind: value}})
+			}
+		}
 	}
-	return nil
+	data, _ := json.Marshal(map[string]any{"nftables": commands})
+	if _, restoreErr := b.commands.Run(restoreCtx, "nft", string(data), "--json", "--file", "-"); restoreErr != nil {
+		return fmt.Errorf("nftables 来源规则核验失败且恢复原规则失败: %w", restoreErr)
+	}
+	return fmt.Errorf("nftables 来源规则回读核验未通过，已恢复原规则: %v", err)
 }

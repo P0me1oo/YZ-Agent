@@ -30,16 +30,17 @@ type Config struct {
 	PrivacyDefaults *Config `yaml:"privacy_defaults,omitempty"`
 	PrivacyError    error   `yaml:"-"`
 	privateSource   []byte
-	InstanceID      string         `yaml:"-"`
-	Panel           PanelConfig    `yaml:"panel"`
-	Node            NodeConfig     `yaml:"node"`
-	Kernel          KernelConfig   `yaml:"kernel"`
-	Cert            CertConfig     `yaml:"cert"`
-	Log             LogConfig      `yaml:"log"`
-	Runtime         RuntimeConfig  `yaml:"runtime"`
-	WS              WSConfig       `yaml:"ws"`
-	TimeSync        TimeSyncConfig `yaml:"time_sync"`
-	Firewall        FirewallConfig `yaml:"firewall,omitempty"`
+	InstanceID      string           `yaml:"-"`
+	Panel           PanelConfig      `yaml:"panel"`
+	Node            NodeConfig       `yaml:"node"`
+	Kernel          KernelConfig     `yaml:"kernel"`
+	Cert            CertConfig       `yaml:"cert"`
+	Log             LogConfig        `yaml:"log"`
+	Runtime         RuntimeConfig    `yaml:"runtime"`
+	WS              WSConfig         `yaml:"ws"`
+	TimeSync        TimeSyncConfig   `yaml:"time_sync"`
+	Firewall        FirewallConfig   `yaml:"firewall,omitempty"`
+	Forwarding      ForwardingConfig `yaml:"forwarding,omitempty"`
 	// Standalone enables a local-only node that never contacts the panel.
 	Standalone *StandaloneConfig `yaml:"standalone,omitempty"`
 	// HealthPort enables a lightweight HTTP health-check endpoint on the
@@ -740,6 +741,7 @@ func (c *Config) inheritFrom(parent *Config) {
 	// 随后再由启动布局校验保证最终配置一致。
 	c.TimeSync.inheritFrom(parent.TimeSync)
 	c.Firewall.inheritFrom(parent.Firewall)
+	c.Forwarding.inheritFrom(parent.Forwarding)
 	// Kernel (NOT config_dir — each instance needs unique dir)
 	if c.Kernel.Type == "" {
 		c.Kernel.Type = parent.Kernel.Type
@@ -954,6 +956,9 @@ func normalizeBaseURL(raw string) (string, string, error) {
 }
 
 func (c *Config) validate() error {
+	if err := ValidateForwarding(c.Forwarding); err != nil {
+		return err
+	}
 	if err := ValidateFirewall(c.Firewall); err != nil {
 		return err
 	}

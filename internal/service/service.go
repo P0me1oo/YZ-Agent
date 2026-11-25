@@ -54,6 +54,7 @@ type Service struct {
 	kernel              kernel.Kernel
 	firewall            firewall.Controller
 	firewallNotice      atomic.Pointer[string]
+	relayEgress         atomic.Pointer[relayEgress]
 	lastFirewallRetry   time.Time
 	firewallFailureHash string
 	sourcePolicyState
@@ -306,6 +307,10 @@ func newReportBootID() string {
 }
 
 func (s *Service) Run(ctx context.Context) (runErr error) {
+	egressCtx, stopEgress := context.WithCancel(ctx)
+	egressDone := make(chan struct{})
+	go func() { defer close(egressDone); s.relayEgressLoop(egressCtx) }()
+	defer func() { stopEgress(); <-egressDone }()
 	// 后台任务启动前固定日志对象，等待首个配置时也保留节点归属。
 	if s.nodeLog == nil {
 		s.nodeLog = nlog.Scoped(s.cfg.LogScope(), s.cfg.Panel.NodeID, "agent")
@@ -1097,7 +1102,7 @@ func (s *Service) startKernel(ctx context.Context, nc *model.NodeSpec, users []m
 		if !s.applyFirewall(ctx, nc, users) {
 			return false
 		}
-	} else if nc.SourcePolicy.Enabled() && !s.prepareFirewall(ctx, nc, users) {
+	} else if (nc.SourcePolicy.Enabled() || nc.HasRelayFirewall()) && !s.prepareFirewall(ctx, nc, users) {
 		return false
 	}
 	if err := s.kernel.Start(prepared, users, s.tlsCert()); err != nil {
@@ -1401,7 +1406,7 @@ func (s *Service) trackAndEnforce(ctx context.Context) bool {
 	if checkSource {
 		interval = 5 * time.Second
 	}
-	checkLanding := s.lastConfig.ManagesFirewall() && s.lastConfig.IsRelayLanding() && s.lastConfig.Relay.EntryNodeID > 0
+	checkLanding := s.lastConfig.ManagesFirewall() && s.lastConfig.IsRelayLanding()
 	if (checkSource || checkLanding || s.firewallNotice.Load() != nil) && s.kernel.IsRunning() && time.Since(s.lastFirewallRetry) >= interval {
 		s.lastFirewallRetry = time.Now()
 		s.applyFirewall(ctx, s.lastConfig, s.lastUsers)
@@ -1930,6 +1935,12 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	s.metricsMu.RUnlock()
 
 	m := make(map[string]interface{})
+	if report := s.relayEgress.Load(); report != nil {
+		m["relay_egress"] = report
+	}
+	if notice := s.firewallNotice.Load(); notice != nil {
+		m["firewall_warning"] = *notice
+	}
 	if state := s.operations.snapshot.Load(); state != nil {
 		m["operations"] = state
 	}

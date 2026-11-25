@@ -37,6 +37,7 @@ type Client struct {
 	nodeType               string
 	machineID              int
 	httpClient             *http.Client
+	snapshotSlots          chan struct{}
 	hostMonitoringParent   *Client
 	hostMonitoringDisabled atomic.Bool
 
@@ -62,11 +63,12 @@ type Client struct {
 // NewClient creates a new panel API client.
 func NewClient(cfg config.PanelConfig) *Client {
 	return &Client{
-		baseURL:   strings.TrimRight(cfg.URL, "/"),
-		token:     cfg.Token,
-		nodeID:    cfg.NodeID,
-		nodeType:  cfg.NodeType,
-		machineID: cfg.MachineID,
+		baseURL:       strings.TrimRight(cfg.URL, "/"),
+		token:         cfg.Token,
+		nodeID:        cfg.NodeID,
+		nodeType:      cfg.NodeType,
+		machineID:     cfg.MachineID,
+		snapshotSlots: make(chan struct{}, 1),
 		httpClient: &http.Client{
 			Timeout:       30 * time.Second,
 			CheckRedirect: sameOriginRedirect,
@@ -97,6 +99,7 @@ func (c *Client) ForNode(nodeID int) *Client {
 		nodeType:             c.nodeType,
 		machineID:            c.machineID,
 		httpClient:           c.httpClient,
+		snapshotSlots:        c.snapshotSlots,
 		hostMonitoringParent: c,
 	}
 }
@@ -130,7 +133,7 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 	return c.HandshakeContext(context.Background())
 }
 func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, error) {
-	payload := map[string]interface{}{"device_handover": 1, "traffic_accounting": "routes-v1"}
+	payload := map[string]interface{}{"device_handover": 1, "traffic_accounting": "routes-v1", "relay_firewall": 1}
 	c.injectAuth(payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -621,7 +624,16 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 
 	var bodyReader io.Reader
 	if method == "GET" {
-		fullURL += "?" + c.authQuery().Encode()
+		u, err := url.Parse(fullURL)
+		if err != nil {
+			return nil, panelRequestError(err, method, path)
+		}
+		query := u.Query()
+		for key, values := range c.authQuery() {
+			query[key] = values
+		}
+		u.RawQuery = query.Encode()
+		fullURL = u.String()
 	} else if body != nil {
 		bodyReader = bytes.NewReader(body)
 	} else {
@@ -638,6 +650,9 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if method == http.MethodGet {
+		req.Header.Set("X-YZ-Snapshot-Chunks", "1")
+	}
 	if ifNoneMatch != "" {
 		req.Header.Set("If-None-Match", ifNoneMatch)
 	}

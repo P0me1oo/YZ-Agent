@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // sourcePlan 仅持久化监听范围和来源集合，用于异常退出后的恢复与精确清理。
@@ -75,7 +76,7 @@ func (b *systemBackend) ApplySources(ctx context.Context, plans map[string]Plan)
 		// 节点发现尚未完成时保留未认领的旧限制，避免先启动的节点撤销其他节点的保护。
 		for _, old := range b.state.SourcePlans {
 			_, known := plans[old.Owner]
-			if !known && b.recovering {
+			if !known && (b.recovering || b.sourcePlanProtected(old)) {
 				desired[old.Owner] = old
 			}
 		}
@@ -116,11 +117,37 @@ func (b *systemBackend) ApplySources(ctx context.Context, plans map[string]Plan)
 	if len(ordered) > 0 && reflect.DeepEqual(b.state.SourcePlans, ordered) {
 		return nil
 	}
+	previous := b.state.SourcePlans
 	b.state.SourcePlans = ordered
 	if len(ordered) == 0 {
 		b.state.SourceDriver = ""
 	}
-	return b.save()
+	if err := b.save(); err != nil {
+		b.state.SourcePlans = previous
+		b.state.SourceDriver = driver
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		var restoreErr error
+		if driver == "nftables" {
+			restoreErr = b.syncSourceNFT(restoreCtx, previous)
+		} else {
+			restoreErr = b.syncSourceIPTables(restoreCtx, previous)
+		}
+		if restoreErr != nil {
+			return fmt.Errorf("保存来源归属失败（%v），恢复原规则失败: %w", err, restoreErr)
+		}
+		return fmt.Errorf("保存来源归属失败，已恢复原规则: %w", err)
+	}
+	return nil
+}
+
+func (b *systemBackend) sourcePlanProtected(plan sourcePlan) bool {
+	for _, listener := range plan.Listeners {
+		if b.keepOwned(listener) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *systemBackend) selectSourceDriver(ctx context.Context) (string, error) {

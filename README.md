@@ -168,3 +168,7 @@ Xray 入站支持 `v2ray-plugin` WebSocket（可带 TLS）。面板需下发 `pl
 ## 许可证
 
 MPL-2.0.
+
+## 端口转发
+
+Realm／nftables 配置、运行条件、恢复机制及 TCP 拥塞算法展示见[端口转发说明](docs/port-forwarding.md)。

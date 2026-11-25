@@ -58,6 +58,10 @@ func (s *Service) publishRuntimeState(ctx context.Context) {
 	if value := s.operations.snapshot.Load(); value != nil {
 		state.Operations = value
 	}
+	// Source verification is control state and must not wait for a display lease.
+	if value := s.relayEgress.Load(); value != nil {
+		state.RelayEgress = value
+	}
 	if details {
 		status := s.collectStatus()
 		state.Metrics = s.buildMetrics(status)

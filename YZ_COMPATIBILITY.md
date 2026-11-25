@@ -1,6 +1,14 @@
 # YZ-Agent 兼容矩阵
 
+**v2.48.0** 为配套 Next / Dash 0.24.0 的本地验证版本，未发布、未部署。增加来源限制能力声明、必要实时测量与独立执行状态；保持旧面板版本化防火墙协议与固定核心依赖。完整数据库、受影响包竞态、原生双栈及双核心快照验证见 [Next 验收记录](../YZboard-Next/YZboard-Next/docs/relay-firewall-acceptance.md)。
+
+**v2.47.0** 为配套面板 2.28.0 / Dash 0.110.0 的本地开发版本，未发布、未部署。中转来源核对及独立端口限制见[说明](docs/relay-firewall.md)，正式核心依赖不变，旧面板无版本策略时保持原行为。包含工作区已有 Next 适配改动，验证范围见[记录](../YZboard/docs/relay-firewall-validation.md)。
+
+v2.46.0 为配套 Next 0.22.0 的本地开发版本，尚未发布或部署。新增有界配置分块、转发撤销与本机目标授权；核心依赖保持不变。见[Next 修复兼容](docs/next-security-fixes.md)。
+
 Agent v2.44.0 已发布，运行节点未升级；配套面板 2.25.0 / Dash 0.107.0 已更新生产。固定来源与完整核验见[发布记录](docs/release-v2.44.0.md)。
+
+v2.44.1 本地开发新增 YZboard Next 0.18.0 跨节点 IP 协调的初始化保护：机器节点首次握手失败时等待重试，避免未确认能力便加载有限额用户。控制平面、许可管理及面板客户端相关测试和控制平面静态检查通过；已部署 Huawei-SG、YT-HK 独立 Next 测试实例，未创建正式发布。见 [Next 用户限制兼容](docs/next-user-limits.md)。
 
 本次发布版本 **v2.44.0** 提供路由分类转换与拦截顺序，配套面板 2.25.0 / Dash 0.107.0。包含尚未单独发布的 v2.43.0 改动，正式核心依赖保持不变；说明与兼容边界见[服务端路由](docs/server-route-presets.md)。正式附件与验证结果以后续发布记录为准，下方保留既有版本记录。
 
@@ -1988,3 +1996,7 @@ make build-all VERSION=v2.30.0
 Next 的 Naive 下发 `naive_username=uuid`，与连接跟踪使用的 UUID 身份一致，凭据轮换撤销旧身份；未发送该字段的旧面板保留数字用户名。Xray SOCKS 支持显式 TLS，通用 TLS 配置保留 ALPN。
 
 本次协议联调的 HTTPUpgrade 首包修复位于相邻 YZ-sing-box 工作区。正式 go.mod 尚未切换，联调使用 Next 的 `tools/build-protocol-test-agent.sh` 创建临时模块文件显式替换核心，不修改正式依赖或已有模块缓存。实际结果与远端授权状态见 Next 的 `docs/protocol-expansion-acceptance.md`。
+
+## Next 端口转发（2.45.0 本地开发）
+
+新增机器级 Realm／nftables 转发接口和系统 TCP 拥塞算法只读上报，不修改代理核心依赖。Next 0.19.0 在 OVH-CA、Huawei-SG、YT-HK 测试环境验收，构建基于当前工作区且 `vcs.modified=true`，未正式发布。行为与条件见 [端口转发](docs/port-forwarding.md)。

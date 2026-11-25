@@ -52,8 +52,12 @@ func (b *systemBackend) planSourceTools(ctx context.Context, plans map[string]Pl
 		return nil, nil
 	}
 	required := false
+	relayOnly := true
 	for _, plan := range plans {
 		required = required || plan.Restricted
+		if plan.Restricted && !plan.RelayRestricted {
+			relayOnly = false
+		}
 	}
 	if !required {
 		return nil, nil
@@ -71,6 +75,12 @@ func (b *systemBackend) planSourceTools(ctx context.Context, plans map[string]Pl
 	}
 	if sourceToolsAvailable(b.commands.Available, driver) {
 		return nil, nil
+	}
+	if relayOnly {
+		if automatic && b.sourceIPTablesAvailable() {
+			return nil, nil
+		}
+		return nil, errSourceToolsMissing
 	}
 	commands := b.commands
 	return func(ctx context.Context) error { return provisionSourceTools(ctx, commands, driver, automatic) }, nil

@@ -284,6 +284,7 @@ func (w *WSClient) connect(ctx context.Context) error {
 	if w.cfg.Realtime {
 		q.Set("realtime", "1")
 	}
+	q.Set("snapshot_chunks", "1")
 	u.RawQuery = q.Encode()
 
 	// URL 含认证信息，日志只记录连接状态。
@@ -323,6 +324,7 @@ func (w *WSClient) connect(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		assembler := &snapshotAssembler{}
 		for {
 			var msg wsMessage
 			if err := conn.ReadJSON(&msg); err != nil {
@@ -330,6 +332,36 @@ func (w *WSClient) connect(ctx context.Context) error {
 				return
 			}
 			_ = conn.SetReadDeadline(time.Now().Add(w.cfg.HeartbeatTimeout))
+			if assembler.expire(time.Now()) {
+				errCh <- fmt.Errorf("incomplete snapshot expired")
+				return
+			}
+			if msg.Event == "sync.snapshot.chunk" {
+				if err := w.handleSnapshotChunk(msg.Data, assembler); err != nil {
+					errCh <- err
+					return
+				}
+				continue
+			}
+			if msg.Event == "sync.ready" && len(assembler.pending) != 0 {
+				errCh <- fmt.Errorf("snapshot synchronization completed with missing chunks")
+				return
+			}
+			if msg.Event == WSEventSyncSnapshot && len(assembler.pending) != 0 {
+				var header struct {
+					NodeID int `json:"node_id"`
+				}
+				if err := json.Unmarshal(msg.Data, &header); err != nil {
+					errCh <- err
+					return
+				}
+				for _, pending := range assembler.pending {
+					if pending.nodeID == header.NodeID {
+						errCh <- fmt.Errorf("snapshot replaced before pending chunks completed")
+						return
+					}
+				}
+			}
 			w.handleMessage(msg)
 			if msg.Event == "ping" {
 				select {
