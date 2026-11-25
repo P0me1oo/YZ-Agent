@@ -1,0 +1,102 @@
+{
+  "repository": "P0me1oo/YZ-Agent",
+  "tag": "v2.50.0",
+  "url": "https://github.com/P0me1oo/YZ-Agent/releases/tag/v2.50.0",
+  "source_commit": "d9a48fb048e7d854fa79da599b89e01e2a2a8a26",
+  "published_at": "2026-11-25T15:40:15Z",
+  "visibility": "public",
+  "docker_published": false,
+  "assets": [
+    {
+      "name": "install.sh",
+      "size": 69986,
+      "sha256": "664ccab98b57e1b3c5fc2464bfe522147774786a43e1d3edf0ce307278581b68",
+      "github_digest": "sha256:664ccab98b57e1b3c5fc2464bfe522147774786a43e1d3edf0ce307278581b68",
+      "download": "anonymous"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 997,
+      "sha256": "c9b338a93de00411dc13f09d94eadd02067c9a700dba3315d2ba2ab284075dca",
+      "github_digest": "sha256:c9b338a93de00411dc13f09d94eadd02067c9a700dba3315d2ba2ab284075dca",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "size": 33259680,
+      "sha256": "bcd8567267c8ffc8c13a8359747c7d3596b3b2881de75766d8e78daff984a723",
+      "github_digest": "sha256:bcd8567267c8ffc8c13a8359747c7d3596b3b2881de75766d8e78daff984a723",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "size": 5116,
+      "sha256": "ad337f3981cb663795b4747223797dd9f5d615138556a9bb69eec0e38f503081",
+      "github_digest": "sha256:ad337f3981cb663795b4747223797dd9f5d615138556a9bb69eec0e38f503081",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "size": 30998688,
+      "sha256": "740ad0ef3d703094a3add8440e6b827f24403fe7493ff3e213575b181153d3e3",
+      "github_digest": "sha256:740ad0ef3d703094a3add8440e6b827f24403fe7493ff3e213575b181153d3e3",
+      "download": "anonymous"
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "size": 5118,
+      "sha256": "8b5b9ca6c4d931edfe9ea414fa152145d36fa26a830aca2a5e4b05e6632ae681",
+      "github_digest": "sha256:8b5b9ca6c4d931edfe9ea414fa152145d36fa26a830aca2a5e4b05e6632ae681",
+      "download": "anonymous"
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "size": 79503520,
+      "sha256": "c6b8abc73ed618789122433a9982a893d02d4fd629ff8b798d52fe637e27ae0a",
+      "github_digest": "sha256:c6b8abc73ed618789122433a9982a893d02d4fd629ff8b798d52fe637e27ae0a",
+      "download": "anonymous"
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "size": 73400480,
+      "sha256": "bdfa7b1813b181935ec27f0bfcf125e774fcad32d3c9516d2a244c3e82d27ab9",
+      "github_digest": "sha256:bdfa7b1813b181935ec27f0bfcf125e774fcad32d3c9516d2a244c3e82d27ab9",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "size": 79503520,
+      "sha256": "c6b8abc73ed618789122433a9982a893d02d4fd629ff8b798d52fe637e27ae0a",
+      "github_digest": "sha256:c6b8abc73ed618789122433a9982a893d02d4fd629ff8b798d52fe637e27ae0a",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "size": 18411,
+      "sha256": "7ef427cb2a89faf7e3074cdd419612c4e452da69b91267b95093b21b5ccb2e6c",
+      "github_digest": "sha256:7ef427cb2a89faf7e3074cdd419612c4e452da69b91267b95093b21b5ccb2e6c",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "size": 73400480,
+      "sha256": "bdfa7b1813b181935ec27f0bfcf125e774fcad32d3c9516d2a244c3e82d27ab9",
+      "github_digest": "sha256:bdfa7b1813b181935ec27f0bfcf125e774fcad32d3c9516d2a244c3e82d27ab9",
+      "download": "anonymous"
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "size": 18413,
+      "sha256": "c10dd7ba0e1e3b65679f35ccc7542fb5a87cae419c552650d2ca401323f9b758",
+      "github_digest": "sha256:c10dd7ba0e1e3b65679f35ccc7542fb5a87cae419c552650d2ca401323f9b758",
+      "download": "anonymous"
+    },
+    {
+      "name": "release.json",
+      "size": 412,
+      "sha256": "367ec2648e917c5d388c6fe749b32ddfd7279b14a2c181abd3b0692a3c915cc3",
+      "github_digest": "sha256:367ec2648e917c5d388c6fe749b32ddfd7279b14a2c181abd3b0692a3c915cc3",
+      "download": "anonymous"
+    }
+  ]
+}

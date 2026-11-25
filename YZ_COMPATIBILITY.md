@@ -1,6 +1,6 @@
 # YZ-Agent 兼容矩阵
 
-**v2.50.0** 为落地 DDNS 的本地开发版本，配套 YZboard 2.29.0 / Dash 0.111.0，未发布或部署。基于 v2.48.0 的独立工作树，不包含原工作区 v2.49.0 未提交功能；固定核心依赖保持不变。两核心中转使用面板确认 IP，地址变化重建连接配置，说明见[落地 DDNS](docs/landing-ddns.md)，跨仓库验证见面板 `docs/landing-ddns-validation.md`。
+**v2.50.0** 已从独立分支 `release/v2.50.0` 发布，配套面板 2.29.0 / Dash 0.111.0，未升级运行节点。完整竞态、双架构与附件核验见[发布记录](docs/release-v2.50.0.md)。未合入原 dev 工作区，不包含其 v2.49.0 未提交改动。
 
 **v2.48.0** 已正式发布，配套 YZboard 2.28.0 / Dash 0.110.0，并兼容 Next / Dash 0.24.0；未更新运行节点。固定来源、完整 CI 与 13 份附件核验见[发布记录](docs/release-v2.48.0.md)。增加来源限制能力声明、必要实时测量与独立执行状态；保持旧面板版本化防火墙协议与固定核心依赖。完整数据库、受影响包竞态、原生双栈及双核心快照验证见 [Next 验收记录](../YZboard-Next/YZboard-Next/docs/relay-firewall-acceptance.md)。
 

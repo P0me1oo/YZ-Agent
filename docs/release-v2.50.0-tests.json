@@ -1,0 +1,22 @@
+{
+  "full_repository": {
+    "passed_top_level": 1154,
+    "skipped_top_level": 9,
+    "failed": 0,
+    "race": true
+  },
+  "fixed_dependencies": {
+    "passed_top_level": 43,
+    "failed": 0,
+    "race": true
+  },
+  "mihomo": {
+    "tests": 2,
+    "passed": 2
+  },
+  "native_firewall_jobs": 4,
+  "build_targets": [
+    "linux/amd64",
+    "linux/arm64"
+  ]
+}
