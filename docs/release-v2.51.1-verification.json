@@ -1,0 +1,80 @@
+{
+  "repository": "P0me1oo/YZ-Agent",
+  "tag": "v2.51.1",
+  "source": "091aa0d886ccbf6fa286fec189f4f869fd71b9b0",
+  "assets": [
+    {
+      "name": "install.sh",
+      "size": 69986,
+      "sha256": "664ccab98b57e1b3c5fc2464bfe522147774786a43e1d3edf0ce307278581b68",
+      "anonymous_download": true
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 997,
+      "sha256": "34fd79fb694037f967174af93a0d21bb69e32f3f36e0b74a54b02e59ddb8dba7",
+      "anonymous_download": true
+    },
+    {
+      "name": "xbctl-linux-amd64",
+      "size": 33280160,
+      "sha256": "9ecd71411678561b11a4902977d3a6c8cd2771aebcdda913e1c2e0faa02e9ad4",
+      "anonymous_download": true
+    },
+    {
+      "name": "xbctl-linux-amd64.buildinfo.txt",
+      "size": 5116,
+      "sha256": "9c2f346066fad97aa55ed92bfe49697f5ed97d594e8f4baffd78ea35d3deb1f7",
+      "anonymous_download": true
+    },
+    {
+      "name": "xbctl-linux-arm64",
+      "size": 30998688,
+      "sha256": "c29813e4c0c4212f95f603b4836d295d40826dbf18ed42cf307122c6edce522b",
+      "anonymous_download": true
+    },
+    {
+      "name": "xbctl-linux-arm64.buildinfo.txt",
+      "size": 5118,
+      "sha256": "73122ce48521b5e63feada3c6679efca71406b1adc07d97515e7a2ea86f87d02",
+      "anonymous_download": true
+    },
+    {
+      "name": "xboard-node-linux-amd64",
+      "size": 79528096,
+      "sha256": "7a5ec6747d88668716a5b43dd01041548c9444285ac206361e432077e8d53411",
+      "anonymous_download": true
+    },
+    {
+      "name": "xboard-node-linux-arm64",
+      "size": 73400480,
+      "sha256": "ba9a2dc1d499f4f6f121a95de605cfad811cb808afcdaf29ab3b5c9a9114e155",
+      "anonymous_download": true
+    },
+    {
+      "name": "yz-agent-linux-amd64",
+      "size": 79528096,
+      "sha256": "7a5ec6747d88668716a5b43dd01041548c9444285ac206361e432077e8d53411",
+      "anonymous_download": true
+    },
+    {
+      "name": "yz-agent-linux-amd64.buildinfo.txt",
+      "size": 18411,
+      "sha256": "32bdabfd8d384e960048588641d12657c6f6f5ce65c6a3f5ba977376f3956c47",
+      "anonymous_download": true
+    },
+    {
+      "name": "yz-agent-linux-arm64",
+      "size": 73400480,
+      "sha256": "ba9a2dc1d499f4f6f121a95de605cfad811cb808afcdaf29ab3b5c9a9114e155",
+      "anonymous_download": true
+    },
+    {
+      "name": "yz-agent-linux-arm64.buildinfo.txt",
+      "size": 18413,
+      "sha256": "95e051c2241f3effb363d26781c78da76dc1b0a0415586c21b2135c1e864e6bf",
+      "anonymous_download": true
+    }
+  ],
+  "source_architecture_and_version_verified": true
+}
