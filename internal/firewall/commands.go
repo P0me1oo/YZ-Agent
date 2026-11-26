@@ -58,8 +58,15 @@ func runSystemCommand(parent context.Context, timeout time.Duration, name, input
 		err = ctx.Err()
 	}
 	if err != nil {
-		// 不把已有防火墙规则或管理员的规则注释复制到通用日志。
-		return output.String(), fmt.Errorf("%s 执行失败: %w", name, err)
+		return output.String(), commandFailure(name, output.String(), err)
 	}
 	return output.String(), nil
+}
+
+func commandFailure(name, output string, err error) error {
+	// 仅提取已知固定诊断，不复制规则内容、地址或管理员注释。
+	if name == "ufw" && strings.Contains(output, "ERROR: IPv6 support not enabled") {
+		return fmt.Errorf("ufw IPv6 支持未启用: %w", err)
+	}
+	return fmt.Errorf("%s 执行失败: %w", name, err)
 }

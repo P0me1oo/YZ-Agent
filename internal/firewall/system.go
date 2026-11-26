@@ -96,6 +96,12 @@ func (b *systemBackend) apply(ctx context.Context, allows, redirects []Rule) err
 			return fmt.Errorf("未找到 firewall-cmd 命令")
 		}
 	}
+	if b.ipv6Unavailable && b.ownsBackend("ufw") && ufwAdded == "" {
+		ufwAdded, err = b.commands.Run(ctx, "ufw", "", "show", "added")
+		if err != nil {
+			return fmt.Errorf("核对禁用 IPv6 后的 UFW 持久规则: %w", err)
+		}
+	}
 	wanted := map[ownedRule]bool{}
 	var ufwAllows, manualUFW []Rule
 	// 所有区域先检查，再执行写入；冲突不能造成半套来源策略。

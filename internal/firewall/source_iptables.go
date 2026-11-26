@@ -322,8 +322,12 @@ func (b *systemBackend) syncSourceIPTables(ctx context.Context, plans []sourcePl
 	if !b.sourceIPTablesAvailable() {
 		return fmt.Errorf("缺少 iptables/ip6tables、restore 或 ipset")
 	}
-	// 双栈权限和归属必须在第一次写入前全部核对。
-	for _, name := range []string{"iptables", "ip6tables"} {
+	namespaces := []string{"iptables", "ip6tables"}
+	if b.ipv6Unavailable {
+		namespaces = []string{"iptables"}
+	}
+	// 所有可用地址族的权限和归属必须在第一次写入前全部核对。
+	for _, name := range namespaces {
 		if _, err := b.readSourceIPTables(ctx, name); err != nil {
 			return err
 		}
@@ -331,6 +335,9 @@ func (b *systemBackend) syncSourceIPTables(ctx context.Context, plans []sourcePl
 	desiredSets := map[string]bool{}
 	for _, plan := range plans {
 		for _, family := range []int{4, 6} {
+			if family == 6 && b.ipv6Unavailable {
+				continue
+			}
 			prefixes := ipsetSourcePrefixes(plan, family)
 			if len(prefixes) == 0 {
 				continue
@@ -345,11 +352,11 @@ func (b *systemBackend) syncSourceIPTables(ctx context.Context, plans []sourcePl
 			desiredSets[name] = true
 		}
 	}
-	for _, name := range []string{"iptables", "ip6tables"} {
+	for _, name := range namespaces {
 		if err := b.syncSourceIPTablesFamily(ctx, name, plans); err != nil {
 			restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			for _, family := range []string{"iptables", "ip6tables"} {
+			for _, family := range namespaces {
 				if restoreErr := b.syncSourceIPTablesFamily(restoreCtx, family, b.state.SourcePlans); restoreErr != nil {
 					return fmt.Errorf("来源规则更新失败（%v），恢复原规则失败: %w", err, restoreErr)
 				}

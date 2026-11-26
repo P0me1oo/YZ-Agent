@@ -29,16 +29,17 @@ type savedState struct {
 }
 
 type systemBackend struct {
-	cfg        config.FirewallConfig
-	scope      string
-	commands   commands
-	path       string
-	lock       *os.File
-	state      savedState
-	plans      map[string]Plan
-	manualUFW  map[string]bool
-	recovering bool
-	protected  []Rule
+	cfg             config.FirewallConfig
+	scope           string
+	commands        commands
+	path            string
+	lock            *os.File
+	state           savedState
+	plans           map[string]Plan
+	manualUFW       map[string]bool
+	recovering      bool
+	protected       []Rule
+	ipv6Unavailable bool
 }
 
 func newSystemBackend(cfg config.FirewallConfig, scope string, runner commands) (*systemBackend, error) {

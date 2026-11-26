@@ -177,6 +177,23 @@ func (b *systemBackend) removeUFW(ctx context.Context, owned ownedRule, existing
 			comments[comment] = true
 		}
 	}
+	if b.ipv6Unavailable && owned.Rule.Family == 6 {
+		if reader, ok := b.commands.(interface{ UFWIPv6Comments() ([]string, error) }); ok {
+			persistent, err := reader.UFWIPv6Comments()
+			if err != nil {
+				return fmt.Errorf("核对 UFW IPv6 归属: %w", err)
+			}
+			for _, comment := range persistent {
+				if b.ownsUFWComment(owned.Rule, comment) {
+					comments[comment] = true
+				}
+			}
+		}
+		if len(comments) > 0 {
+			return pending("内核 IPv6 已禁用，但仍有本实例的 UFW IPv6 持久规则；保留归属，等待规则可安全撤回")
+		}
+		return b.forget(owned)
+	}
 	for comment := range comments {
 		if _, err := b.commands.Run(ctx, "ufw", "", b.ufwArgsWithComment(owned.Rule, true, comment)...); err != nil {
 			return fmt.Errorf("删除 UFW 托管规则: %w", err)

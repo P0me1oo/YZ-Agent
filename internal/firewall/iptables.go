@@ -15,6 +15,9 @@ func (b *systemBackend) iptablesChain() string {
 
 func (b *systemBackend) syncIPTables(ctx context.Context, rules []Rule) error {
 	for _, family := range b.state.RedirectFamilies {
+		if family == 6 && b.ipv6Unavailable {
+			continue
+		}
 		name := "iptables"
 		if family == 6 {
 			name = "ip6tables"

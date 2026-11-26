@@ -661,10 +661,11 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 		nlog.Core().Debug("panel request", "method", method, "path", path)
 	}
 
+	trace := tracePanelRequest(req)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		c.apiFailure.Add(1)
-		return nil, panelRequestError(err, method, path)
+		return nil, trace.failure(panelRequestError(err, method, path))
 	}
 	const maxPanelResponse = 32 << 20
 	if resp.ContentLength > maxPanelResponse {
@@ -672,7 +673,8 @@ func (c *Client) doRequestContext(ctx context.Context, method, path string, body
 		c.apiFailure.Add(1)
 		return nil, errors.New("面板响应超过大小限制")
 	}
-	resp.Body = &boundedPanelBody{body: resp.Body, remaining: maxPanelResponse}
+	trace.response(resp)
+	resp.Body = &boundedPanelBody{body: &tracedPanelBody{ReadCloser: resp.Body, trace: trace}, remaining: maxPanelResponse}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		c.apiSuccess.Add(1)

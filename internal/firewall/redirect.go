@@ -35,6 +35,9 @@ func (b *systemBackend) applyRedirects(ctx context.Context, rules []Rule) error 
 	if driver == "iptables" {
 		families := map[int]bool{}
 		for _, family := range b.state.RedirectFamilies {
+			if family == 6 && b.ipv6Unavailable {
+				continue
+			}
 			families[family] = true
 		}
 		for _, rule := range rules {

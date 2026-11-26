@@ -158,6 +158,13 @@ func (m *Manager) apply(ctx context.Context, owner string, node *model.NodeSpec,
 		return nil
 	}
 	plan, err := PlanForNode(node, kernelType)
+	if backend, ok := m.backend.(*systemBackend); ok {
+		var familyErr error
+		plan, familyErr = backend.effectivePlan(plan)
+		if familyErr != nil {
+			return familyErr
+		}
+	}
 	plan.Ready = ready
 	if err == nil && plan.Restricted && (!m.linux || m.backend == nil) {
 		return fmt.Errorf("来源限制需要具备防火墙管理权限的 Linux 环境")
