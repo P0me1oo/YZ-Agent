@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +15,8 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
+	"github.com/P0me1oo/YZ-Agent/internal/privacy"
+	"github.com/P0me1oo/YZ-Agent/internal/tracker"
 )
 
 // pendingReportStore 把尚未确认的流量写入节点自己的配置目录，进程重启后继续上报。
@@ -36,16 +38,26 @@ type pendingReportStore struct {
 	loadErr    error
 }
 
-const pendingReportVersion = 1
+const pendingReportVersion = 2
 
 type pendingTraffic struct {
+	Scoped    bool                     `json:"scoped,omitempty"`
+	Direct    map[int][2]int64         `json:"direct_traffic,omitempty"`
+	Entry     map[int][2]int64         `json:"entry_traffic,omitempty"`
 	Traffic   map[int][2]int64         `json:"traffic,omitempty"`
 	Relay     map[int][2]int64         `json:"relay,omitempty"`
 	RelayUser map[int]map[int][2]int64 `json:"relay_user,omitempty"`
 }
 
 func (p pendingTraffic) empty() bool {
-	return len(p.Traffic) == 0 && len(p.Relay) == 0 && len(p.RelayUser) == 0
+	return len(p.Traffic) == 0 && len(p.Direct) == 0 && len(p.Entry) == 0 && len(p.Relay) == 0 && len(p.RelayUser) == 0
+}
+
+func (p pendingTraffic) aggregate() map[int][2]int64 {
+	if p.Scoped {
+		return tracker.TotalTraffic(p.Direct, p.Entry)
+	}
+	return p.Traffic
 }
 
 type pendingBatch struct {
@@ -57,12 +69,38 @@ type pendingBatch struct {
 func (p pendingBatch) empty() bool { return p.pendingTraffic.empty() && len(p.LimitEvents) == 0 }
 
 type pendingReportFile struct {
-	Version         int            `json:"version"`
-	JournalSequence uint64         `json:"journal_sequence,omitempty"`
-	Identity        string         `json:"identity"`
-	SavedAt         time.Time      `json:"saved_at"`
-	Batch           *pendingBatch  `json:"batch,omitempty"`
-	Pending         pendingTraffic `json:"pending"`
+	Version         int           `json:"version"`
+	JournalSequence uint64        `json:"journal_sequence,omitempty"`
+	Identity        string        `json:"identity"`
+	SavedAt         time.Time     `json:"saved_at"`
+	Batch           *pendingBatch `json:"batch,omitempty"`
+	// An old checkpoint can hold both an immutable batch and unbatched counters.
+	// Keep those counters in a distinct immutable batch until its own acknowledgement.
+	DeferredLegacy *pendingBatch  `json:"deferred_legacy,omitempty"`
+	Pending        pendingTraffic `json:"pending"`
+}
+
+func (p pendingReportFile) validateQueue() error {
+	if p.DeferredLegacy != nil && (p.DeferredLegacy.Scoped || p.DeferredLegacy.empty() ||
+		!p.Pending.Scoped && !p.Pending.empty()) {
+		return errors.New("invalid legacy traffic queue; preserve checkpoint for reconciliation")
+	}
+	items := []pendingTraffic{p.Pending}
+	for _, batch := range []*pendingBatch{p.Batch, p.DeferredLegacy} {
+		if batch != nil {
+			if batch.ID == "" && !batch.empty() {
+				return errors.New("unconfirmed traffic batch missing its report ID")
+			}
+			items = append(items, batch.pendingTraffic)
+		}
+	}
+	for _, item := range items {
+		if !item.Scoped && (len(item.Direct) > 0 || len(item.Entry) > 0) ||
+			item.Scoped && len(item.Traffic) > 0 && !maps.Equal(item.Traffic, item.aggregate()) {
+			return errors.New("inconsistent stored traffic roles; preserve checkpoint for reconciliation")
+		}
+	}
+	return nil
 }
 
 // newPendingReportStore 为向面板上报的节点创建存储；独立运行或没有配置目录时返回 nil。
@@ -80,6 +118,10 @@ func newPendingReportStore(cfg *config.Config) *pendingReportStore {
 // save 用临时文件替换的方式写入，写到一半断电也不会留下损坏的文件。
 // 没有任何待确认数据时删除文件。
 func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) error {
+	return s.saveQueue(batch, nil, pending)
+}
+
+func (s *pendingReportStore) saveQueue(batch, deferred *pendingBatch, pending pendingTraffic) error {
 	if s == nil {
 		return nil
 	}
@@ -93,7 +135,7 @@ func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) e
 	if batch != nil && batch.empty() {
 		batch = nil
 	}
-	state := pendingReportFile{Version: pendingReportVersion, Identity: s.identity, Batch: batch, Pending: pending}
+	state := pendingReportFile{Version: pendingReportVersion, Identity: s.identity, Batch: batch, DeferredLegacy: deferred, Pending: pending}
 	hash, err := pendingStateHash(state)
 	if err != nil {
 		return err
@@ -101,13 +143,16 @@ func (s *pendingReportStore) save(batch *pendingBatch, pending pendingTraffic) e
 	if s.saved && hash == s.lastHash {
 		return nil
 	}
-	empty := batch == nil && pending.empty()
+	empty := batch == nil && deferred == nil && pending.empty()
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	// 首次、每 128 次变化和清空时发布检查点；中间只追加变化记录。
-	if !s.saved || s.journalSeq%128 == 127 || empty {
+	// Migrating or promoting a legacy batch changes the queue structure. Publish
+	// that transition as one checkpoint before any transport can send the batch.
+	deferredChanged := (deferred == nil) != (s.lastState.DeferredLegacy == nil)
+	if !s.saved || s.lastState.Version != pendingReportVersion || s.journalSeq%128 == 127 || empty || deferredChanged {
 		state.JournalSequence = s.journalSeq + 1
 		checkpoint, err := json.Marshal(state)
 		if err != nil {
@@ -167,7 +212,7 @@ func (s *pendingReportStore) writeProtected(path string, data []byte) error {
 	return privacy.WriteRaw(path, protected, 0o600)
 }
 
-// compact 在正常退出前合并增量；历史版本仍能按旧单快照恢复未确认流量。
+// compact 在正常退出前将待确认批次和增量合并到同一版本的检查点。
 func (s *pendingReportStore) compact() error {
 	if s == nil {
 		return nil
@@ -179,7 +224,7 @@ func (s *pendingReportStore) compact() error {
 	if s.loadErr != nil {
 		return s.loadErr
 	}
-	if !s.saved || (s.lastState.Batch == nil && s.lastState.Pending.empty()) {
+	if !s.saved || (s.lastState.Batch == nil && s.lastState.DeferredLegacy == nil && s.lastState.Pending.empty()) {
 		return nil
 	}
 	state := s.lastState
@@ -201,8 +246,17 @@ func (s *pendingReportStore) compact() error {
 // load 读取上次保存的数据。文件不存在时返回空结果；内容损坏或属于其他节点时
 // 把文件改名保留，交由管理员核对，本次按空结果继续运行。
 func (s *pendingReportStore) load() (*pendingBatch, pendingTraffic, error) {
+	batch, _, pending, err := s.loadQueue()
+	if batch != nil {
+		batch.Traffic = batch.aggregate()
+	}
+	pending.Traffic = pending.aggregate()
+	return batch, pending, err
+}
+
+func (s *pendingReportStore) loadQueue() (*pendingBatch, *pendingBatch, pendingTraffic, error) {
 	if s == nil {
-		return nil, pendingTraffic{}, nil
+		return nil, nil, pendingTraffic{}, nil
 	}
 	release := privacy.LockFileWrite(s.path)
 	defer release()
@@ -214,7 +268,11 @@ func (s *pendingReportStore) load() (*pendingBatch, pendingTraffic, error) {
 		file := pendingReportFile{Version: pendingReportVersion, Identity: s.identity}
 		if err := s.replayJournal(&file, true); err != nil {
 			s.loadErr = err
-			return nil, pendingTraffic{}, err
+			return nil, nil, pendingTraffic{}, err
+		}
+		if err := file.validateQueue(); err != nil {
+			s.loadErr = err
+			return nil, nil, pendingTraffic{}, err
 		}
 		s.journalSeq = file.JournalSequence
 		if file.JournalSequence > 0 {
@@ -224,48 +282,52 @@ func (s *pendingReportStore) load() (*pendingBatch, pendingTraffic, error) {
 			}
 			if err != nil {
 				s.loadErr = err
-				return nil, pendingTraffic{}, err
+				return nil, nil, pendingTraffic{}, err
 			}
 		}
 		if file.Batch != nil && (file.Batch.ID == "" || file.Batch.empty()) {
 			file.Batch = nil
 		}
-		return file.Batch, file.Pending, nil
+		return file.Batch, file.DeferredLegacy, file.Pending, nil
 	}
 	if err != nil {
 		s.loadErr = err
-		return nil, pendingTraffic{}, err
+		return nil, nil, pendingTraffic{}, err
 	}
 	var file pendingReportFile
-	if err := json.Unmarshal(data, &file); err != nil || file.Version != pendingReportVersion || file.Identity != s.identity {
+	if err := json.Unmarshal(data, &file); err != nil || (file.Version != 1 && file.Version != pendingReportVersion) || file.Identity != s.identity {
 		aside := fmt.Sprintf("%s.invalid-%d", s.path, time.Now().Unix())
 		if renameErr := os.Rename(s.path, aside); renameErr != nil {
-			return nil, pendingTraffic{}, fmt.Errorf("pending report file unreadable and could not be moved aside: %w", renameErr)
+			return nil, nil, pendingTraffic{}, fmt.Errorf("pending report file unreadable and could not be moved aside: %w", renameErr)
 		}
 		if renameErr := os.Rename(s.path+".journal", aside+".journal"); renameErr != nil && !os.IsNotExist(renameErr) {
-			return nil, pendingTraffic{}, renameErr
+			return nil, nil, pendingTraffic{}, renameErr
 		}
 		if err == nil {
 			err = fmt.Errorf("version or node identity mismatch")
 		}
-		return nil, pendingTraffic{}, fmt.Errorf("pending report file moved to %s: %w", aside, err)
+		return nil, nil, pendingTraffic{}, fmt.Errorf("pending report file moved to %s: %w", aside, err)
 	}
 	if err := s.replayJournal(&file, false); err != nil {
 		s.loadErr = err
-		return nil, pendingTraffic{}, err
+		return nil, nil, pendingTraffic{}, err
+	}
+	if err := file.validateQueue(); err != nil {
+		s.loadErr = err
+		return nil, nil, pendingTraffic{}, err
 	}
 	s.journalSeq = file.JournalSequence
 	file.JournalSequence = 0
 	hash, err := pendingStateHash(file)
 	if err != nil {
-		return nil, pendingTraffic{}, err
+		return nil, nil, pendingTraffic{}, err
 	}
 	s.lastState = clonePendingState(file)
 	s.lastHash, s.saved = hash, true
 	if file.Batch != nil && (file.Batch.ID == "" || file.Batch.empty()) {
 		file.Batch = nil
 	}
-	return file.Batch, file.Pending, nil
+	return file.Batch, file.DeferredLegacy, file.Pending, nil
 }
 
 func isChmodUnsupported(err error) bool {

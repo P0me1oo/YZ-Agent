@@ -166,17 +166,21 @@ func TestFilteredSubscriptionPreservesAllLocalPrivateLevels(t *testing.T) {
 	logger := Scoped(key, 7, "test")
 	logger.Debug("local debug")
 	logger.Info("local info")
-	logger.Warn("uploaded warning token=" + strings.Repeat("test", 8))
+	message := "uploaded warning token=" + strings.Repeat("test", 8)
+	logger.Warn(message)
 	logger.Error("uploaded error")
-	if console.Len() != 0 || len(events) != 2 || !strings.Contains(events[0].Message, "[已隐藏]") {
-		t.Fatal("level filtering changed privacy, required events or sanitization")
+	if console.Len() != 0 || len(events) != 2 || events[0].Message != message {
+		t.Fatal("level filtering changed privacy or original diagnostic content")
 	}
 	raw, _ := os.ReadFile(filepath.Join(dir, "runtime.log.enc"))
 	var decoded bytes.Buffer
 	if err := state.ReadLog(&decoded, bytes.NewReader(raw)); err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"local debug", "local info", "uploaded warning", "uploaded error"} {
+	if bytes.Contains(raw, []byte(message)) {
+		t.Fatal("private log file contains plaintext diagnostics")
+	}
+	for _, marker := range []string{"local debug", "local info", message, "uploaded error"} {
 		if !strings.Contains(decoded.String(), marker) {
 			t.Fatalf("local level was lost: %s", marker)
 		}

@@ -374,6 +374,7 @@ func (t *ConnTracker) setNodeUsers(nc *model.NodeSpec, users []model.UserSpec) {
 func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpec) {
 	identities := make(map[string]relayIdentity)
 	userMap := buildUserMap(users)
+	loadKeys := make(map[string]int)
 	nodes := make(map[string]int)
 	if nc.IsRelayLanding() {
 		userMap = make(map[string]int)
@@ -392,9 +393,11 @@ func (t *ConnTracker) replaceNodeUsers(nc *model.NodeSpec, users []model.UserSpe
 		}
 		for _, child := range nc.Relay.Children {
 			nodes[child.Tag] = child.NodeID
+			loadKeys[child.Tag] = child.LoadKey()
 		}
 	}
 	t.usersMu.Lock()
+	t.relayLoadKeys = loadKeys
 	t.uuidMap, t.identities, t.relayNodes = userMap, identities, nodes
 	t.relayEntry = nc.IsRelayEntry()
 	t.relayAccounting = nc.IsRelayEntry() && nc.Relay.Accounting == "routes"
@@ -424,9 +427,10 @@ func (t *ConnTracker) resolveUser(name string, outbound adapter.Outbound) (strin
 	if identity, ok := t.identities[name]; ok {
 		canonical = identity.UUID
 	}
-	nodeID := 0
+	nodeID, loadKey := 0, 0
 	if outbound != nil {
 		nodeID = t.relayNodes[outbound.Tag()]
+		loadKey = t.relayLoadKeys[outbound.Tag()]
 	}
 	// 旧 QUIC 会话保留原认证名称；普通节点也必须拒绝已删除或轮换的身份。
 	allowed := uid > 0 || t.anonymous
@@ -435,5 +439,5 @@ func (t *ConnTracker) resolveUser(name string, outbound adapter.Outbound) (strin
 	if nodeID == 0 && !countDirect {
 		return canonical, uid, user, relayCounters{}, allowed
 	}
-	return canonical, uid, user, t.traffic.relayCounters(uid, nodeID), allowed
+	return canonical, uid, user, t.traffic.relayCounters(uid, nodeID, loadKey), allowed
 }

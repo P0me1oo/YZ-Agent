@@ -79,13 +79,21 @@ func TestTrafficProtectionRelayNoDirectFallbackRuntime(t *testing.T) {
 			landing.Relay = &model.RelayConfig{Mode: "landing", Protocol: "vless", VLESS: &model.RelayVLESSConfig{ID: relayCredential(runtimeUser(t, 992), 0)}}
 			landingCore := relayStartCore(t, kind, landing, nil, kernel.TLSCert{}, relayMarkerEcho(t, "landing"))
 			entry := runtimeNode(t, "vless")
-			entry.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{{NodeID: 12, RouteID: 12, Tag: "relay-12", Protocol: "vless", Address: "127.0.0.1", Port: landing.ServerPort, VLESS: &model.RelayVLESSConfig{ID: landing.Relay.VLESS.ID, Network: "tcp", Encryption: "none"}}}}
+			entry.Relay = &model.RelayConfig{Mode: "entry", RouteID: 11, Children: []model.RelayChild{{NodeID: 12, TrafficBinding: 81, RouteID: 12, Tag: "relay-12", Protocol: "vless", Address: "127.0.0.1", Port: landing.ServerPort, VLESS: &model.RelayVLESSConfig{ID: landing.Relay.VLESS.ID, Network: "tcp", Encryption: "none"}}}}
 			entryCore := relayStartCore(t, kind, entry, []model.UserSpec{user}, kernel.TLSCert{}, relayMarkerEcho(t, "direct"))
 			routed := user
 			routed.UUID = relayCredential(user, 12)
 			client := runtimeClient(t, entry, routed)
 			for _, network := range []string{"tcp", "udp"} {
 				relayMarkerExchange(t, client, "landing", network)
+			}
+			amounts, err := entryCore.(kernel.RelayTrafficReader).GetRelayTraffic(context.Background())
+			if err != nil || amounts[-81][0] == 0 || amounts[-81][1] == 0 || amounts[12] != [2]int64{} {
+				t.Fatalf("physical traffic binding %v: %v", amounts, err)
+			}
+			users, err := entryCore.(kernel.RelayUserTrafficReader).GetRelayUserTraffic(context.Background())
+			if err != nil || users[user.ID][12][0] == 0 {
+				t.Fatalf("logical route usage %v: %v", users, err)
 			}
 			landingCore.(kernel.ImmediateStopper).StopNow()
 			for _, network := range []string{"tcp", "udp"} {

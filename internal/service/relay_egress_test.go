@@ -94,3 +94,18 @@ func TestRelayMeasurementTargetChangesUpdateSnapshotWithoutKernelReload(t *testi
 		t.Fatal("target-only update would restart core")
 	}
 }
+
+func TestNextRoutingExitDoesNotDisableRelaySourceMeasurement(t *testing.T) {
+	node := &model.NodeSpec{AccessPolicyVersion: 1, CustomOutbounds: []model.OutboundConfig{{Tag: "next-exit-1", Protocol: "socks"}}, RelayEgressTargets: []panel.RelayEgressTarget{{NodeID: 1, Address: "landing.example", Port: 443, Token: strings.Repeat("a", 64)}}}
+	lookup := func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+	}
+	route := func(context.Context, netip.Addr, int) (string, error) { return "1.1.1.1", nil }
+	if !collectRelayEgress(t.Context(), node, lookup, route).Children[0].Complete {
+		t.Fatal("independent exit prevented relay source confirmation")
+	}
+	node.CustomOutbounds[0].Tag = "direct"
+	if collectRelayEgress(t.Context(), node, lookup, route).Children[0].Complete {
+		t.Fatal("arbitrary override was trusted")
+	}
+}

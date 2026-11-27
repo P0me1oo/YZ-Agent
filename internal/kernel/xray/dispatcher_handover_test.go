@@ -11,6 +11,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/devicegate/gatetest"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	"github.com/xtls/xray-core/common/buf"
 	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
@@ -178,5 +179,28 @@ func TestDeviceHandoverXrayFailedDispatchLinkClosesTransportBeforeRelease(t *tes
 	}
 	if len(gate.Snapshot().Sources) != 0 {
 		t.Fatal("实际关闭后仍占用设备名额")
+	}
+}
+
+func TestNextDeviceExclusionOnlySkipsAdmission(t *testing.T) {
+	remote := &gatetest.Remote{Admit: func(context.Context, devicegate.AdmissionRequest) (devicegate.AdmissionReply, error) {
+		return devicegate.AdmissionReply{Status: "denied"}, nil
+	}}
+	gate := gatetest.Manager(t, remote)
+	ld := newTestDispatcher()
+	ld.UpdateLimits(map[string]int{userEmail(1): 1}, nil, nil)
+	ld.deviceGate.Store(gate)
+	ld.deviceFilter = &deviceip.Filter{}
+	ld.deviceFilter.SetExcluded([]string{"8.8.8.8"})
+	permit, err := ld.acquireDevice(t.Context(), userEmail(1), "8.8.8.8")
+	if err != nil || permit != nil || remote.Calls.Load() != 0 {
+		t.Fatal("excluded source used a slot")
+	}
+	if _, err := ld.acquireDevice(t.Context(), "unknown-user", "8.8.8.8"); err == nil {
+		t.Fatal("exclusion bypassed identity")
+	}
+	ld.deviceFilter.SetExcluded(nil)
+	if _, err := ld.acquireDevice(t.Context(), userEmail(1), "8.8.8.8"); err == nil {
+		t.Fatal("removed exemption bypassed admission")
 	}
 }

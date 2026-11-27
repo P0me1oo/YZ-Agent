@@ -72,3 +72,47 @@ func TestTelemetrySubscriptionKeepsBusinessStateAndRestoresDisplay(t *testing.T)
 		t.Fatalf("切换展示上报改变了计费流量：%v", got)
 	}
 }
+
+type deviceDetailPublisher struct {
+	*demandTestPublisher
+	omit bool
+}
+
+func (p *deviceDetailPublisher) OmitDeviceDetails() bool { return p.omit }
+
+func TestDeviceDetailLeaseKeepsTrackingBillingAndCurrentUsers(t *testing.T) {
+	s, cp := newShutdownReportService()
+	p := &deviceDetailPublisher{demandTestPublisher: &demandTestPublisher{speedTestPublisher: &speedTestPublisher{shutdownReportPlane: cp, states: make(chan panel.StatePayload, 1)}}}
+	s.sink = p
+	s.operations.snapshot.Store(&operationsSnapshot{Version: 1})
+	s.tracker.Process(map[int][2]int64{1: {100, 200}}, map[int]map[string]bool{1: {"8.8.8.8": true, "::ffff:8.8.8.8": true}}, 2)
+	s.tracker.ProcessIPConnectionCounts(map[int]map[string]int{1: {"8.8.8.8": 2}})
+	s.tracker.ProcessConnectionCounts(map[int]int{1: 2}, map[int]map[int]int{1: {3: 2}})
+	s.tracker.ProcessRelayAlive(map[int]map[int]map[string]bool{1: {3: {"8.8.8.8": true}}})
+	for _, omit := range []bool{true, false} {
+		deadline := time.Now().Add(time.Second)
+		for s.stateActive.Load() && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		p.omit = omit
+		s.publishRuntimeState(context.Background())
+		select {
+		case state := <-p.states:
+			if len(state.Online) != 1 || state.Operations == nil {
+				t.Fatal("missing online users or runtime state")
+			}
+			if omit {
+				if state.Alive != nil || state.ConnectionCounts != nil || state.RelayConnectionCounts != nil || state.IPConnectionCounts != nil || state.RelayUserAlive != nil {
+					t.Fatal("lease still sent the device details")
+				}
+			} else if len(state.Alive[1]) != 1 || state.Alive[1][0] != "8.8.8.8" || state.ConnectionCounts[1] != 2 || state.IPConnectionCounts[1]["8.8.8.8"] != 2 || state.RelayConnectionCounts[1][3] != 2 || len(state.RelayUserAlive[1][3]) != 1 {
+				t.Fatal("latest deduplicated device snapshot did not resume")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("state was not sent")
+		}
+	}
+	if s.tracker.FlushTraffic()[1] != [2]int64{100, 200} {
+		t.Fatal("omitting display fields drained reliable traffic")
+	}
+}

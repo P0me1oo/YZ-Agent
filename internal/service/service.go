@@ -7,9 +7,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -39,6 +41,10 @@ import (
 )
 
 type Service struct {
+	meterReadFailed          atomic.Bool
+	meterWriteFailed         atomic.Bool
+	meterReportFailed        atomic.Bool
+	relayReadFailed          atomic.Bool
 	accessLogFailureRevision uint64
 
 	failures            nlog.Failures
@@ -119,6 +125,8 @@ type Service struct {
 	deviceGate        *devicegate.Manager
 	stateActive       atomic.Bool
 	userSpeed         userSpeedSampler
+	usageMode         bool
+	usageBatch        *panel.UserUsageBatch
 	discoveryActive   atomic.Bool
 	discoveryResults  chan discoveryResult
 	machineMailbox    *controlplane.NodeMailbox
@@ -132,11 +140,16 @@ type Service struct {
 	// 保留完整批次和 report ID，可让面板丢弃重试而不丢失请求期间产生的新流量。
 	reportMu          sync.Mutex
 	retryReport       *reportBatch
+	deferredLegacy    *pendingBatch
 	persistedBatch    *reportBatch
 	persistedRevision uint64
 	pendingPersisted  bool
-	reportBoot        string
-	reportSeq         atomic.Uint64
+	// Ownership of the kernel's cumulative ingress counters, including the
+	// final counters still readable after Stop. Written by the service loop.
+	meterRole          string
+	meterSwitchPending bool
+	reportBoot         string
+	reportSeq          atomic.Uint64
 	// pendingStore 把待确认的报告写入磁盘，进程重启后继续上报；独立运行时为 nil。
 	pendingStore *pendingReportStore
 	status       func(RuntimeStatus)
@@ -231,6 +244,20 @@ func NewWithControlPlane(cfg *config.Config, cp controlplane.ControlPlane) *Serv
 }
 
 // SetStatusHandler registers a lifecycle observer before Run is called.
+// ProxyMeterWarning is exchanged on the independent management connection, including when a node report cannot be delivered.
+func (s *Service) ProxyMeterWarning() string {
+	switch {
+	case s.meterWriteFailed.Load():
+		return "proxy_write_failed"
+	case s.meterReadFailed.Load() || s.relayReadFailed.Load():
+		return "proxy_read_failed"
+	case s.meterReportFailed.Load():
+		return "proxy_report_failed"
+	default:
+		return ""
+	}
+}
+
 func (s *Service) SetStatusHandler(handler func(RuntimeStatus)) {
 	s.status = handler
 }
@@ -1040,6 +1067,7 @@ func (s *Service) prepareUserState(users []model.UserSpec) {
 	s.lastUsers = append([]model.UserSpec{}, users...)
 	s.metricsMu.Unlock()
 	s.lastUserHash = computeUserHash(users)
+	s.autoSpeed.rules = nil
 	s.updateAutoSpeed(time.Now())
 }
 
@@ -1090,6 +1118,13 @@ func (s *Service) resetPollingState() {
 // startKernel 对每次启动执行完整检查，包括由用户变化触发的故障恢复。
 func (s *Service) startKernel(ctx context.Context, nc *model.NodeSpec, users []model.UserSpec) bool {
 	if !s.prepareRuntime(ctx, nc, users) {
+		return false
+	}
+	if err := s.setMeterRole(ctx, nc); err != nil {
+		s.failRuntime("旧角色流量尚未完整保存", nc, users, err)
+		// A failed read or disk write is transient. Retry the same desired config.
+		s.failedRuntimeHash = ""
+		s.meterSwitchPending = true
 		return false
 	}
 	prepared, err := s.prepareSourcePolicy(ctx, nc)
@@ -1358,7 +1393,8 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 		s.prepareUserState(nil)
 	}
 
-	if !s.kernel.IsRunning() && (len(s.lastUsers) > 0 || isLanding) {
+	roleChanged := s.meterRole != "" && s.meterRole != meterRole(s.lastConfig)
+	if (!s.kernel.IsRunning() || roleChanged) && (len(s.lastUsers) > 0 || isLanding) {
 		return s.startKernel(ctx, s.lastConfig, s.lastUsers)
 	}
 	if !s.prepareRuntime(ctx, s.lastConfig, s.lastUsers) {
@@ -1367,13 +1403,14 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 	if len(s.lastUsers) == 0 && !isLanding {
 		s.stopKernel()
 		s.runtimeApplied(nil, nil)
+		s.meterSwitchPending = false
 		return true
 	}
 
 	// If config changed, delegate to kernel.Reload. The kernel implementation
 	// decides whether to hot-swap users, reconstruct inbounds, or restart itself.
 	// 来源规则变更先停旧监听，避免重载过程中出现没有保护的监听窗口。
-	if s.kernel.IsRunning() && ((s.lastConfig.ManagesFirewall() && s.lastConfig.SourcePolicy.Enabled()) ||
+	if s.kernel.IsRunning() && ((s.lastConfig.AccessPolicyVersion > 0 && s.appliedState.Config != nil && !slices.Equal(s.lastConfig.DeviceIPExclude, s.appliedState.Config.DeviceIPExclude)) || (s.lastConfig.ManagesFirewall() && s.lastConfig.SourcePolicy.Enabled()) ||
 		(s.appliedState.Config != nil && s.appliedState.Config.ManagesFirewall() && s.appliedState.Config.SourcePolicy.Enabled()) ||
 		(s.appliedState.Config != nil && s.appliedState.Config.ManagesFirewall() != s.lastConfig.ManagesFirewall())) {
 		s.stopKernel()
@@ -1400,6 +1437,9 @@ func (s *Service) applyChanges(ctx context.Context, configChanged, usersChanged 
 }
 
 func (s *Service) trackAndEnforce(ctx context.Context) bool {
+	if s.meterSwitchPending && ctx.Err() == nil {
+		s.applyChanges(ctx, true, false)
+	}
 	s.retrySourceFirewall(ctx)
 	checkSource := s.lastConfig != nil && s.lastConfig.ManagesFirewall() && s.lastConfig.SourcePolicy.Enabled()
 	interval := 30 * time.Second
@@ -1432,19 +1472,82 @@ func (s *Service) trackAndEnforce(ctx context.Context) bool {
 	return true
 }
 
+func meterRole(config *model.NodeSpec) string {
+	switch {
+	case config.IsRelayEntry():
+		return "entry"
+	case config.IsRelayLanding():
+		return "landing"
+	default:
+		return "direct"
+	}
+}
+
+func (s *Service) setMeterRole(ctx context.Context, next *model.NodeSpec) error {
+	role := meterRole(next)
+	if s.meterRole != "" && s.meterRole != role {
+		// Reload can keep old connections alive. Fully stop the old runtime so
+		// every byte up to and including teardown has one provable role.
+		s.stopKernel()
+		if _, _, err := s.collectTraffic(ctx); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if s.meterRole == "entry" && s.relayReadFailed.Load() {
+			return errors.New("旧前置流量明细读取失败")
+		}
+		if err := s.persistPending(); err != nil {
+			return err
+		}
+	}
+	s.tracker.SetEntryRuntime(role == "entry")
+	s.meterRole = role
+	s.meterSwitchPending = false
+	return nil
+}
+
 // collectTraffic 只采样，不启动内核；停止节点和进程退出也需要读取最终累计值。
 func (s *Service) collectTraffic(ctx context.Context) (connCount, userCount int, err error) {
-	traffic, aliveIPs, connCount, err := s.kernel.GetUserTraffic(ctx)
-	if err != nil {
-		s.userSpeed = userSpeedSampler{maxGap: s.userSpeed.maxGap}
-		return 0, 0, err
+	defer func() { s.meterReadFailed.Store(err != nil) }()
+	var traffic map[int][2]int64
+	ids, compact := s.userUsageDemand()
+	now := time.Now()
+	s.usageBatch = nil
+	if compact && !s.usageMode {
+		s.tracker.ProcessConnectionCounts(nil, nil)
+		s.tracker.ProcessIPConnectionCounts(nil)
+		s.tracker.ProcessRelayAlive(nil)
 	}
-	s.userSpeed.sample(traffic, time.Now())
-	s.updateAutoSpeed(time.Now())
-	s.tracker.Process(traffic, aliveIPs, connCount)
-	s.trackRelayTraffic(ctx)
-	s.trackRelayAlive(ctx)
-	s.trackConnectionCounts(ctx)
+	s.usageMode = compact
+	if compact {
+		detailIDs := ids
+		if len(ids) > 0 && !s.usageDetailsDue() {
+			detailIDs = nil
+		}
+		sample := s.kernel.(kernel.UsageReader).ReadUserUsage(ctx, detailIDs)
+		connCount = sample.Connections
+		traffic = sample.Traffic.Users
+		s.relayReadFailed.Store(false)
+		s.tracker.ProcessSummary(traffic, sample.OnlineUsers, connCount)
+		s.tracker.ProcessRelay(sample.Traffic.Relay)
+		s.tracker.ProcessRelayUser(sample.Traffic.RelayUsers)
+		s.sampleRequestedUsage(ids, sample, now)
+	} else {
+		var aliveIPs map[int]map[string]bool
+		traffic, aliveIPs, connCount, err = s.kernel.GetUserTraffic(ctx)
+		if err != nil {
+			s.userSpeed = userSpeedSampler{maxGap: s.userSpeed.maxGap}
+			return 0, 0, err
+		}
+		s.userSpeed.sample(traffic, now)
+		s.updateAutoSpeed(now)
+		s.tracker.Process(traffic, aliveIPs, connCount)
+		s.trackRelayTraffic(ctx)
+		s.trackRelayAlive(ctx)
+		s.trackConnectionCounts(ctx)
+	}
 	// 每次采样都保存；面板不可用、退避或请求仍在途时也不能只留在内存里。
 	if err := s.persistPending(); err == nil {
 		s.reportMu.Lock()
@@ -1544,6 +1647,9 @@ func (s *Service) pushReportSync() {
 	if hasRetry {
 		batchCount++
 	}
+	if s.deferredLegacy != nil {
+		batchCount++
+	}
 	for range batchCount {
 		if ctx.Err() != nil {
 			return
@@ -1590,41 +1696,40 @@ func (s *Service) pushFinalBatch(ctx context.Context, batch *reportBatch) bool {
 func (s *Service) takeReportBatch() *reportBatch {
 	s.reportMu.Lock()
 	defer s.reportMu.Unlock()
+	if s.retryReport == nil && s.deferredLegacy != nil {
+		s.retryReport = restoredReport(s.deferredLegacy)
+		s.deferredLegacy = nil
+		_ = s.persistBatchLocked(s.retryReport)
+	}
 	if s.retryReport != nil {
 		batch := s.retryReport
 		if batch.restored {
 			// 上次运行保存的批次只含流量，状态和指标换成当前值；设备与在线人数不重发旧快照。
-			s.fillReportStatus(&batch.payload)
+			if !s.usageMode {
+				s.fillReportStatus(&batch.payload)
+			}
 			batch.restored = false
 		}
 		return batch
 	}
 
-	traffic := cloneTraffic(s.tracker.FlushTraffic())
-	relayTraffic := cloneTraffic(s.tracker.FlushRelayTraffic())
-	relayUserTraffic := cloneRelayUserTraffic(s.tracker.FlushRelayUserTraffic())
-	aliveIPs := cloneAliveIPs(s.tracker.FlushAliveIPs())
-	limitEvents := s.collectLimitEvents()
-	connectionCounts, relayConnectionCounts := s.tracker.CurrentConnectionCounts()
+	// Flush transfers ownership of the pending maps; a retry keeps these exact counters.
 	reportID := s.nextReportIDLocked()
-
-	batch := &reportBatch{
-		id: reportID,
-		payload: controlplane.ReportPayload{
-			ReportID:              reportID,
-			Traffic:               traffic,
-			RelayTraffic:          relayTraffic,
-			RelayUserTraffic:      relayUserTraffic,
-			RelayUserAlive:        s.tracker.RelayUserAlive(),
-			Alive:                 aliveIPs,
-			Online:                s.tracker.CurrentOnline(),
-			ConnectionCounts:      connectionCounts,
-			IPConnectionCounts:    s.tracker.CurrentIPConnectionCounts(),
-			RelayConnectionCounts: relayConnectionCounts,
-			LimitEvents:           limitEvents,
-		},
+	direct, entry := s.tracker.FlushScopedTraffic()
+	batch := &reportBatch{id: reportID, payload: controlplane.ReportPayload{
+		ReportID: reportID, ScopedTraffic: true, DirectTraffic: direct, EntryTraffic: entry,
+		Traffic: tracker.TotalTraffic(direct, entry), RelayTraffic: s.tracker.FlushRelayTraffic(),
+		RelayUserTraffic: s.tracker.FlushRelayUserTraffic(), LimitEvents: s.collectLimitEvents(),
+	}}
+	if !s.usageMode {
+		payload := &batch.payload
+		payload.RelayUserAlive = s.tracker.RelayUserAlive()
+		payload.Alive = s.tracker.FlushAliveIPs()
+		payload.Online = s.tracker.CurrentOnline()
+		payload.ConnectionCounts, payload.RelayConnectionCounts = s.tracker.CurrentConnectionCounts()
+		payload.IPConnectionCounts = s.tracker.CurrentIPConnectionCounts()
+		s.fillReportStatus(payload)
 	}
-	s.fillReportStatus(&batch.payload)
 	// 在发出请求前登记批次，期间的采样保存必须包含这个未确认批次。
 	s.retryReport = batch
 	_ = s.persistBatchLocked(batch)
@@ -1644,32 +1749,42 @@ func (s *Service) fillReportStatus(payload *controlplane.ReportPayload) {
 
 // restorePendingReports 读取上次运行保存的数据：未确认批次作为待重试批次原样重发，
 // 尚未组成批次的流量并入本次累计。
+func restoredReport(batch *pendingBatch) *reportBatch {
+	return &reportBatch{id: batch.ID, restored: true, payload: controlplane.ReportPayload{
+		ReportID: batch.ID, ScopedTraffic: batch.Scoped, DirectTraffic: batch.Direct, EntryTraffic: batch.Entry,
+		Traffic: batch.aggregate(), RelayTraffic: batch.Relay, RelayUserTraffic: batch.RelayUser, LimitEvents: batch.LimitEvents,
+	}}
+}
+
 func (s *Service) restorePendingReports() {
 	if s.pendingStore == nil {
 		return
 	}
-	batch, pending, err := s.pendingStore.load()
+	batch, deferred, pending, err := s.pendingStore.loadQueue()
 	if err != nil {
 		s.logger().Error("failed to restore pending traffic", "error", err)
 		return
 	}
-	if batch != nil {
-		s.reportMu.Lock()
-		s.retryReport = &reportBatch{
-			id: batch.ID,
-			payload: controlplane.ReportPayload{
-				ReportID:         batch.ID,
-				Traffic:          batch.Traffic,
-				RelayTraffic:     batch.Relay,
-				RelayUserTraffic: batch.RelayUser,
-				LimitEvents:      batch.LimitEvents,
-			},
-			restored: true,
+	if !pending.Scoped && !pending.empty() {
+		// These bytes predate classification. Seal them by themselves so fresh
+		// traffic can accumulate safely even while the older batch awaits an ACK.
+		legacy := &pendingBatch{ID: s.nextReportIDLocked(), pendingTraffic: pending}
+		if batch == nil {
+			batch = legacy
+		} else {
+			deferred = legacy
 		}
-		s.reportMu.Unlock()
+		pending = pendingTraffic{}
 	}
-	if len(pending.Traffic) > 0 {
-		s.tracker.RestoreTraffic(pending.Traffic)
+	if deferred != nil || batch != nil && !batch.Scoped && !batch.pendingTraffic.empty() {
+		s.logger().Warn("发现旧版未区分角色的待报流量，保留独立批次；切换到要求分类上报的面板前须先排空或核对历史账本")
+	}
+	s.deferredLegacy = deferred
+	if batch != nil {
+		s.retryReport = restoredReport(batch)
+	}
+	if len(pending.Direct) > 0 || len(pending.Entry) > 0 {
+		s.tracker.RestoreScopedTraffic(pending.Direct, pending.Entry)
 	}
 	if len(pending.Relay) > 0 {
 		s.tracker.RestoreRelayTraffic(pending.Relay)
@@ -1678,9 +1793,9 @@ func (s *Service) restorePendingReports() {
 		s.tracker.RestoreRelayUserTraffic(pending.RelayUser)
 	}
 	if batch != nil || !pending.empty() {
-		users := len(pending.Traffic)
+		users := len(pending.Direct) + len(pending.Entry)
 		if batch != nil {
-			users += len(batch.Traffic)
+			users += len(s.retryReport.payload.Traffic)
 		}
 		s.logger().Info("restored pending traffic from previous run", "has_batch", batch != nil, "user_entries", users)
 	}
@@ -1706,16 +1821,24 @@ func (s *Service) persistBatchLocked(batch *reportBatch) error {
 	var saved *pendingBatch
 	if batch != nil {
 		saved = &pendingBatch{ID: batch.id, LimitEvents: batch.payload.LimitEvents, pendingTraffic: pendingTraffic{
-			Traffic:   batch.payload.Traffic,
+			Scoped:    batch.payload.ScopedTraffic,
+			Direct:    batch.payload.DirectTraffic,
+			Entry:     batch.payload.EntryTraffic,
 			Relay:     batch.payload.RelayTraffic,
 			RelayUser: batch.payload.RelayUserTraffic,
 		}}
+		if !batch.payload.ScopedTraffic {
+			saved.Traffic = batch.payload.Traffic
+		}
 	}
-	traffic, relay, relayUser := s.tracker.PendingSnapshot()
-	if err := s.pendingStore.save(saved, pendingTraffic{Traffic: traffic, Relay: relay, RelayUser: relayUser}); err != nil {
+	direct, entry, relay, relayUser := s.tracker.ScopedPendingSnapshot()
+	pending := pendingTraffic{Scoped: true, Direct: direct, Entry: entry, Relay: relay, RelayUser: relayUser}
+	if err := s.pendingStore.saveQueue(saved, s.deferredLegacy, pending); err != nil {
+		s.meterWriteFailed.Store(true)
 		s.logger().Warn("failed to save pending traffic", "error", err)
 		return err
 	}
+	s.meterWriteFailed.Store(false)
 	s.persistedBatch, s.persistedRevision, s.pendingPersisted = batch, revision, true
 	return nil
 }
@@ -1725,7 +1848,8 @@ func (s *Service) sendReport(batch *reportBatch) error {
 	return s.sendReportContext(context.Background(), batch)
 }
 
-func (s *Service) sendReportContext(ctx context.Context, batch *reportBatch) error {
+func (s *Service) sendReportContext(ctx context.Context, batch *reportBatch) (err error) {
+	defer func() { s.meterReportFailed.Store(err != nil) }()
 	if err := s.persistPending(); err != nil {
 		return fmt.Errorf("save report before sending: %w", err)
 	}
@@ -1799,6 +1923,7 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 	}
 	relay, err := reader.GetRelayTraffic(ctx)
 	if err != nil {
+		s.relayReadFailed.Store(true)
 		s.failures.Report(s.logger(), "get relay traffic failed", err)
 		return
 	}
@@ -1811,9 +1936,11 @@ func (s *Service) trackRelayTraffic(ctx context.Context) {
 	}
 	relayUser, err := userReader.GetRelayUserTraffic(ctx)
 	if err != nil {
+		s.relayReadFailed.Store(true)
 		s.failures.Report(s.logger(), "get per-user relay traffic failed", err)
 		return
 	}
+	s.relayReadFailed.Store(false)
 	s.tracker.ProcessRelayUser(relayUser)
 	s.failures.Report(s.logger(), "get per-user relay traffic failed", nil)
 }
@@ -1852,6 +1979,7 @@ func (s *Service) trackConnectionCounts(ctx context.Context) {
 	users, relay, err := reader.GetConnectionSnapshot(ctx)
 	s.failures.Report(s.logger(), "get connection snapshot failed", err)
 	if err != nil {
+		s.tracker.ProcessConnectionCounts(nil, nil)
 		return
 	}
 	s.tracker.ProcessConnectionCounts(users, relay)
@@ -1896,35 +2024,6 @@ func cloneTraffic(src map[int][2]int64) map[int][2]int64 {
 	return dst
 }
 
-func cloneRelayUserTraffic(src map[int]map[int][2]int64) map[int]map[int][2]int64 {
-	if len(src) == 0 {
-		return nil
-	}
-	out := make(map[int]map[int][2]int64, len(src))
-	for uid, nodes := range src {
-		if len(nodes) == 0 {
-			continue
-		}
-		copyNodes := make(map[int][2]int64, len(nodes))
-		for nodeID, value := range nodes {
-			copyNodes[nodeID] = value
-		}
-		out[uid] = copyNodes
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func cloneAliveIPs(src map[int][]string) map[int][]string {
-	dst := make(map[int][]string, len(src))
-	for uid, ips := range src {
-		dst[uid] = append([]string(nil), ips...)
-	}
-	return dst
-}
-
 // buildMetrics aggregates node-level metrics to be reported to the panel.
 // This includes active connections, per-core CPU, GC stats, API call stats,
 // WebSocket status, and limiter hit counts.
@@ -1947,7 +2046,6 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	if results := s.scheduler.Snapshot(); len(results) > 0 {
 		m["scheduling_probes"] = results
 	}
-	online := s.tracker.CurrentOnline()
 
 	m["uptime"] = status.Uptime
 	m["goroutines"] = status.Goroutines
@@ -1955,7 +2053,7 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	// Active connections (last measured during tracker.Process()).
 	m["active_connections"] = s.tracker.ActiveConnections()
 	m["total_connections"] = s.tracker.TotalConnections()
-	m["active_users"] = len(online)
+	m["active_users"] = s.tracker.OnlineCount()
 	m["total_users"] = len(lastUsers)
 
 	// Speed
@@ -2020,7 +2118,7 @@ func (s *Service) applySchedulingTargets(cfg *model.NodeSpec) {
 }
 
 // applyDeviceIPExclude 更新当前实例的前置服务器名单，不影响同进程其他节点。
-// 名单内的来源不计入设备数；没有节点开关的旧配置继续按名单信任 PROXY 头。
+// 名单内来源只豁免设备计数，PROXY 信任由独立名单决定。
 func (s *Service) applyDeviceIPExclude(cfg *model.NodeSpec) {
 	setter, ok := s.kernel.(interface {
 		SetDeviceIPExclude([]string) ([]string, bool)
@@ -2033,6 +2131,9 @@ func (s *Service) applyDeviceIPExclude(cfg *model.NodeSpec) {
 		s.logger().Warn("device ip exclude list has invalid entries, skipped", "entries", invalid)
 	}
 	if changed {
+		if cfg.AccessPolicyVersion > 0 && s.deviceGate != nil {
+			s.deviceGate.RetireExcluded(cfg.DeviceIPExclude)
+		}
 		s.logger().Info("device ip exclude list updated", "entries", len(cfg.DeviceIPExclude)-len(invalid))
 	}
 }
@@ -2048,6 +2149,10 @@ func computeConfigHash(cfg *model.NodeSpec) string {
 	// We marshal the entire config to be safe. Node config updates are low-frequency,
 	// so the robustness of capturing all fields outweighs the micro-performance of manual hashing.
 	data, _ := json.Marshal(cfg)
+	if cfg.AccessPolicyVersion > 0 {
+		excluded, _ := json.Marshal(cfg.DeviceIPExclude)
+		h.Write(excluded)
+	}
 	h.Write(data)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

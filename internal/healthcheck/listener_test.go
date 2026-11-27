@@ -119,3 +119,18 @@ func TestListenerNativeInspectionDoesNotConnectAndDetectsClose(t *testing.T) {
 		t.Fatalf("已关闭监听仍被认定可用：%v %v", ok, err)
 	}
 }
+
+func TestUDPListenerOwnership(t *testing.T) {
+	conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := conn.LocalAddr().String()
+	if owned, err := ListenerNetwork(t.Context(), "udp", address); err != nil || !owned {
+		t.Fatalf("UDP ownership: %v %v", owned, err)
+	}
+	conn.Close()
+	if owned, err := ListenerNetwork(t.Context(), "udp", address); err != nil || owned {
+		t.Fatalf("closed UDP: %v %v", owned, err)
+	}
+}

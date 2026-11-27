@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
@@ -52,6 +53,17 @@ func collectRelayEgress(ctx context.Context, node *model.NodeSpec, lookup relayL
 	for _, target := range node.RelayEgressTargets {
 		item := relayEgressChild{NodeID: target.NodeID, Token: target.Token, Sources: []string{}}
 		defaultRoute := len(node.CustomOutbounds)+len(node.CustomRoutes)+len(node.CustomRouteRules) == 0
+		// Next namespaced exits cannot override a relay transport; relay selection
+		// precedes non-block panel routing and has no outbound chaining.
+		if node.AccessPolicyVersion == 1 && len(node.CustomRoutes)+len(node.CustomRouteRules) == 0 {
+			defaultRoute = true
+			for _, out := range node.CustomOutbounds {
+				if !strings.HasPrefix(out.Tag, "next-exit-") || out.ProxyTag != "" {
+					defaultRoute = false
+					break
+				}
+			}
+		}
 		valid := target.NodeID > 0 && target.Port > 0 && target.Port <= 65535 && len(target.Token) == 64
 		if valid && defaultRoute {
 			addresses, err := lookup(ctx, "ip", target.Address)

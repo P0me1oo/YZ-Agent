@@ -26,3 +26,14 @@ func TestRelayAddressesSupportsPoolFronts(t *testing.T) {
 		t.Fatal("落地地址被前置地址替代")
 	}
 }
+
+func TestNextRelayRejectsBroadPeerRoutes(t *testing.T) {
+	w := &model.RelayWireGuardConfig{Transport: "socks-v1", Address: []string{"10.253.0.1/32", "fd7a:797a::1/128"}, AllowedIPs: []string{"10.253.0.2/32", "fd7a:797a::2/128"}}
+	if err := checkAddresses(w, true); err != nil {
+		t.Fatal(err)
+	}
+	w.AllowedIPs = []string{"0.0.0.0/0", "::/0"}
+	if err := checkAddresses(w, true); err == nil {
+		t.Fatal("Next accepted default routes in isolated SOCKS tunnel")
+	}
+}

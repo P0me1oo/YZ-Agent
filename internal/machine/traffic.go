@@ -14,24 +14,34 @@ import (
 func (o *Orchestrator) initTraffic(ctx context.Context, p *machinetraffic.Policy) error {
 	identity := sha256.Sum256([]byte(fmt.Sprintf("%s|%d", o.cfg.Panel.URL, o.cfg.Machine.MachineID)))
 	o.trafficMeter = machinetraffic.New(filepath.Join(o.cfg.Kernel.ConfigDir, fmt.Sprintf("machine-traffic-%x.json", identity[:8])), nil)
+	return o.activateTraffic(ctx, p, true)
+}
+
+func (o *Orchestrator) activateTraffic(ctx context.Context, p *machinetraffic.Policy, initial bool) error {
 	if p == nil && !o.trafficMeter.HasPolicy() {
-		o.trafficMeter = nil
 		return nil
 	}
-	o.trafficBlocked.Store(true)
+	o.trafficDecisionMu.Lock()
+	defer o.trafficDecisionMu.Unlock()
+	o.trafficEnabled.Store(true)
+	setBlocked := o.setTrafficBlocked
+	if initial {
+		setBlocked = o.trafficBlocked.Store
+	}
+	setBlocked(true)
 	if p != nil {
 		if err := o.trafficMeter.Apply(*p); err != nil {
 			return err
 		}
 	}
 	sample, blocked := o.trafficMeter.Tick(time.Now())
-	o.trafficBlocked.Store(blocked)
+	setBlocked(blocked)
 	if next, err := o.client.ExchangeMachineTraffic(ctx, &sample); err == nil {
 		if err = o.trafficMeter.Apply(*next); err != nil {
 			return err
 		}
 		_, blocked = o.trafficMeter.Snapshot()
-		o.trafficBlocked.Store(blocked)
+		setBlocked(blocked)
 	}
 	return nil
 }
@@ -51,6 +61,11 @@ func (o *Orchestrator) setTrafficBlocked(blocked bool) {
 	}
 	o.mu.Unlock()
 	if changed {
+		o.trafficGeneration.Add(1)
+		select {
+		case o.forwardingWake <- struct{}{}:
+		default:
+		}
 		o.logger().Info("machine traffic protection changed", "blocked", blocked)
 		if !blocked && o.runCtx != nil {
 			o.runJob(func() { o.rediscover(o.runCtx) })
@@ -74,16 +89,20 @@ func (o *Orchestrator) trafficLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case sample := <-reports:
+				if sample.Mode == "proxy" {
+					sample.ProxyWarning = o.proxyMeterWarning()
+				}
 				p, err := o.client.ExchangeMachineTraffic(ctx, &sample)
+				o.failures.Report(o.logger(), "machine traffic exchange failed", err)
 				if err != nil {
 					continue
 				}
-				if err = o.trafficMeter.Apply(*p); err != nil {
-					o.setTrafficBlocked(true)
-					continue
-				}
+				o.trafficDecisionMu.Lock()
+				err = o.trafficMeter.Apply(*p)
+				o.failures.Report(o.logger(), "machine traffic policy update failed", err)
 				_, blocked := o.trafficMeter.Snapshot()
-				o.setTrafficBlocked(blocked)
+				o.setTrafficBlocked(blocked || (err != nil && p.Limit != 0))
+				o.trafficDecisionMu.Unlock()
 			}
 		}
 	})
@@ -93,9 +112,14 @@ func (o *Orchestrator) trafficLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
+			if !o.trafficEnabled.Load() {
+				continue
+			}
+			o.trafficDecisionMu.Lock()
 			sample, blocked := o.trafficMeter.Tick(now)
 			changed := o.trafficBlocked.Load() != blocked
 			o.setTrafficBlocked(blocked)
+			o.trafficDecisionMu.Unlock()
 			count++
 			if changed || count%5 == 0 {
 				select {
@@ -110,4 +134,17 @@ func (o *Orchestrator) trafficLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (o *Orchestrator) proxyMeterWarning() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, h := range o.nodes {
+		if h.proxyWarning != nil {
+			if warning := h.proxyWarning(); warning != "" {
+				return warning
+			}
+		}
+	}
+	return ""
 }

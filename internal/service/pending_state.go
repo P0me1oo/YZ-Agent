@@ -8,17 +8,22 @@ import (
 
 func clonePendingState(state pendingReportFile) pendingReportFile {
 	state.Pending = clonePendingTraffic(state.Pending)
-	if state.Batch != nil {
-		batch := *state.Batch
+	cloneBatch := func(old *pendingBatch) *pendingBatch {
+		if old == nil {
+			return nil
+		}
+		batch := *old
 		batch.pendingTraffic = clonePendingTraffic(batch.pendingTraffic)
 		batch.LimitEvents = append(batch.LimitEvents[:0:0], batch.LimitEvents...)
-		state.Batch = &batch
+		return &batch
 	}
+	state.Batch = cloneBatch(state.Batch)
+	state.DeferredLegacy = cloneBatch(state.DeferredLegacy)
 	return state
 }
 
 func clonePendingTraffic(traffic pendingTraffic) pendingTraffic {
-	copy := pendingTraffic{Traffic: cloneTraffic(traffic.Traffic), Relay: cloneTraffic(traffic.Relay)}
+	copy := pendingTraffic{Scoped: traffic.Scoped, Direct: cloneTraffic(traffic.Direct), Entry: cloneTraffic(traffic.Entry), Traffic: cloneTraffic(traffic.Traffic), Relay: cloneTraffic(traffic.Relay)}
 	if len(traffic.RelayUser) > 0 {
 		copy.RelayUser = make(map[int]map[int][2]int64, len(traffic.RelayUser))
 		for uid, nodes := range traffic.RelayUser {
@@ -31,7 +36,7 @@ func clonePendingTraffic(traffic pendingTraffic) pendingTraffic {
 // 每条记录带不同类别和完整身份后计算摘要，再无序合并。
 // 只有检查点需要编码完整待上报流量；增量保存不再每秒编码整份 JSON。
 func pendingStateHash(state pendingReportFile) ([32]byte, error) {
-	batch, err := json.Marshal(state.Batch)
+	batch, err := json.Marshal([]any{state.Batch, state.DeferredLegacy, state.Pending.Scoped})
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -50,6 +55,12 @@ func pendingStateHash(state pendingReportFile) ([32]byte, error) {
 	}
 	for id, value := range state.Pending.Traffic {
 		add(1, id, 0, value)
+	}
+	for id, value := range state.Pending.Direct {
+		add(4, id, 0, value)
+	}
+	for id, value := range state.Pending.Entry {
+		add(5, id, 0, value)
 	}
 	for id, value := range state.Pending.Relay {
 		add(2, 0, id, value)

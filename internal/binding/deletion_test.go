@@ -25,7 +25,7 @@ func TestDeletionRequiresFreshIdentityProof(t *testing.T) {
 					Token     string `json:"token"`
 					Nonce     string `json:"nonce"`
 				}
-				if r.Method != "POST" || r.URL.Path != "/api/v2/server/machine/binding-status" || r.URL.RawQuery != "" {
+				if r.Method != "POST" || r.URL.Path != "/api/v2/server/machine/nodes" || r.URL.RawQuery != "" {
 					t.Error("invalid binding request")
 				}
 				if json.NewDecoder(r.Body).Decode(&req) != nil || req.Token != token || req.MachineID != 117 || len(req.Nonce) != 64 {
@@ -60,7 +60,7 @@ func TestDeletionRequiresFreshIdentityProof(t *testing.T) {
 				key := sha256.Sum256([]byte(signingToken))
 				mac := hmac.New(sha256.New, key[:])
 				fmt.Fprintf(mac, "yz-agent-machine-deleted-v1\n%d\n%s", id, nonce)
-				json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": version, "state": state, "machine_id": id, "nonce": nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
+				json.NewEncoder(w).Encode(map[string]any{"binding_deletion": map[string]any{"version": version, "state": state, "machine_id": id, "nonce": nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
 			}))
 			defer server.Close()
 			deleted, err := Deleted(context.Background(), server.URL, 117, token)

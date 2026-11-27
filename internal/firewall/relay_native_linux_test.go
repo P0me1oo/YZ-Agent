@@ -11,6 +11,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
 )
 
 type relayNativeCommands struct {
@@ -126,6 +127,73 @@ func TestNativeRelayFirewallDualStackAndRollback(t *testing.T) {
 		t.Fatal("manual table changed")
 	}
 	if err := m.Release(ctx, "landing"); err != nil {
+		t.Fatal(err)
+	}
+	probe(true, true)
+}
+
+func TestNativeNextSourcePolicyLifecycle(t *testing.T) {
+	requireNativeFirewall(t)
+	ctx := t.Context()
+	driver := os.Getenv("YZ_RELAY_DRIVER")
+	if driver == "" {
+		driver = "nftables"
+	}
+	runner := &relayNativeCommands{nativeCommands: nativeCommands{t: t}}
+	cfg := config.FirewallConfig{Backend: "none", SourceBackend: driver, StateDir: t.TempDir()}
+	b, err := newSystemBackend(cfg, "next-source", runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := testManager(b)
+	t.Cleanup(func() {
+		if err := m.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	nativeEcho(t, 28390)
+	node := &model.NodeSpec{Protocol: "socks", ListenIP: "0.0.0.0", ServerPort: 28390, AccessPolicyVersion: 1, SourcePolicy: &sourcepolicy.Policy{Mode: "whitelist", AllowIPs: []string{"192.0.2.2", "2001:db8:1::2"}}, SourcePolicyReady: true}
+	prepare := func() {
+		t.Helper()
+		node.SourceBlockCIDRs, err = node.SourcePolicy.Blocked(sourcepolicy.Snapshot{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply := func() {
+		t.Helper()
+		prepare()
+		if err := m.Apply(ctx, "source", node, "xray"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	probe := func(v4, v6 bool) {
+		t.Helper()
+		for _, network := range []string{"tcp", "udp"} {
+			probeNative(t, nativeProbe{Protocol: network, Address: "192.0.2.1", Port: 28390, Open: v4}, nativeProbe{Protocol: network, Address: "2001:db8:1::1", Port: 28390, Open: v6})
+		}
+	}
+	apply()
+	probe(true, true)
+	node.SourcePolicy.AllowIPs = []string{"192.0.2.9"}
+	prepare()
+	runner.failReadback, runner.wrote = true, false
+	if err := m.Apply(ctx, "source", node, "xray"); err == nil || !strings.Contains(err.Error(), "已恢复原规则") {
+		t.Fatal("failure did not report restored rules", err)
+	}
+	probe(true, true)
+	apply()
+	probe(false, false)
+	node.AcceptProxyProtocol = new(true)
+	node.TrustedProxyIPs = []string{"192.0.2.2"}
+	apply()
+	probe(true, false)
+	node.AcceptProxyProtocol = new(false)
+	node.TrustedProxyIPs = nil
+	node.SourcePolicy = &sourcepolicy.Policy{Mode: "blacklist", BlockIPs: []string{"192.0.2.2", "2001:db8:1::2"}}
+	apply()
+	probe(false, false)
+	if err := m.Release(ctx, "source"); err != nil {
 		t.Fatal(err)
 	}
 	probe(true, true)

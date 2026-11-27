@@ -18,6 +18,8 @@ const realtimeFallbackInterval = 10 * time.Second
 
 // StatePayload 只含当前状态，不含会累计结算的流量或超限事件。
 type StatePayload struct {
+	OnlineCount           *int                     `json:"online_count,omitempty"`
+	UserUsage             *UserUsageBatch          `json:"user_usage,omitempty"`
 	RelayEgress           any                      `json:"relay_egress,omitempty"`
 	IPConnectionCounts    map[int]map[string]int   `json:"ip_connection_counts,omitempty"`
 	Operations            any                      `json:"operations,omitempty"`
@@ -34,6 +36,12 @@ type StatePayload struct {
 // mapValue 保留非 nil 的空快照，空状态与不支持该采样不是一回事。
 func (s StatePayload) mapValue() map[string]interface{} {
 	out := make(map[string]interface{})
+	if s.OnlineCount != nil {
+		out["online_count"] = *s.OnlineCount
+	}
+	if s.UserUsage != nil {
+		out["user_usage"] = s.UserUsage
+	}
 	if s.RelayEgress != nil {
 		out["relay_egress"] = s.RelayEgress
 	}
@@ -129,6 +137,17 @@ func (c *Client) runtimePath(action string) string {
 	return "/api/v2/server/realtime/" + action
 }
 
+// StateDue lets producers avoid building a snapshot during HTTP fallback's
+// quiet interval. A new socket or generation can send immediately. Never wait
+// for an in-flight request on the proxy's tracking or configuration loop.
+func (c *Client) StateDue() bool {
+	if !c.realtime.stateMu.TryLock() {
+		return false
+	}
+	defer c.realtime.stateMu.Unlock()
+	return time.Since(c.realtime.lastFallback) >= realtimeFallbackInterval || c.realtimeSocket() != nil
+}
+
 // PublishState 由独立状态发送任务调用。HTTP 兜底期间合并采样，只发送最新状态。
 func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 	if !c.RealtimeEnabled() {
@@ -213,7 +232,7 @@ func (c *Client) PublishState(ctx context.Context, state StatePayload) error {
 func (c *Client) reportRealtime(ctx context.Context, original map[string]interface{}) error {
 	// 流量重试不再携带原批次中的旧设备和负载状态。
 	payload := make(map[string]interface{})
-	for _, name := range []string{"report_id", "traffic", "relay_traffic", "relay_user_traffic", "traffic_accounting", "limit_events"} {
+	for _, name := range []string{"report_id", "traffic", "direct_traffic", "entry_traffic", "relay_traffic", "relay_loads", "relay_user_traffic", "traffic_accounting", "limit_events"} {
 		if value, ok := original[name]; ok {
 			payload[name] = value
 		}

@@ -55,6 +55,13 @@ func (m *Manager) installLeaseLocked(item Lease, deadline time.Time, sequence ui
 	if m.closing || !m.ready || (m.users != nil && !m.users[item.UserID]) {
 		return false
 	}
+	if sequence <= m.exclusionBarrier {
+		return false
+	}
+	if m.exclusionFilter != nil && m.exclusionFilter.CountKey(item.IP) == "" {
+		m.retireLocked(Revocation{UserID: item.UserID, IP: item.IP, Lease: item.Lease, Run: m.run, ConfirmedSequence: item.ConfirmedSequence})
+		return false
+	}
 	if sequence <= m.permissionBarriers[item.UserID] {
 		return false
 	}

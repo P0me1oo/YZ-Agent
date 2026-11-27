@@ -47,6 +47,7 @@ func (s *Service) prepareSourcePolicy(ctx context.Context, nc *model.NodeSpec) (
 	if nc == nil || !nc.SourcePolicy.Enabled() {
 		s.sourcePolicyDataFailed = false
 		s.sourcePolicyFailureHash = ""
+		s.sourcePolicyLastError = ""
 		return nc, nil
 	}
 	if nc.SourcePolicy.NeedsCN() && !s.sourcePolicySnapshot.Ready() {
@@ -59,6 +60,7 @@ func (s *Service) prepareSourcePolicy(ctx context.Context, nc *model.NodeSpec) (
 			return nil, err
 		}
 		if err != nil {
+			s.sourcePolicyLastError = err.Error()
 			nlog.Core().Warn("使用上一份大陆来源网段库", "error", err)
 		}
 		s.sourcePolicySnapshot = snapshot

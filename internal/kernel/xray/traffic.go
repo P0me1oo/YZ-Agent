@@ -26,13 +26,15 @@ func (x *Xray) collectInstanceStatsLocked(instance *xrayCore.Instance, config *m
 	if !ok {
 		return
 	}
-	tagToNode := config.RelayNodeIDByTag()
+	var loadKeys map[string]int
 	routeToNode := make(map[int]int)
 	if config.IsRelayEntry() {
 		if config.Relay.Accounting == "routes" {
 			routeToNode[config.Relay.RouteID] = 0
 		}
+		loadKeys = make(map[string]int, len(config.Relay.Children))
 		for _, child := range config.Relay.Children {
+			loadKeys[child.Tag] = child.LoadKey()
 			if child.RouteID > 0 && child.NodeID > 0 {
 				routeToNode[child.RouteID] = child.NodeID
 			}
@@ -83,12 +85,12 @@ func (x *Xray) collectInstanceStatsLocked(instance *xrayCore.Instance, config *m
 			}
 		case "outbound":
 			if len(parts) == 4 {
-				if node, exists := tagToNode[parts[1]]; exists {
+				if node, exists := loadKeys[parts[1]]; exists {
 					id, target = node, x.cumRelayTraffic
 				}
 			}
 		}
-		if target != nil && id >= 0 {
+		if target != nil {
 			if delta := counter.Set(0); delta > 0 {
 				current := target[id]
 				current[direction] += delta

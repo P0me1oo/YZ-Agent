@@ -96,7 +96,7 @@ func TestForwardingRevocationAppliesWhenCacheCannotBeSaved(t *testing.T) {
 	o := &Orchestrator{client: panel.NewClient(config.PanelConfig{URL: server.URL, MachineID: 1, Token: "test"})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
-	go func() { defer close(done); o.forwardingLoop(ctx, m) }()
+	go func() { defer close(done); o.forwardingLoop(ctx, m, nil) }()
 	defer func() { cancel(); <-done }()
 	select {
 	case err := <-failures:
@@ -124,7 +124,7 @@ func TestForwardingStartupDoesNotAuthorizeCachedRules(t *testing.T) {
 	o := &Orchestrator{client: panel.NewClient(config.PanelConfig{URL: server.URL, MachineID: 1, Token: "test"})}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
-	go func() { defer close(done); o.forwardingLoop(ctx, m) }()
+	go func() { defer close(done); o.forwardingLoop(ctx, m, nil) }()
 	defer func() { cancel(); <-done }()
 	for range 2 {
 		select {
@@ -136,4 +136,51 @@ func TestForwardingStartupDoesNotAuthorizeCachedRules(t *testing.T) {
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("cached rule started without online authorization", err)
 	}
+}
+
+func TestTrafficProtectionRevokesForwardingDuringExchange(t *testing.T) {
+	m, p, _, path := forwardingFixture(t)
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	var count atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if count.Add(1) == 2 {
+			close(arrived)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		_ = json.NewEncoder(w).Encode(p)
+	}))
+	defer server.Close()
+	o := &Orchestrator{cfg: &config.Config{}, client: panel.NewClient(config.PanelConfig{URL: server.URL, MachineID: 1, Token: "test"}), forwardingWake: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); o.forwardingLoop(ctx, m, nil) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-arrived:
+	case <-time.After(8 * time.Second):
+		t.Fatal("no in-flight forwarding exchange")
+	}
+	o.setTrafficBlocked(true)
+	wait := func(want int) {
+		t.Helper()
+		end := time.Now().Add(7 * time.Second)
+		for time.Now().Before(end) {
+			var got portforward.Policy
+			raw, e := os.ReadFile(path)
+			if e == nil && json.Unmarshal(raw, &got) == nil && len(got.Rules) == want {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("expected %d grants", want)
+	}
+	wait(0)
+	close(release)
+	o.setTrafficBlocked(false)
+	wait(1)
 }

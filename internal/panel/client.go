@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/binding"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/go-viper/mapstructure/v2"
@@ -31,6 +33,9 @@ var (
 // When machineID > 0 the client uses machine-level authentication
 // (machine_id + token) instead of the legacy (token + node_type) scheme.
 type Client struct {
+	scopedAccounting atomic.Bool
+	onBindingDeleted func(binding.Confirmation)
+
 	baseURL                string
 	token                  string
 	nodeID                 int
@@ -40,6 +45,8 @@ type Client struct {
 	snapshotSlots          chan struct{}
 	hostMonitoringParent   *Client
 	hostMonitoringDisabled atomic.Bool
+	hostMetricsEnabled     atomic.Bool
+	lastHostSample         atomic.Int64
 
 	configETag string
 	userETag   string
@@ -133,7 +140,10 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 	return c.HandshakeContext(context.Background())
 }
 func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, error) {
-	payload := map[string]interface{}{"device_handover": 1, "traffic_accounting": "routes-v1", "relay_firewall": 1}
+	payload := map[string]interface{}{"device_handover": 1, "traffic_accounting": "routes-v1", "traffic_accounting_versions": []string{scopedTrafficVersion}, "relay_firewall": 1, "access_policy": 1}
+	if runtime.GOOS == "linux" {
+		payload["wireguard_relay"] = 1
+	}
 	c.injectAuth(payload)
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -146,6 +156,9 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUpgradeRequired {
+			return nil, fmt.Errorf("面板要求升级 Agent 的流量计量协议 (HTTP %d)", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("handshake status %d", resp.StatusCode)
 	}
 
@@ -153,6 +166,13 @@ func (c *Client) HandshakeContext(ctx context.Context) (*HandshakeResponse, erro
 	if err := json.NewDecoder(resp.Body).Decode(&hs); err != nil {
 		return nil, fmt.Errorf("decode handshake: %w", err)
 	}
+	if hs.TrafficAccounting != "" && hs.TrafficAccounting != scopedTrafficVersion && hs.TrafficAccounting != "routes-v1" {
+		return nil, fmt.Errorf("面板选择了不支持的计量协议 %q", hs.TrafficAccounting)
+	}
+	if hs.TrafficAccounting == scopedTrafficVersion && (hs.Realtime.Version != 1 || !hs.Realtime.TrafficAck) {
+		return nil, fmt.Errorf("分项计量需要面板确认每个流量批次")
+	}
+	c.scopedAccounting.Store(hs.TrafficAccounting == scopedTrafficVersion)
 	if hs.WebSocket.Enabled {
 		ws, err := url.Parse(hs.WebSocket.WSURL)
 		if err != nil || ws.Hostname() == "" || ws.User != nil ||
@@ -209,6 +229,9 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 	metrics map[string]interface{},
 	limitEvents []LimitEvent, counts ...ConnectionSnapshot,
 ) error {
+	if c.scopedAccounting.Load() {
+		return fmt.Errorf("当前面板要求分项流量账单")
+	}
 	payload := make(map[string]interface{})
 	payload["traffic_accounting"] = "routes-v1"
 	if reportID != "" {
@@ -217,10 +240,20 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 
 	if len(relayTraffic) > 0 {
 		r := make(map[string][2]int64, len(relayTraffic))
+		loads := map[string][2]int64{}
 		for nodeID, d := range relayTraffic {
+			if nodeID < 0 {
+				loads[strconv.Itoa(-nodeID)] = d
+				continue
+			}
 			r[strconv.Itoa(nodeID)] = d
 		}
-		payload["relay_traffic"] = r
+		if len(loads) > 0 {
+			payload["relay_loads"] = loads
+		}
+		if len(r) > 0 {
+			payload["relay_traffic"] = r
+		}
 	}
 
 	if len(relayUserTraffic) > 0 {
@@ -242,6 +275,28 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 		}
 	}
 
+	if len(traffic) > 0 {
+		t := trafficMapPool.Get().(map[string][2]int64)
+		for uid, d := range traffic {
+			t[strconv.Itoa(uid)] = d
+		}
+		payload["traffic"] = t
+		defer func() {
+			for k := range t {
+				delete(t, k)
+			}
+			trafficMapPool.Put(t)
+		}()
+	}
+
+	if len(limitEvents) > 0 {
+		payload["limit_events"] = limitEvents
+	}
+
+	if c.RealtimeEnabled() {
+		return c.reportRealtime(ctx, payload)
+	}
+
 	if len(relayUserAlive) > 0 {
 		r := make(map[string]map[string][]string, len(relayUserAlive))
 		for userID, nodes := range relayUserAlive {
@@ -258,20 +313,6 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 		if len(r) > 0 {
 			payload["relay_user_alive"] = r
 		}
-	}
-
-	if len(traffic) > 0 {
-		t := trafficMapPool.Get().(map[string][2]int64)
-		for uid, d := range traffic {
-			t[strconv.Itoa(uid)] = d
-		}
-		payload["traffic"] = t
-		defer func() {
-			for k := range t {
-				delete(t, k)
-			}
-			trafficMapPool.Put(t)
-		}()
 	}
 
 	if alive != nil {
@@ -327,13 +368,6 @@ func (c *Client) ReportContext(ctx context.Context, reportID string, traffic map
 		payload["metrics"] = state.Metrics
 	}
 
-	if len(limitEvents) > 0 {
-		payload["limit_events"] = limitEvents
-	}
-
-	if c.RealtimeEnabled() {
-		return c.reportRealtime(ctx, payload)
-	}
 	return c.postJSONContext(ctx, "/api/v2/server/report", payload)
 }
 

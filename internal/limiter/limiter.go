@@ -104,3 +104,11 @@ func (l *Limiter) GetDeviceLimitByUUID(uuid string) (int, bool) {
 	limit, ok := l.uuidDeviceLimit[uuid]
 	return limit, ok
 }
+
+// HasUser checks the installed user list without rebuilding an index during sampling.
+func (l *Limiter) HasUser(id int) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	_, ok := l.users[id]
+	return ok
+}

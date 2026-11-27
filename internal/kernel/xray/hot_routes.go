@@ -24,6 +24,9 @@ func (x *Xray) tryHotRoutesLocked(next *model.NodeSpec, users []model.UserSpec, 
 	if previous == nil || instance == nil || !tlsEqual(oldTLS, tls) || !reflect.DeepEqual(oldUsers, users) {
 		return false, nil
 	}
+	if !reflect.DeepEqual(kernel.ProxyProtocolPrefixesForNode(previous), kernel.ProxyProtocolPrefixesForNode(next)) {
+		return false, nil
+	}
 	if realityGuardEnabled(previous) || realityGuardEnabled(next) {
 		return false, nil
 	}

@@ -1,12 +1,21 @@
 package panel
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/binding"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/realityscan"
 	"github.com/gofrs/uuid/v5"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -96,6 +105,65 @@ func TestMachineControlReportsUpgradeResultWithoutChangingProcess(t *testing.T) 
 			command, err := client.ExchangeMachineControl("v1.16.1", "same-process", true, &MachineOperation{ID: id.String(), Action: "upgrade", Status: "succeeded", Result: result})
 			if err != nil || command != nil {
 				t.Fatalf("command=%+v err=%v", command, err)
+			}
+		})
+	}
+}
+
+func TestMachineControlDeletionRequiresProofForThisHeartbeat(t *testing.T) {
+	key := rand.Text()
+	var mode atomic.Value
+	var mu sync.Mutex
+	var previous string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		scenario := mode.Load().(string)
+		var heartbeat struct{ Nonce string }
+		if err := json.NewDecoder(r.Body).Decode(&heartbeat); err != nil || len(heartbeat.Nonce) != 64 || heartbeat.Nonce == previous {
+			t.Error("missing fresh challenge")
+			return
+		}
+		nonce := heartbeat.Nonce
+		defer func() { previous = heartbeat.Nonce }()
+		switch scenario {
+		case "403", "404":
+			code, _ := strconv.Atoi(scenario)
+			w.WriteHeader(code)
+			return
+		case "old-panel":
+			fmt.Fprint(w, `{"command":null}`)
+			return
+		case "replay":
+			nonce = previous
+		}
+		credential := key
+		if scenario == "rotated" {
+			credential = rand.Text()
+		}
+		id := 17
+		if scenario == "other-machine" {
+			id++
+		}
+		hash := sha256.Sum256([]byte(credential))
+		mac := hmac.New(sha256.New, hash[:])
+		fmt.Fprintf(mac, "yz-agent-machine-deleted-v1\n%d\n%s", id, nonce)
+		json.NewEncoder(w).Encode(map[string]any{"binding_deletion": binding.Proof{Version: 1, MachineID: id, State: "deleted", Nonce: nonce, MAC: hex.EncodeToString(mac.Sum(nil))}})
+	}))
+	defer server.Close()
+	client := NewClient(config.PanelConfig{URL: server.URL, MachineID: 17, Token: key})
+	var proof binding.Confirmation
+	client.SetBindingDeletionHandler(func(confirmed binding.Confirmation) { proof = confirmed })
+	for _, name := range []string{"valid", "replay", "rotated", "other-machine", "old-panel", "403", "404"} {
+		t.Run(name, func(t *testing.T) {
+			mode.Store(name)
+			proof = binding.Confirmation{}
+			cmd, _ := client.ExchangeMachineControl("test", "boot", false, nil)
+			if cmd != nil || proof.Matches(server.URL, 17, key) != (name == "valid") {
+				t.Fatal("incorrect deletion decision")
+			}
+			if proof.Matches(server.URL, 18, key) || proof.Matches(server.URL, 17, "replacement") || proof.Matches(server.URL+"/other", 17, key) {
+				t.Fatal("confirmation matched another binding")
 			}
 		})
 	}

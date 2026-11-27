@@ -117,3 +117,29 @@ func TestDeviceHandoverWireGuardUsesCapturedSourceWhenEndpointChanges(t *testing
 		t.Fatal("关闭原来源时误清了新来源")
 	}
 }
+
+func TestNextExcludedWireGuardSourceKeepsAuthorization(t *testing.T) {
+	remote := &gatetest.Remote{Admit: func(context.Context, devicegate.AdmissionRequest) (devicegate.AdmissionReply, error) {
+		return devicegate.AdmissionReply{Status: "denied"}, nil
+	}}
+	gate := gatetest.Manager(t, remote)
+	s := newState()
+	s.deviceGate = gate
+	user := stateUser(t)
+	s.replaceUsers([]model.UserSpec{user})
+	t.Cleanup(func() { s.replaceUsers(nil) })
+	s.filter.SetExcluded([]string{"8.8.8.8"})
+	if !s.admit(user.WireGuard.PublicKey, netip.MustParseAddr("8.8.8.8"), true, time.Now()) {
+		t.Fatal("excluded WG source requested device slot")
+	}
+	if remote.Calls.Load() != 0 {
+		t.Fatal("excluded source counted")
+	}
+	if s.admit("unknown", netip.MustParseAddr("8.8.8.8"), true, time.Now()) {
+		t.Fatal("excluded source bypassed user authorization")
+	}
+	s.filter.SetExcluded(nil)
+	if s.admit(user.WireGuard.PublicKey, netip.MustParseAddr("8.8.8.8"), true, time.Now()) {
+		t.Fatal("removed exclusion bypassed admission")
+	}
+}

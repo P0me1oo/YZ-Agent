@@ -153,7 +153,7 @@ func (s *State) admitLocked(key string, source netip.Addr, payload bool, now tim
 	}
 	raw := source.Unmap().String()
 	s.pruneSourcesLocked(u, now)
-	if s.deviceGate.Enabled() && deviceip.PublicAddress(raw) != "" {
+	if s.deviceGate.Enabled() && s.filter.CountKey(raw) != "" {
 		return s.admitManagedSourceLocked(u, raw, payload, now)
 	}
 	if !payload {
@@ -268,7 +268,7 @@ func (s *State) track(id int, conn io.Closer, sources ...netip.Addr) (*userState
 	if len(sources) > 0 {
 		public = sources[0]
 	}
-	if s.deviceGate.Enabled() && deviceip.PublicAddress(public.String()) != "" {
+	if s.deviceGate.Enabled() && s.filter.CountKey(public.String()) != "" {
 		permit = u.sourcePermits[public.String()]
 		if permit == nil || !permit.Valid() {
 			s.mu.Unlock()

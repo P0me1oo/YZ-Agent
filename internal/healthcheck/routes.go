@@ -2,11 +2,16 @@ package healthcheck
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 )
 
-// CheckRoutes 最多四路并发，整轮截止后把未完成项留为未知，不误报线路故障。
+type IncompleteError struct{ Reason error }
+
+func (e IncompleteError) Error() string { return e.Reason.Error() }
+
+// CheckRoutes 最多两路并发，整轮截止后把未完成项留为未知，不误报线路故障。
 func CheckRoutes(ctx context.Context, targets map[string]int, probe func(context.Context, string) (int64, error)) []Route {
 	tags := make([]string, 0, len(targets))
 	for tag := range targets {
@@ -21,7 +26,7 @@ func CheckRoutes(ctx context.Context, targets map[string]int, probe func(context
 	}
 	close(jobs)
 	var workers sync.WaitGroup
-	for range min(4, len(tags)) {
+	for range min(2, len(tags)) {
 		workers.Go(func() {
 			for i := range jobs {
 				if ctx.Err() != nil {
@@ -35,6 +40,10 @@ func CheckRoutes(ctx context.Context, targets map[string]int, probe func(context
 				routes[i].Status, routes[i].Error = "ok", ""
 				if err != nil {
 					routes[i].Status, routes[i].Error = "failed", err.Error()
+					var incomplete IncompleteError
+					if errors.As(err, &incomplete) {
+						routes[i].Status = "incomplete"
+					}
 				}
 			}
 		})

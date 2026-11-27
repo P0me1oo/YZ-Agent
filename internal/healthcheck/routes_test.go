@@ -66,7 +66,7 @@ func TestDeadlineLeavesQueuedRoutesIncompleteAndBoundsConcurrency(t *testing.T) 
 			return 1, ctx.Err()
 		})
 	}()
-	for range 4 {
+	for range 2 {
 		select {
 		case <-started:
 		case <-time.After(time.Second):
@@ -75,7 +75,7 @@ func TestDeadlineLeavesQueuedRoutesIncompleteAndBoundsConcurrency(t *testing.T) 
 	}
 	cancel()
 	routes := <-done
-	if peak.Load() > 4 || len(routes) != 17 {
+	if peak.Load() > 2 || len(routes) != 17 {
 		t.Fatal("并发上限或结果数量错误", peak.Load(), len(routes))
 	}
 	for _, route := range routes {

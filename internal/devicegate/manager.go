@@ -64,6 +64,8 @@ type revokedLease struct {
 
 // Manager 持有实际连接的来源引用，只有关闭回调释放后才向面板确认来源离线。
 type Manager struct {
+	exclusionBarrier   uint64
+	exclusionFilter    *deviceip.Filter
 	remote             Remote
 	enabled            atomic.Bool
 	mu                 sync.Mutex
@@ -202,6 +204,10 @@ func (m *Manager) Acquire(ctx context.Context, userID int, rawIP string) (*Permi
 		if m.users != nil && !m.users[userID] {
 			m.mu.Unlock()
 			return nil, ErrRevoked
+		}
+		if m.exclusionFilter != nil && m.exclusionFilter.CountKey(ip) == "" {
+			m.mu.Unlock()
+			return nil, nil
 		}
 		if source := m.sources[key]; source != nil && (m.leaseCache || len(source.permits) > 0) {
 			if !source.revoked && (!m.leaseCache || time.Now().Before(source.deadline)) {

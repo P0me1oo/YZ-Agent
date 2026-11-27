@@ -21,6 +21,7 @@ func (x *Xray) RetireTraffic(candidates model.TrafficCounters) model.TrafficCoun
 		}
 		for _, child := range x.nodeConfig.Relay.Children {
 			keepNodes[child.NodeID] = true
+			keepNodes[child.LoadKey()] = true
 		}
 	}
 	merge := func(dispatcher *LimitDispatcher) {

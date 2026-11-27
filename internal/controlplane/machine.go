@@ -175,6 +175,9 @@ func (p *MachinePanelControlPlane) Report(payload ReportPayload) error {
 }
 
 func (p *MachinePanelControlPlane) ReportContext(ctx context.Context, payload ReportPayload) error {
+	if p.client.UsesScopedTraffic() {
+		return reportScopedTraffic(ctx, p.client, payload)
+	}
 	return p.client.ReportContext(ctx,
 		payload.ReportID,
 		payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.RelayUserAlive, payload.Alive, payload.Online,

@@ -13,19 +13,36 @@ type userSpeedSampler struct {
 	rates    map[int][2]int64
 	maxGap   time.Duration
 	reset    []int
+	scoped   bool
 }
 
 func (s *userSpeedSampler) sample(totals map[int][2]int64, now time.Time) {
+	s.sampleSelection(totals, now, false)
+}
+
+// The scoped map belongs to the sampler and includes explicit zero counters for watched users.
+func (s *userSpeedSampler) sampleSelection(totals map[int][2]int64, now time.Time, scoped bool) {
 	previous, elapsed := s.previous, now.Sub(s.at)
+	wasScoped := s.scoped
+	s.scoped = scoped
 	ready := !s.at.IsZero() && elapsed > 0 && elapsed <= max(s.maxGap, 5*time.Second)
-	s.previous = make(map[int][2]int64, len(totals))
+	if scoped {
+		s.previous = totals
+	} else {
+		s.previous = make(map[int][2]int64, len(totals))
+	}
 	s.at, s.rates = now, nil
 	s.reset = s.reset[:0]
 	rates := make(map[int][2]int64)
 	valid := len(totals) == 0
 	for id, total := range totals {
-		s.previous[id] = total
-		before := previous[id]
+		if !scoped {
+			s.previous[id] = total
+		}
+		before, existed := previous[id]
+		if !existed && (scoped || wasScoped) {
+			continue
+		}
 		if total[0] < 0 || total[1] < 0 || before[0] < 0 || before[1] < 0 || total[0] < before[0] || total[1] < before[1] {
 			s.reset = append(s.reset, id)
 			continue
@@ -39,7 +56,7 @@ func (s *userSpeedSampler) sample(totals map[int][2]int64, now time.Time) {
 			int64(math.Min(9007199254740991, float64(total[0]-before[0])/elapsed.Seconds())),
 			int64(math.Min(9007199254740991, float64(total[1]-before[1])/elapsed.Seconds())),
 		}
-		if value[0] > 0 || value[1] > 0 {
+		if scoped || value[0] > 0 || value[1] > 0 {
 			rates[id] = value
 		}
 	}

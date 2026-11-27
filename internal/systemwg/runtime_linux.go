@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -97,7 +98,7 @@ func Prepare(nc *model.NodeSpec, kind string, cfg M) (_ *Runtime, err error) {
 			return nil, err
 		}
 		r.tunnels = append(r.tunnels, t)
-		in := M{"type": "socks", "tag": "relay-in", "listen": "10.253.0.2", "listen_port": 1080, "netns": t.path()}
+		in := M{"type": "socks", "tag": "relay-in", "listen": "10.253.0.2", "listen_port": 1080, "netns": t.path(), "udp_fragment": true}
 		if kind == "singbox" {
 			cfg["inbounds"] = []M{in}
 			removeEndpoint(cfg, "relay-in")
@@ -120,7 +121,7 @@ func Prepare(nc *model.NodeSpec, kind string, cfg M) (_ *Runtime, err error) {
 				return nil, err
 			}
 			r.tunnels = append(r.tunnels, t)
-			out := M{"type": "socks", "tag": child.Tag, "server": "10.253.0.2", "server_port": 1080, "version": "5", "netns": t.path()}
+			out := M{"type": "socks", "tag": child.Tag, "server": "10.253.0.2", "server_port": 1080, "version": "5", "netns": t.path(), "udp_fragment": true}
 			if kind == "singbox" {
 				removeEndpoint(cfg, child.Tag)
 				cfg["outbounds"] = append(cfg["outbounds"].([]M), out)
@@ -161,6 +162,16 @@ func removeEndpoint(cfg M, tag string) {
 func checkAddresses(w *model.RelayWireGuardConfig, entry bool) error {
 	if w == nil {
 		return errors.New("缺少系统 WG 参数")
+	}
+	if w.Transport == "socks-v1" {
+		local := []string{"10.253.0.2/32", "fd7a:797a::2/128"}
+		remote := []string{"10.253.0.1/32", "fd7a:797a::1/128"}
+		if entry {
+			local, remote = remote, local
+		}
+		if !slices.Equal(w.Address, local) || !slices.Equal(w.AllowedIPs, remote) || len(w.Peers) != 0 {
+			return errors.New("WireGuard 中转仅允许本线路两端的隧道主机地址")
+		}
 	}
 	want := "10.253.0.2/32"
 	if entry {

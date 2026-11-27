@@ -3,6 +3,8 @@ package firewall
 import (
 	"context"
 	"errors"
+	"github.com/P0me1oo/YZ-Agent/internal/sourcepolicy"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -151,5 +153,32 @@ func TestExternalRulesAreCheckedBeforeSourceMutation(t *testing.T) {
 	}
 	if richRuleMayOverlap(`rule family="ipv4" port port="443" protocol="tcp" accept`, wanted) {
 		t.Fatal("无关端口不应冲突")
+	}
+}
+
+func TestNextProxyTransportAndClientSourceAreSeparate(t *testing.T) {
+	node := &model.NodeSpec{Protocol: "vless", ServerPort: 443, ListenIP: "0.0.0.0", AccessPolicyVersion: 1,
+		AcceptProxyProtocol: new(true), TrustedProxyIPs: []string{"192.0.2.1"},
+		SourcePolicy: &sourcepolicy.Policy{Mode: "whitelist", AllowIPs: []string{"8.8.8.8"}}, SourcePolicyReady: true,
+		SourceBlockCIDRs: []string{"0.0.0.0/0", "::/0"}}
+	plan, err := PlanForNode(node, "xray")
+	if err != nil {
+		t.Fatal(err)
+	}
+	families := map[int]bool{}
+	for _, r := range plan.Listeners {
+		families[r.Family] = true
+	}
+	if !families[4] || !families[6] {
+		t.Fatal("wildcard filter missing address family")
+	}
+	for _, raw := range plan.Blocked {
+		p := netip.MustParsePrefix(raw)
+		if p.Contains(netip.MustParseAddr("192.0.2.1")) {
+			t.Fatal("trusted peer blocked before header can be read")
+		}
+	}
+	if len(node.SourceBlockCIDRs) != 2 {
+		t.Fatal("kernel source set changed")
 	}
 }

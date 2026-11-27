@@ -37,7 +37,7 @@ func diffTraffic(before, after map[int][2]int64) map[int][2]int64 {
 }
 
 func diffPending(before, after pendingTraffic) pendingTraffic {
-	delta := pendingTraffic{Traffic: diffTraffic(before.Traffic, after.Traffic), Relay: diffTraffic(before.Relay, after.Relay)}
+	delta := pendingTraffic{Scoped: after.Scoped, Direct: diffTraffic(before.Direct, after.Direct), Entry: diffTraffic(before.Entry, after.Entry), Traffic: diffTraffic(before.Traffic, after.Traffic), Relay: diffTraffic(before.Relay, after.Relay)}
 	for id, values := range after.RelayUser {
 		if diff := diffTraffic(before.RelayUser[id], values); len(diff) > 0 {
 			if delta.RelayUser == nil {
@@ -116,6 +116,13 @@ func (s *pendingReportStore) replayJournal(file *pendingReportFile, withoutCheck
 		withoutCheckpoint = false
 		if record.BatchChanged {
 			file.Batch = record.Batch
+		}
+		file.Pending.Scoped = record.Pending.Scoped
+		if file.Pending.Direct, err = applyTrafficDelta(file.Pending.Direct, record.Pending.Direct); err != nil {
+			return err
+		}
+		if file.Pending.Entry, err = applyTrafficDelta(file.Pending.Entry, record.Pending.Entry); err != nil {
+			return err
 		}
 		if file.Pending.Traffic, err = applyTrafficDelta(file.Pending.Traffic, record.Pending.Traffic); err != nil {
 			return err

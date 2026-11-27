@@ -30,12 +30,12 @@ func deletionFixture(t *testing.T, beforeResponse func()) (string, *atomic.Bool)
 			Nonce     string `json:"nonce"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if r.URL.Path != "/api/v2/server/machine/binding-status" || req.Token != token {
+		if r.URL.Path != "/api/v2/server/machine/nodes" || req.Token != token {
 			w.WriteHeader(403)
 			return
 		}
 		if req.MachineID != 117 || !deleted.Load() {
-			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": 1, "machine_id": req.MachineID, "state": "active"}})
+			json.NewEncoder(w).Encode(map[string]any{"binding_deletion": map[string]any{"version": 1, "machine_id": req.MachineID, "state": "active"}})
 			return
 		}
 		if beforeResponse != nil {
@@ -44,7 +44,7 @@ func deletionFixture(t *testing.T, beforeResponse func()) (string, *atomic.Bool)
 		key := sha256.Sum256([]byte(token))
 		mac := hmac.New(sha256.New, key[:])
 		fmt.Fprintf(mac, "yz-agent-machine-deleted-v1\n117\n%s", req.Nonce)
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": 1, "machine_id": 117, "state": "deleted", "nonce": req.Nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
+		json.NewEncoder(w).Encode(map[string]any{"binding_deletion": map[string]any{"version": 1, "machine_id": 117, "state": "deleted", "nonce": req.Nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
 	}))
 	t.Cleanup(server.Close)
 	dir := t.TempDir()
@@ -260,5 +260,26 @@ func TestDeletedBindingPreservesUnrelatedProtectedEnvelope(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if !bytes.Contains(after, []byte("protected: unrelated-ciphertext")) || !bytes.Contains(after, []byte("NEW_BINDING_TEST")) {
 		t.Fatal("unrelated protected binding damaged")
+	}
+}
+
+func TestDeletedBindingProtectsCredentialsRotatedOnDisk(t *testing.T) {
+	path, deleted := deletionFixture(t, nil)
+	deleted.Store(true)
+	keyPath := filepath.Join(filepath.Dir(path), "credentials.env")
+	old, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := []byte("OLD_BINDING_TEST=" + rand.Text())
+	updated := bytes.Replace(old, []byte("OLD_BINDING_TEST="+os.Getenv("OLD_BINDING_TEST")), replacement, 1)
+	if err := os.WriteFile(keyPath, updated, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := PruneDeletedMachines(t.Context(), path); changed || err != nil {
+		t.Fatal("stale process removed rebound identity", err)
+	}
+	if kept, err := os.ReadFile(keyPath); err != nil || !bytes.Equal(updated, kept) {
+		t.Fatal("rebound credentials overwritten", err)
 	}
 }

@@ -24,7 +24,13 @@ type Managed struct {
 	users   []model.UserSpec
 }
 
-func Wrap(base kernel.Kernel) kernel.Kernel { return &Managed{Kernel: base, state: newState()} }
+func Wrap(base kernel.Kernel) kernel.Kernel {
+	m := &Managed{Kernel: base, state: newState()}
+	if reader, ok := base.(kernel.UsageReader); ok {
+		return &usageManaged{Managed: m, reader: reader}
+	}
+	return m
+}
 
 func (m *Managed) RetireTraffic(candidates model.TrafficCounters) model.TrafficCounters {
 	m.mu.Lock()

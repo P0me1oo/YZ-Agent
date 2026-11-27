@@ -65,3 +65,17 @@ func listener(
 	}
 	return false, nil
 }
+
+// ListenerNetwork validates UDP socket ownership as well as TCP listeners.
+func ListenerNetwork(ctx context.Context, network, address string) (bool, error) {
+	if network == "tcp" {
+		return Listener(ctx, address)
+	}
+	return listener(ctx, address, int32(os.Getpid()), func(ctx context.Context, pid int32) ([]gnet.ConnectionStat, error) {
+		items, err := processNetworkConnections(ctx, pid, "udp")
+		for i := range items {
+			items[i].Status = "LISTEN"
+		}
+		return items, err
+	})
+}

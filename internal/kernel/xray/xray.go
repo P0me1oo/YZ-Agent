@@ -195,6 +195,7 @@ func (x *Xray) startLocked(nodeConfig *model.NodeSpec, users []model.UserSpec, t
 	// ── Phase 2: Create instance (global lock for LD capture) ───────────
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = systemWGContext(ctx, wgRuntime)
+	ctx = hysteriaCompatibilityContext(ctx)
 	ctx = context.WithValue(ctx, protectedDirectKey{}, directGuards)
 	x.mu.Lock()
 	previousProxyProtocol := x.proxyProtocol

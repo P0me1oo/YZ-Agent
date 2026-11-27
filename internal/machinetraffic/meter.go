@@ -19,36 +19,38 @@ const MaxBytes uint64 = 9007199254740991
 const proxyConfirmationTimeout = 180 * time.Second
 
 type Policy struct {
-	Limit       uint64   `json:"limit"`
-	Mode        string   `json:"mode"`
-	ResetDay    int      `json:"reset_day"`
-	Timezone    string   `json:"timezone"`
-	Interfaces  []string `json:"interfaces"`
-	Revision    uint64   `json:"revision"`
-	Epoch       uint64   `json:"epoch"`
-	PeriodStart int64    `json:"period_start"`
-	PeriodEnd   int64    `json:"period_end"`
-	RX          uint64   `json:"rx"`
-	TX          uint64   `json:"tx"`
-	ProxyRX     uint64   `json:"proxy_rx"`
-	ProxyTX     uint64   `json:"proxy_tx"`
-	Baseline    uint64   `json:"baseline"`
-	Sequence    uint64   `json:"sequence"`
-	Initialized bool     `json:"initialized"`
-	Active      bool     `json:"active"`
+	ProxyUncertain bool     `json:"proxy_uncertain,omitempty"`
+	Limit          uint64   `json:"limit"`
+	Mode           string   `json:"mode"`
+	ResetDay       int      `json:"reset_day"`
+	Timezone       string   `json:"timezone"`
+	Interfaces     []string `json:"interfaces"`
+	Revision       uint64   `json:"revision"`
+	Epoch          uint64   `json:"epoch"`
+	PeriodStart    int64    `json:"period_start"`
+	PeriodEnd      int64    `json:"period_end"`
+	RX             uint64   `json:"rx"`
+	TX             uint64   `json:"tx"`
+	ProxyRX        uint64   `json:"proxy_rx"`
+	ProxyTX        uint64   `json:"proxy_tx"`
+	Baseline       uint64   `json:"baseline"`
+	Sequence       uint64   `json:"sequence"`
+	Initialized    bool     `json:"initialized"`
+	Active         bool     `json:"active"`
 }
 
 type Sample struct {
-	Revision    uint64   `json:"revision"`
-	Mode        string   `json:"mode"`
-	Epoch       uint64   `json:"epoch"`
-	PeriodStart int64    `json:"period_start"`
-	Sequence    uint64   `json:"sequence"`
-	RX          uint64   `json:"rx"`
-	TX          uint64   `json:"tx"`
-	Initialized bool     `json:"initialized"`
-	Error       string   `json:"error,omitempty"`
-	Interfaces  []string `json:"interfaces"`
+	ProxyWarning string   `json:"proxy_warning,omitempty"`
+	Revision     uint64   `json:"revision"`
+	Mode         string   `json:"mode"`
+	Epoch        uint64   `json:"epoch"`
+	PeriodStart  int64    `json:"period_start"`
+	Sequence     uint64   `json:"sequence"`
+	RX           uint64   `json:"rx"`
+	TX           uint64   `json:"tx"`
+	Initialized  bool     `json:"initialized"`
+	Error        string   `json:"error,omitempty"`
+	Interfaces   []string `json:"interfaces"`
 }
 
 type Counter struct {
@@ -65,10 +67,11 @@ type Reading struct {
 type Reader func([]string) (Reading, error)
 
 type diskState struct {
-	Version  int
-	Policy   Policy
-	Sample   Sample
-	Previous Reading
+	BaselineLost bool `json:",omitempty"`
+	Version      int
+	Policy       Policy
+	Sample       Sample
+	Previous     Reading
 }
 
 // Meter 的每次采样先持久化再允许代理运行；写盘失败立即进入保护。
@@ -93,7 +96,7 @@ func New(path string, reader Reader) *Meter {
 		err = json.Unmarshal(data, &m.state)
 		if err == nil && m.state.Version == 1 && m.state.Policy.Epoch > 0 {
 			m.loaded = true
-			m.lost = m.state.Sample.Error == "state_lost"
+			m.lost = m.state.BaselineLost || m.state.Sample.Error == "state_lost"
 		} else {
 			m.lost = true
 		}
@@ -128,10 +131,11 @@ func (m *Meter) Apply(p Policy) error {
 		if p.PeriodStart < old.PeriodStart {
 			p.PeriodStart, p.PeriodEnd, p.Baseline = old.PeriodStart, old.PeriodEnd, old.Baseline
 			p.RX, p.TX, p.Sequence = 0, 0, 0
+			p.ProxyUncertain = old.ProxyUncertain
 			p.ProxyRX, p.ProxyTX = old.ProxyRX, old.ProxyTX
 		} else if p.PeriodStart > old.PeriodStart {
 			m.state.Sample = Sample{Epoch: p.Epoch, PeriodStart: p.PeriodStart}
-			if m.lost {
+			if m.lost || old.Mode == "proxy" {
 				m.lost = false
 				m.state.Previous = Reading{}
 			}
@@ -200,9 +204,10 @@ func (m *Meter) Tick(now time.Time) (Sample, bool) {
 	}
 	if now.Unix() >= p.PeriodEnd {
 		start, end, _ := Period(now, p.ResetDay, p.Timezone)
+		p.ProxyUncertain = false
 		p.PeriodStart, p.PeriodEnd, p.Baseline, p.ProxyRX, p.ProxyTX = start, end, 0, 0, 0
 		m.state.Sample = Sample{Epoch: p.Epoch, PeriodStart: start}
-		if m.lost {
+		if m.lost || p.Mode == "proxy" {
 			m.lost = false
 			m.state.Previous = Reading{}
 		}
@@ -266,7 +271,7 @@ func (m *Meter) blockedLocked(now time.Time) bool {
 	}
 	if p.Mode == "proxy" {
 		// 面板负责累计，断线后不能继续用过期额度放行；管理连接保持运行。
-		return m.writeFailed || !s.Initialized || s.Error != "" || m.confirmedAt.IsZero() || now.Sub(m.confirmedAt) >= proxyConfirmationTimeout || add(p.ProxyRX, p.ProxyTX) >= p.Limit
+		return p.ProxyUncertain || m.writeFailed || !s.Initialized || s.Error != "" || m.confirmedAt.IsZero() || now.Sub(m.confirmedAt) >= proxyConfirmationTimeout || add(p.ProxyRX, p.ProxyTX) >= p.Limit
 	}
 	used := add(p.Baseline, s.TX)
 	if p.Mode == "both" {
@@ -279,6 +284,7 @@ func (m *Meter) saveLocked() (err error) {
 	release := privacy.LockFileWrite(m.path)
 	defer release()
 	defer func() { m.writeFailed = err != nil }()
+	m.state.BaselineLost = m.lost
 	data, err := json.Marshal(m.state)
 	if err != nil {
 		return err

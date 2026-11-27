@@ -199,7 +199,7 @@ func TestRequestTriesAllFailedAddresses(t *testing.T) {
 		return nil, errors.New("private diagnostic detail")
 	}
 	_, err = Request(t.Context(), u, addresses, dial)
-	if err == nil || strings.Contains(err.Error(), "private diagnostic detail") || !slices.Equal(attempted, addresses) {
+	if err == nil || !strings.Contains(err.Error(), "private diagnostic detail") || !slices.Equal(attempted, addresses) {
 		t.Fatalf("attempted=%v error=%v", attempted, err)
 	}
 }
@@ -313,5 +313,23 @@ func TestListenerTransportMatchesHTTP3AndUDPProtocols(t *testing.T) {
 		if IsTCP(tc.protocol, tc.network, tc.tls, tc.settings) != tc.tcp {
 			t.Fatalf("错误的监听探测类型: %+v", tc)
 		}
+	}
+}
+
+func TestHealthRequestDoesNotForcePrematureServerClose(t *testing.T) {
+	server, target, testTransport := probeServer(t, http.StatusNoContent)
+	transport := requestTransport(target, (&net.Dialer{}).DialContext)
+	transport.TLSClientConfig.RootCAs = testTransport.TLSClientConfig.RootCAs
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Close {
+			t.Error("diagnostic forced Connection: close")
+		}
+		w.WriteHeader(204)
+	})
+	if _, err := request(t.Context(), target, []string{"8.8.8.8:443"}, transport); err != nil {
+		t.Fatal(err)
 	}
 }

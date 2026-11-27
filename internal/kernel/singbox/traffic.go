@@ -69,14 +69,14 @@ func (c relayCounters) download(n int64) {
 	}
 }
 
-func (t *trafficTotals) relayCounters(userID, nodeID int) relayCounters {
+func (t *trafficTotals) relayCounters(userID, nodeID, loadKey int) relayCounters {
 	if userID <= 0 || nodeID < 0 {
 		return relayCounters{}
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.relays[nodeID] == nil {
-		t.relays[nodeID] = t.newCounter(1, 0, nodeID)
+	if t.relays[loadKey] == nil {
+		t.relays[loadKey] = t.newCounter(1, 0, loadKey)
 	}
 	if t.relayUsers[userID] == nil {
 		t.relayUsers[userID] = make(map[int]*userTraffic)
@@ -84,7 +84,7 @@ func (t *trafficTotals) relayCounters(userID, nodeID int) relayCounters {
 	if t.relayUsers[userID][nodeID] == nil {
 		t.relayUsers[userID][nodeID] = t.newCounter(2, userID, nodeID)
 	}
-	return relayCounters{node: t.relays[nodeID], user: t.relayUsers[userID][nodeID]}
+	return relayCounters{node: t.relays[loadKey], user: t.relayUsers[userID][nodeID]}
 }
 
 func snapshotTraffic(counters map[int]*userTraffic) map[int][2]int64 {

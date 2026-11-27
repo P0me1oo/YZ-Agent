@@ -342,7 +342,11 @@ func (d *LimitDispatcher) acquireDevice(ctx context.Context, email, sourceIP str
 	if uid <= 0 {
 		return nil, errors.New("设备来源用户已失效")
 	}
-	permit, err := gate.Acquire(ctx, uid, sourceIP)
+	var permit *devicegate.Permit
+	var err error
+	if d.countKey(sourceIP) != "" {
+		permit, err = gate.Acquire(ctx, uid, sourceIP)
+	}
 	if err != nil {
 		var denied *devicegate.DeniedError
 		if errors.As(err, &denied) {

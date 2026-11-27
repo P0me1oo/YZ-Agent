@@ -15,6 +15,9 @@ import (
 )
 
 func processConnections(ctx context.Context, pid int32) ([]gnet.ConnectionStat, error) {
+	return processNetworkConnections(ctx, pid, "tcp")
+}
+func processNetworkConnections(ctx context.Context, pid int32, network string) ([]gnet.ConnectionStat, error) {
 	// 外部主机监控的 HOST_PROC 不能改变实际运行进程的监听归属。
 	ctx = context.WithValue(ctx, gcommon.EnvKey, gcommon.EnvMap{gcommon.HostProcEnvKey: "/proc"})
 	// WireGuard 空间创建可能结束主线程；其连接表不能代表当前监听空间。
@@ -29,7 +32,7 @@ func processConnections(ctx context.Context, pid int32) ([]gnet.ConnectionStat, 
 		return nil, err
 	}
 	fd.Close()
-	connections, err := gnet.ConnectionsPidWithoutUidsWithContext(ctx, "tcp", readPID)
+	connections, err := gnet.ConnectionsPidWithoutUidsWithContext(ctx, network, readPID)
 	if err != nil {
 		return nil, err
 	}

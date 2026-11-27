@@ -28,14 +28,14 @@ func TestConfigInitReplacesDeletedEncryptedBindingWithoutChangingLiveFiles(t *te
 					Nonce     string `json:"nonce"`
 				}
 				json.NewDecoder(r.Body).Decode(&req)
-				if req.Token != token || req.MachineID != 117 || r.URL.Path != "/api/v2/server/machine/binding-status" {
+				if req.Token != token || req.MachineID != 117 || r.URL.Path != "/api/v2/server/machine/nodes" {
 					w.WriteHeader(403)
 					return
 				}
 				key := sha256.Sum256([]byte(token))
 				mac := hmac.New(sha256.New, key[:])
 				fmt.Fprintf(mac, "yz-agent-machine-deleted-v1\n117\n%s", req.Nonce)
-				json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": 1, "machine_id": 117, "state": "deleted", "nonce": req.Nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
+				json.NewEncoder(w).Encode(map[string]any{"binding_deletion": map[string]any{"version": 1, "machine_id": 117, "state": "deleted", "nonce": req.Nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
 			}))
 			defer server.Close()
 			dir := t.TempDir()

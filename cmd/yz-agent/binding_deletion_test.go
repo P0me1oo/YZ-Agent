@@ -37,21 +37,20 @@ func TestDeletedBindingProcessWaitsAndAcceptsRebinding(t *testing.T) {
 			return
 		}
 		switch r.URL.Path {
-		case "/api/v2/server/machine/binding-status":
-			if req.MachineID == 117 || deleteNew.Load() {
+		case "/api/v2/server/machine/nodes", "/api/v2/server/machine/control":
+			if req.Nonce != "" && (req.MachineID == 117 || deleteNew.Load()) {
 				key := sha256.Sum256([]byte(token))
 				mac := hmac.New(sha256.New, key[:])
 				fmt.Fprintf(mac, "yz-agent-machine-deleted-v1\n%d\n%s", req.MachineID, req.Nonce)
-				json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"version": 1, "machine_id": req.MachineID, "state": "deleted", "nonce": req.Nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
+				json.NewEncoder(w).Encode(map[string]any{"binding_deletion": map[string]any{"version": 1, "machine_id": req.MachineID, "state": "deleted", "nonce": req.Nonce, "proof": hex.EncodeToString(mac.Sum(nil))}})
 			} else {
-				fmt.Fprintf(w, `{"data":{"version":1,"machine_id":%d,"state":"active"}}`, req.MachineID)
+				fmt.Fprint(w, `{"nodes":[],"base_config":{"pull_interval":1,"push_interval":60}}`)
 			}
 		case "/api/v2/server/machine/privacy":
 			fmt.Fprint(w, `{"data":{"version":1,"enabled":false,"keys":[]}}`)
-		case "/api/v2/server/machine/nodes":
-			fmt.Fprint(w, `{"nodes":[],"base_config":{"pull_interval":1,"push_interval":60}}`)
-		case "/api/v2/server/machine/control":
-			fmt.Fprint(w, `{}`)
+		case "/api/v2/server/machine/binding-status":
+			t.Error("Agent still uses the removed route")
+			w.WriteHeader(404)
 		default:
 			w.WriteHeader(404)
 		}
@@ -126,7 +125,7 @@ func TestDeletedBindingProcessWaitsAndAcceptsRebinding(t *testing.T) {
 	writeBinding(139)
 	waitHealth("ok", 6*time.Second)
 	deleteNew.Store(true)
-	waitHealth("unbound", 36*time.Second)
+	waitHealth("unbound", 10*time.Second)
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "139") || strings.Contains(string(data), token) {
 		t.Fatal("deleted identity retained")

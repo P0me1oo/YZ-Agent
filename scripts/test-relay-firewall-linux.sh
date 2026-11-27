@@ -5,8 +5,10 @@ work=$(realpath "${1:?compiled tests directory required}")
 driver=${2:-nftables}
 suite=${3:-firewall}
 case "$driver" in nftables|iptables) ;; *) exit 2 ;; esac
-case "$suite" in firewall|service) ;; *) exit 2 ;; esac
-[[ -f "$work/$suite.test" && "$work" == /tmp/* ]]
+case "$suite" in firewall|service|policy) ;; *) exit 2 ;; esac
+binary=$suite
+[[ "$suite" == policy ]] && binary=firewall
+[[ -f "$work/$binary.test" && "$work" == /tmp/* ]]
 root=$(mktemp -d "$work/rootfs.XXXXXX")
 trap 'rmdir "$root" 2>/dev/null || true' EXIT
 unshare --mount --net --pid --fork bash -s -- "$work" "$root" "$driver" "$suite" <<'OUTER'
@@ -55,6 +57,9 @@ if [[ "$3" == service ]]; then
  ip netns exec yzfw-client ip -6 addr add 2001:4860:4860::8888/64 dev yzfw1 nodad
  export TEST_RELAY_FIREWALL_EXPORT="$work/export"
  exec "$work/service.test" -test.run='^TestNativeRelayNextSnapshotsBothCores$' -test.v -test.timeout=3m
+fi
+if [[ "$3" == policy ]]; then
+ exec "$work/firewall.test" -test.run='^TestNativeNextSourcePolicyLifecycle$' -test.v -test.timeout=3m
 fi
 exec "$work/firewall.test" -test.run='^TestNativeRelayFirewallDualStackAndRollback$' -test.v -test.timeout=3m
 GUEST

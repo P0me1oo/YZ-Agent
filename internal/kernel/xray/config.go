@@ -69,6 +69,14 @@ func buildConfigWithGuards(kcfg config.KernelConfig, nc *model.NodeSpec, users [
 		}
 	}
 
+	if nc.AccessPolicyVersion == 1 {
+		for i, out := range outbounds {
+			if out["tag"] == "direct" {
+				outbounds = append([]M{out}, append(outbounds[:i], outbounds[i+1:]...)...)
+				break
+			}
+		}
+	}
 	cfg := M{
 		"log": M{
 			"loglevel": xrayLogLevel(level),
@@ -798,7 +806,7 @@ func buildRouting(rules []model.RouteRule, customRouteRules []model.CustomRouteR
 	xrayRules = append(xrayRules, relayEntryRules...)
 
 	domainStrategy := "AsIs"
-	if kernel.BlockRoutesNeedIP(rules) {
+	if kernel.RoutesNeedIP(rules) {
 		domainStrategy = "IPOnDemand"
 	}
 	return M{
@@ -835,6 +843,10 @@ func compilePanelRouteRule(rule model.RouteRule) []M {
 		}
 		if strings.HasPrefix(item, "geosite:") {
 			sites = append(sites, item)
+			continue
+		}
+		if strings.HasPrefix(item, "domain:") || strings.HasPrefix(item, "full:") {
+			suffixes = append(suffixes, item)
 			continue
 		}
 		if suffix := strings.TrimSpace(strings.TrimPrefix(item, "*.")); suffix != "" {

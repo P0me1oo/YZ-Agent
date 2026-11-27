@@ -14,6 +14,17 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if n == nil {
 		return nil
 	}
+	if err := validateAccessPolicy(n); err != nil {
+		return err
+	}
+	if n.AccessPolicyVersion == 1 && len(n.Routes) > 0 {
+		if len(n.CustomRoutes)+len(n.CustomRouteRules)+len(kcfg.CustomRoute) > 0 {
+			return fmt.Errorf("Next 服务端路由不能与优先执行的本地自定义路由混用")
+		}
+		if err := validateNextLocalRoutes(kcfg.CustomConfig); err != nil {
+			return err
+		}
+	}
 	if n.Protocol == "balancer" && (n.Balancer == nil || n.Balancer.Network != "tcp") {
 		return fmt.Errorf("调度入口只支持 TCP 前置池")
 	}

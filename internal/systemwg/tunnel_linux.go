@@ -3,6 +3,7 @@
 package systemwg
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -10,25 +11,33 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/P0me1oo/YZ-Agent/internal/model"
+	"github.com/sagernet/wireguard-go/conn"
+	"github.com/sagernet/wireguard-go/device"
+	"github.com/sagernet/wireguard-go/tun"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
-	"golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/tun"
 )
 
 // tunnel 不创建持久命名空间；关闭设备和描述符后由内核回收网络空间。
 type tunnel struct {
-	ns         netns.NsHandle
-	wg         *device.Device
-	routes     []*net.IPNet
-	listenPort int
-	once       sync.Once
+	ns              netns.NsHandle
+	wg              *device.Device
+	routes          []*net.IPNet
+	listenPort      int
+	once            sync.Once
+	endpointHost    string
+	endpointPort    int
+	endpointAddress string
+	endpointKeys    []string
+	cancel          context.CancelFunc
+	done            chan struct{}
 }
 
 func (t *tunnel) path() string { return fmt.Sprintf("/proc/self/fd/%d", t.ns) }
@@ -60,10 +69,22 @@ func (t *tunnel) start() error {
 			return fmt.Errorf("安装系统 WG 路由失败: %w", err)
 		}
 	}
+	if t.endpointHost != "" && t.cancel == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		t.cancel, t.done = cancel, make(chan struct{})
+		go t.refreshEndpoint(ctx)
+	}
 	return nil
 }
 func (t *tunnel) close() {
-	t.once.Do(func() { t.wg.Close(); _ = t.ns.Close() })
+	t.once.Do(func() {
+		if t.cancel != nil {
+			t.cancel()
+			<-t.done
+		}
+		t.wg.Close()
+		_ = t.ns.Close()
+	})
 }
 
 func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunnel, error) {
@@ -108,12 +129,25 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 	if len(addresses) == 0 || len(allowed) == 0 {
 		return nil, errors.New("系统 WG 缺少地址或允许网段")
 	}
+	var endpointHost string
+	var endpointPort int
 	if endpoint != "" {
-		a, err := net.ResolveUDPAddr("udp", endpoint)
+		host, portText, err := net.SplitHostPort(endpoint)
+		if err != nil {
+			return nil, errors.New("系统 WG 对端地址无效")
+		}
+		endpointPort, err = strconv.Atoi(portText)
+		if err != nil || endpointPort < 1 || endpointPort > 65535 {
+			return nil, errors.New("系统 WG 对端端口无效")
+		}
+		a, err := resolveEndpoint(context.Background(), host, endpointPort)
 		if err != nil {
 			return nil, errors.New("无法解析系统 WG 对端地址")
 		}
-		endpoint = a.String()
+		endpoint = a
+		if net.ParseIP(host) == nil {
+			endpointHost = host
+		}
 	}
 	type result struct {
 		ns  netns.NsHandle
@@ -137,8 +171,14 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 			_ = ns.Close()
 			ch <- result{err: err}
 		}
-		if err := os.WriteFile("/proc/sys/net/ipv4/tcp_congestion_control", []byte("bbr"), 0); err != nil {
-			fail(fmt.Errorf("系统 WG 需要 Linux BBR 支持: %w", err))
+		if err := configureCongestionControl(); err != nil {
+			fail(err)
+			return
+		}
+		// TCP can recover from a black-holed path MTU. This does not make oversized
+		// UDP safe or change the administrator's configured interface MTU.
+		if err := os.WriteFile("/proc/sys/net/ipv4/tcp_mtu_probing", []byte("1"), 0); err != nil {
+			fail(fmt.Errorf("配置系统 WG TCP MTU 探测失败: %w", err))
 			return
 		}
 		dev, err = tun.CreateTUN("yz-wg0", w.MTU)
@@ -182,12 +222,17 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 		return nil, r.err
 	}
 	// 加密 UDP 套接字在宿主网络空间创建，不受隧道内的路由影响。
-	wg := device.NewDevice(r.dev, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
-	t := &tunnel{ns: r.ns, wg: wg, routes: allowed, listenPort: port}
+	// Bound per-link workers instead of multiplying the host CPU count by every
+	// landing. The already pinned implementation shares the WireGuard wire format.
+	wg := device.NewDevice(context.Background(), r.dev, conn.NewDefaultBind(nil),
+		device.NewLogger(device.LogLevelSilent, ""), min(2, runtime.GOMAXPROCS(0)))
+	t := &tunnel{ns: r.ns, wg: wg, routes: allowed, listenPort: port,
+		endpointHost: endpointHost, endpointPort: endpointPort, endpointAddress: endpoint}
 	var b strings.Builder
 	fmt.Fprintf(&b, "private_key=%s\nreplace_peers=true\n", private)
 	for _, peer := range peers {
 		public, _ := decodeKey(peer.PublicKey)
+		t.endpointKeys = append(t.endpointKeys, public)
 		fmt.Fprintf(&b, "public_key=%s\nreplace_allowed_ips=true\n", public)
 		for _, subnet := range peer.AllowedIPs {
 			fmt.Fprintf(&b, "allowed_ip=%s\n", subnet)
@@ -202,6 +247,68 @@ func newTunnel(w *model.RelayWireGuardConfig, endpoint string, port int) (*tunne
 		return nil, errors.New("配置系统 WG 设备失败")
 	}
 	return t, nil
+}
+
+func resolveEndpoint(ctx context.Context, host string, port int) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return "", err
+	}
+	if len(addresses) == 0 {
+		return "", errors.New("WG 对端无可用地址")
+	}
+	for _, address := range addresses {
+		target := net.JoinHostPort(address.Unmap().String(), strconv.Itoa(port))
+		// UDP connect only checks local routing; it sends no probe or WG packet.
+		// A host without IPv6 routing can still use the domain's IPv4 endpoint.
+		probe, err := (&net.Dialer{}).DialContext(ctx, "udp", target)
+		if err == nil {
+			_ = probe.Close()
+			return target, nil
+		}
+	}
+	return "", errors.New("WG 对端没有可达的本机路由")
+}
+
+func (t *tunnel) refreshEndpoint(ctx context.Context) {
+	defer close(t.done)
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			t.updateEndpoint(ctx, resolveEndpoint)
+		}
+	}
+}
+
+func (t *tunnel) updateEndpoint(ctx context.Context, resolve func(context.Context, string, int) (string, error)) {
+	address, err := resolve(ctx, t.endpointHost, t.endpointPort)
+	if err != nil || address == t.endpointAddress || ctx.Err() != nil {
+		return
+	}
+	var update strings.Builder
+	for _, key := range t.endpointKeys {
+		fmt.Fprintf(&update, "public_key=%s\nupdate_only=true\nendpoint=%s\n", key, address)
+	}
+	if t.wg.IpcSet(update.String()) == nil {
+		t.endpointAddress = address
+	}
+}
+
+func configureCongestionControl() error {
+	// This runs inside the new namespace. BBR is optional; CUBIC provides a
+	// usable TCP path on hosts without BBR without changing the host setting.
+	for _, algorithm := range []string{"bbr", "cubic"} {
+		if err := os.WriteFile("/proc/sys/net/ipv4/tcp_congestion_control", []byte(algorithm), 0); err == nil {
+			return nil
+		}
+	}
+	return errors.New("无法为系统 WG 配置 TCP 拥塞控制")
 }
 
 func decodeKey(value string) (string, error) {

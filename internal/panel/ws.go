@@ -19,13 +19,14 @@ import (
 
 // WSEvent types
 const (
-	WSEventSyncSnapshot  = "sync.snapshot"
-	WSEventSyncConfig    = "sync.config"
-	WSEventSyncUsers     = "sync.users"
-	WSEventSyncUserDelta = "sync.user.delta"
-	WSEventSyncDevices   = "sync.devices"   // panel → node: global device state
-	WSEventSyncNodes     = "sync.nodes"     // panel → machine: node list changed
-	WSEventReportDevices = "report.devices" // node → panel: report device snapshot
+	WSEventMachineDeleted = "machine.deleted"
+	WSEventSyncSnapshot   = "sync.snapshot"
+	WSEventSyncConfig     = "sync.config"
+	WSEventSyncUsers      = "sync.users"
+	WSEventSyncUserDelta  = "sync.user.delta"
+	WSEventSyncDevices    = "sync.devices"   // panel → node: global device state
+	WSEventSyncNodes      = "sync.nodes"     // panel → machine: node list changed
+	WSEventReportDevices  = "report.devices" // node → panel: report device snapshot
 )
 
 // WSEvent is a parsed data event delivered to the service layer.
@@ -325,6 +326,7 @@ func (w *WSClient) connect(ctx context.Context) error {
 	go func() {
 		defer close(done)
 		assembler := &snapshotAssembler{}
+		deletionNotified := false
 		for {
 			var msg wsMessage
 			if err := conn.ReadJSON(&msg); err != nil {
@@ -361,6 +363,18 @@ func (w *WSClient) connect(ctx context.Context) error {
 						return
 					}
 				}
+			}
+			if msg.Event == WSEventMachineDeleted {
+				var notice struct {
+					MachineID int `json:"machine_id"`
+				}
+				if !deletionNotified && w.cfg.MachineID > 0 && w.nodeID == 0 && json.Unmarshal(msg.Data, &notice) == nil && notice.MachineID == w.cfg.MachineID {
+					deletionNotified = true
+					if w.onEvent != nil {
+						w.onEvent(WSEvent{Type: WSEventMachineDeleted})
+					}
+				}
+				continue
 			}
 			w.handleMessage(msg)
 			if msg.Event == "ping" {

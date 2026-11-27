@@ -7,6 +7,7 @@ import (
 )
 
 type Task struct {
+	Version     int      `json:"version,omitempty"`
 	ID          string   `json:"id"`
 	Targets     []string `json:"targets"`
 	SNI         string   `json:"sni"`
@@ -73,6 +74,13 @@ func (r *Runner) Accept(ctx context.Context, task *Task) {
 	go func() {
 		defer cancel()
 		results, err := r.scan(scanCtx, task.Targets, task.SNI, task.Diagnostics)
+		if task.Version < 1 {
+			for i := range results {
+				results[i].Steps = nil
+				results[i].Error = ""
+				results[i].DurationMS = 0
+			}
+		}
 		report := &Report{ID: task.ID, Status: "succeeded", Results: results}
 		if err != nil {
 			report.Status, report.Error = "failed", err.Error()

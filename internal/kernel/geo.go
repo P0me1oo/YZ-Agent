@@ -9,8 +9,14 @@ import (
 
 // BlockRoutesNeedIP 表示有效的面板拦截需要检查目标 IP，域名目标也需要先解析。
 func BlockRoutesNeedIP(routes []model.RouteRule) bool {
+	return routesNeedIP(routes, true)
+}
+
+func RoutesNeedIP(routes []model.RouteRule) bool { return routesNeedIP(routes, false) }
+
+func routesNeedIP(routes []model.RouteRule, blocksOnly bool) bool {
 	for _, route := range routes {
-		if route.Action != "block" {
+		if blocksOnly && route.Action != "block" {
 			continue
 		}
 		if _, err := model.PanelRouteConditions(route); err != nil {

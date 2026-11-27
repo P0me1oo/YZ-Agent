@@ -266,6 +266,12 @@ func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteR
 			rules = append(rules, relayRule)
 		}
 	}
+	// Domain-only exit routing must work without a local DNS answer. Resolve
+	// first only when an earlier IP rule can affect first-match ordering.
+	nonBlockBeforeResolve := !resolveBeforeRelay && !kernel.RoutesNeedIP(panelRoutes)
+	if nonBlockBeforeResolve {
+		appendPanelRules(false)
+	}
 	if !resolveBeforeRelay {
 		rules = append(rules, M{"action": "resolve"})
 		rules = append(rules, postResolveCustom...)
@@ -274,7 +280,9 @@ func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteR
 		M{"outbound": "block", "ip_cidr": privateV4},
 		M{"outbound": "block", "ip_cidr": privateV6},
 	)
-	appendPanelRules(false)
+	if !nonBlockBeforeResolve {
+		appendPanelRules(false)
+	}
 	// 入口自身线路的直连排在面板路由之后，入口绑定的路由才能作用于入口自身用户。
 	rules = append(rules, directRelayRules...)
 
@@ -294,7 +302,7 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 		return nil
 	}
 
-	var domains, cidrs, siteRefs, ipRefs []string
+	var domains, fullDomains, cidrs, siteRefs, ipRefs []string
 	hasAddress := false
 	for _, item := range pr.Match {
 		item = strings.TrimSpace(item)
@@ -322,10 +330,14 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 			cidrs = append(cidrs, item)
 			continue
 		}
-		domains = append(domains, item)
+		if strings.HasPrefix(item, "full:") {
+			fullDomains = append(fullDomains, strings.TrimPrefix(item, "full:"))
+		} else {
+			domains = append(domains, strings.TrimPrefix(item, "domain:"))
+		}
 	}
 	// 填写的目标地址全部无效时整条跳过，不能退化成只按附加条件匹配。
-	if hasAddress && len(domains)+len(cidrs)+len(siteRefs)+len(ipRefs) == 0 {
+	if hasAddress && len(domains)+len(fullDomains)+len(cidrs)+len(siteRefs)+len(ipRefs) == 0 {
 		return nil
 	}
 	if !hasAddress && conditions.Empty() {
@@ -371,6 +383,11 @@ func compilePanelRouteRule(pr model.RouteRule) []M {
 	}
 
 	var compiled []M
+	if len(fullDomains) > 0 {
+		full := newRule()
+		full["domain"] = fullDomains
+		compiled = append(compiled, full)
+	}
 	if len(domains) > 0 {
 		domainRule := newRule()
 		domainRule["domain_suffix"] = domains

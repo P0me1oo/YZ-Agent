@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/binding"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/controlplane"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
@@ -27,6 +28,7 @@ import (
 
 // nodeHandle tracks a running node service.
 type nodeHandle struct {
+	proxyWarning     func() string
 	cancel           context.CancelFunc
 	protect          context.CancelFunc
 	done             chan struct{}
@@ -48,10 +50,15 @@ type Orchestrator struct {
 	firewall     firewall.Controller
 	client       *panel.Client // machine-level client (no node_id)
 
-	mu             sync.Mutex
-	nodes          map[int]*nodeHandle // node_id → handle
-	trafficMeter   *machinetraffic.Meter
-	trafficBlocked atomic.Bool
+	mu                sync.Mutex
+	nodes             map[int]*nodeHandle // node_id → handle
+	trafficMeter      *machinetraffic.Meter
+	trafficBlocked    atomic.Bool
+	trafficEnabled    atomic.Bool
+	trafficDecisionMu sync.Mutex
+	controlWake       chan struct{}
+	forwardingWake    chan struct{}
+	trafficGeneration atomic.Uint64
 
 	// Per-node mailbox keyed by node_id. Shared WS events are aggregated here
 	// and each node service drains the latest state when ready.
@@ -97,12 +104,14 @@ func New(cfg *config.Config) *Orchestrator {
 		MachineID: cfg.Machine.MachineID,
 	}
 	return &Orchestrator{
-		cfg:          cfg,
-		client:       panel.NewClient(panelCfg),
-		nodes:        make(map[int]*nodeHandle),
-		mailboxes:    make(map[int]*controlplane.NodeMailbox),
-		statuses:     make(map[int]chan<- controlplane.StatusChange),
-		nodeStatuses: make(map[int]service.RuntimeStatus),
+		cfg:            cfg,
+		forwardingWake: make(chan struct{}, 1),
+		controlWake:    make(chan struct{}, 1),
+		client:         panel.NewClient(panelCfg),
+		nodes:          make(map[int]*nodeHandle),
+		mailboxes:      make(map[int]*controlplane.NodeMailbox),
+		statuses:       make(map[int]chan<- controlplane.StatusChange),
+		nodeStatuses:   make(map[int]service.RuntimeStatus),
 	}
 }
 
@@ -112,6 +121,10 @@ func (o *Orchestrator) SetStatusHandler(handler func(service.RuntimeStatus)) {
 }
 
 func (o *Orchestrator) SetFirewallController(controller firewall.Controller) { o.firewall = controller }
+
+func (o *Orchestrator) SetBindingDeletionHandler(handle func(binding.Confirmation)) {
+	o.client.SetBindingDeletionHandler(handle)
+}
 
 func (o *Orchestrator) SetAgentRuntime(version, bootID string) {
 	o.agentVersion, o.bootID = version, bootID
@@ -178,6 +191,7 @@ func (o *Orchestrator) controlLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-o.controlWake:
 		}
 	}
 }
@@ -270,8 +284,9 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		o.runJob(func() { o.addressLoop(ctx) })
 	}
 	forwardingManager, forwardingError := o.newForwardingManager()
+	forwardingReady := make(chan struct{})
 	if forwardingError == nil {
-		o.runJob(func() { o.forwardingLoop(ctx, forwardingManager) })
+		o.runJob(func() { o.forwardingLoop(ctx, forwardingManager, forwardingReady) })
 	} else {
 		o.logger().Error("forwarding manager unavailable", "error", forwardingError)
 	}
@@ -288,12 +303,13 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	if err := o.initTraffic(ctx, nodesResp.Traffic); err != nil {
 		o.logger().Error("machine traffic initialization failed; proxies remain protected", "error", err)
 	}
-	if o.trafficMeter != nil {
+	close(forwardingReady)
+	o.runJob(func() { o.trafficLoop(ctx) })
+	if o.trafficEnabled.Load() {
 		// 首次有效采样可能已经解除面板的等待计量状态，重新取得管理员启用的节点。
 		if refreshed, err := o.client.GetMachineNodesContext(ctx); err == nil {
 			nodesResp = refreshed
 		}
-		o.runJob(func() { o.trafficLoop(ctx) })
 	}
 	o.applyIntervals(nodesResp.BaseConfig)
 	o.logger().Info(fmt.Sprintf("machine %d: discovered %d nodes",
@@ -452,6 +468,9 @@ func (o *Orchestrator) startNode(ctx context.Context, mn panel.MachineNode) {
 	cp := controlplane.NewMachinePanelControlPlane(perNodeClient, push, registerFn)
 	cp.SetPrefetchedConfig(cfgSnapshot)
 	svc := service.NewWithControlPlane(nodeCfg, cp)
+	o.mu.Lock()
+	o.nodes[mn.ID].proxyWarning = svc.ProxyMeterWarning
+	o.mu.Unlock()
 	svc.SetFirewallController(o.firewall)
 	var kernelChanged atomic.Bool
 	svc.SetConfigKernelCheck(func(spec *model.NodeSpec) bool {
@@ -509,7 +528,7 @@ func (o *Orchestrator) finishNode(nodeID int, done chan struct{}, runErr error) 
 		o.setNodeStatus(nodeID, service.RuntimeFailed)
 	}
 	// 提额可能早于旧服务完成退出；退出后重新发现，避免等待长连接的周期校对。
-	if runErr == nil && o.trafficMeter != nil && !o.trafficBlocked.Load() && o.runCtx != nil && o.runCtx.Err() == nil {
+	if runErr == nil && o.trafficEnabled.Load() && !o.trafficBlocked.Load() && o.runCtx != nil && o.runCtx.Err() == nil {
 		o.runJob(func() { o.rediscover(o.runCtx) })
 	}
 }
@@ -585,6 +604,14 @@ func (o *Orchestrator) rediscoverOnce(ctx context.Context) {
 	if err != nil {
 		o.logger().Warn("machine node discovery failed", "error", err)
 		return
+	}
+	if nodesResp.Traffic != nil && !o.trafficEnabled.Load() {
+		if err := o.activateTraffic(ctx, nodesResp.Traffic, false); err != nil {
+			o.logger().Error("machine traffic activation failed", "error", err)
+		}
+	}
+	if nodesResp.TrafficBlocked {
+		o.setTrafficBlocked(true)
 	}
 	if ctx.Err() != nil || o.rediscoverPending.Load() {
 		return
@@ -708,6 +735,13 @@ func (o *Orchestrator) currentWebSocket() *panel.WSClient {
 // onWSEvent routes a WS event to the correct node's channel.
 // sync.nodes is a machine-level event that triggers immediate rediscovery.
 func (o *Orchestrator) onWSEvent(event panel.WSEvent) {
+	if event.Type == panel.WSEventMachineDeleted {
+		select {
+		case o.controlWake <- struct{}{}:
+		default:
+		}
+		return
+	}
 	// sync.nodes is a machine-level event, not per-node
 	if event.Type == panel.WSEventSyncNodes {
 		o.logger().Info("machine received sync.nodes, triggering immediate rediscovery")

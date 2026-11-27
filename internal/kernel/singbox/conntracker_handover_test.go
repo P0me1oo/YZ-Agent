@@ -10,6 +10,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/devicegate"
 	"github.com/P0me1oo/YZ-Agent/internal/devicegate/gatetest"
+	"github.com/P0me1oo/YZ-Agent/internal/deviceip"
 	N "github.com/sagernet/sing/common/network"
 )
 
@@ -98,5 +99,33 @@ func TestDeviceHandoverPendingSingboxAdmissionIsNotReportedAsOnline(t *testing.T
 	tracker.users[1].mu.RUnlock()
 	if pending != 0 || len(gate.Snapshot().Sources) != 0 {
 		t.Fatal("拒绝后没有归还并发预留名额")
+	}
+}
+
+func TestNextDeviceExclusionPreservesSingboxTraffic(t *testing.T) {
+	remote := &gatetest.Remote{}
+	gate := gatetest.Manager(t, remote)
+	tracker := NewConnTracker(0)
+	tracker.SetUserMap(map[string]int{"excluded": 1})
+	tracker.deviceGate.Store(gate)
+	tracker.deviceFilter = &deviceip.Filter{}
+	tracker.deviceFilter.SetExcluded([]string{"8.8.8.8"})
+	server, peer := net.Pipe()
+	wrapped := tracker.RoutedConnection(t.Context(), server, testInboundContext("excluded", "8.8.8.8"), nil, nil)
+	defer wrapped.Close()
+	defer peer.Close()
+	done := make(chan error, 1)
+	go func() { _, err := peer.Write([]byte("hello")); done <- err }()
+	wrapped.SetReadDeadline(time.Now().Add(time.Second))
+	var data [5]byte
+	if _, err := io.ReadFull(wrapped, data[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	traffic, _, _ := tracker.GetUserTraffic()
+	if remote.Calls.Load() != 0 || traffic[1][0] != 5 {
+		t.Fatal("exemption changed accounting or used device slot")
 	}
 }

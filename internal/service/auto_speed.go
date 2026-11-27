@@ -2,16 +2,18 @@ package service
 
 import (
 	"encoding/json"
+	"maps"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/P0me1oo/YZ-Agent/internal/autospeed"
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
-	"os"
-	"path/filepath"
-	"reflect"
-	"time"
 )
 
 type autoSpeedState struct {
+	rules      map[int]*autospeed.Rule
 	readFailed bool
 	manager    autospeed.Manager
 	loaded     bool
@@ -26,10 +28,15 @@ func (s *Service) autoSpeedPath() string {
 	return filepath.Join(filepath.Dir(s.pendingStore.path), "auto-speed-"+filepath.Base(s.pendingStore.path))
 }
 func (s *Service) updateAutoSpeed(now time.Time) {
-	rules := map[int]*autospeed.Rule{}
-	for _, u := range s.lastUsers {
-		rules[u.ID] = u.AutoSpeedLimit
+	if s.autoSpeed.rules == nil {
+		s.autoSpeed.rules = make(map[int]*autospeed.Rule)
+		for _, u := range s.lastUsers {
+			if u.AutoSpeedLimit.Valid() {
+				s.autoSpeed.rules[u.ID] = u.AutoSpeedLimit
+			}
+		}
 	}
+	rules := s.autoSpeed.rules
 	if !s.autoSpeed.loaded {
 		s.autoSpeed.loaded = true
 		if path := s.autoSpeedPath(); path != "" {
@@ -54,7 +61,7 @@ func (s *Service) updateAutoSpeed(now time.Time) {
 	}
 	s.userSpeed.reset = s.userSpeed.reset[:0]
 	active := s.autoSpeed.manager.UpdateSampleWithGap(rules, s.userSpeed.rates, s.userSpeed.at, now, s.userSpeed.maxGap)
-	if reflect.DeepEqual(active, s.autoSpeed.active) && s.autoSpeed.error == "" {
+	if s.autoSpeed.active != nil && maps.Equal(active, s.autoSpeed.active) && s.autoSpeed.error == "" {
 		return
 	}
 	limits := map[int]int{}

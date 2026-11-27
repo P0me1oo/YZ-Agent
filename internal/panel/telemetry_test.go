@@ -41,6 +41,27 @@ func TestTelemetryDemandLeaseAndCompatibility(t *testing.T) {
 	check(true, true)
 }
 
+func TestDeviceDetailLeaseExpiresAndLegacyReceiptRestoresSnapshots(t *testing.T) {
+	c := &Client{}
+	demand := &TelemetryDemand{DetailInterval: 60, LeaseSeconds: 60, OmitDeviceDetails: true}
+	if c.OmitDeviceDetails() {
+		t.Fatal("new connection skipped device snapshots")
+	}
+	c.acceptTelemetry(demand, StatePayload{})
+	if !c.OmitDeviceDetails() {
+		t.Fatal("device detail opt-out ignored")
+	}
+	c.realtime.telemetry.Store(&telemetryLease{demand: *demand, until: time.Now().Add(-time.Second)})
+	if c.OmitDeviceDetails() {
+		t.Fatal("expired opt-out skipped device snapshots")
+	}
+	c.acceptTelemetry(demand, StatePayload{})
+	c.acceptTelemetry(nil, StatePayload{})
+	if c.OmitDeviceDetails() {
+		t.Fatal("old panel did not receive device snapshots")
+	}
+}
+
 func TestTelemetryHTTPAcknowledgementControlsNextSample(t *testing.T) {
 	var watching atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

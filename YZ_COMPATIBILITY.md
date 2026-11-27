@@ -1,5 +1,15 @@
 # YZ-Agent 兼容矩阵
 
+**v2.58.0** 本地开发版与 Next 0.41.0 使用分项流量协议 `scoped-v2`。能力在握手时协商，既有 YZboard 面板继续使用原有发送路径。切换到新 Next 前应在原面板结清待报数据。[服务器计量](docs/server-traffic-protection.md)
+
+**v2.57.0** 本地开发版与 YZboard 2.32.0、Next 0.39.0 共用服务器删除确认协议。仅一端升级时，Agent 保留未获得心跳签名确认的绑定。[自动解绑](docs/machine-binding-deletion.md)
+
+**v2.56.0** 本地开发版支持 Next 0.36.0 与管理台 0.33.0 的服务器月流量保护，继续使用固定版本的 Xray 和 sing-box。[计量与保护范围](docs/server-traffic-protection.md)
+
+**v2.55.0** 本地开发版支持 Next 0.34.0 与管理台 0.32.0 的用户实时详情。能力由节点状态回执协商。旧面板、租约到期或不支持批量读取的核心沿用原采样和上报路径。双核心继续使用 `go.mod` 中固定的依赖。[采样与兼容说明](docs/next-user-usage.md)
+
+**v2.54.0** 本地开发版支持 Next 0.33.0 与管理台 0.31.0 的机器级服务器监控。旧面板继续使用原有采样和状态协议，见[主机监控说明](docs/host-monitoring.md)。
+
 **v2.48.0** 已正式发布，配套 YZboard 2.28.0 / Dash 0.110.0，并兼容 Next / Dash 0.24.0；未更新运行节点。固定来源、完整 CI 与 13 份附件核验见[发布记录](docs/release-v2.48.0.md)。增加来源限制能力声明、必要实时测量与独立执行状态；保持旧面板版本化防火墙协议与固定核心依赖。完整数据库、受影响包竞态、原生双栈及双核心快照验证见 [Next 验收记录](../YZboard-Next/YZboard-Next/docs/relay-firewall-acceptance.md)。
 
 **v2.47.0** 为配套面板 2.28.0 / Dash 0.110.0 的本地开发版本，未发布、未部署。中转来源核对及独立端口限制见[说明](docs/relay-firewall.md)，正式核心依赖不变，旧面板无版本策略时保持原行为。包含工作区已有 Next 适配改动，验证范围见[记录](../YZboard/docs/relay-firewall-validation.md)。

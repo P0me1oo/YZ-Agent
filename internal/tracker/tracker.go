@@ -12,11 +12,12 @@ import (
 // snapshot is an immutable point-in-time view of tracker state.
 // It is swapped atomically so readers never block writers.
 type snapshot struct {
-	aliveIPs  map[int]map[string]bool // userID → set of source IPs（含不计入设备数的来源）
-	online    map[int]int             // userID → distinct IP count（含不计入设备数的来源）
-	connCount int
-	inSpeed   int64 // 字节每秒
-	outSpeed  int64 // 字节每秒
+	aliveIPs    map[int]map[string]bool // userID → set of source IPs（含不计入设备数的来源）
+	online      map[int]int             // userID → distinct IP count（含不计入设备数的来源）
+	connCount   int
+	onlineCount int
+	inSpeed     int64 // 字节每秒
+	outSpeed    int64 // 字节每秒
 }
 
 type connectionSnapshot struct {
@@ -47,7 +48,10 @@ type Tracker struct {
 
 	// pending accumulates deltas between flushes.
 	// Protected by mu — written by Process, drained by FlushTraffic.
-	pendingTraffic map[int][2]int64
+	pendingTraffic   map[int][2]int64
+	pendingEntry     map[int][2]int64
+	entryRuntime     bool
+	pendingUserBytes int64
 
 	// Relay bookkeeping mirrors the user maps but is keyed by logical node ID
 	// and reported on a separate channel, so landing-line traffic never mixes
@@ -77,6 +81,7 @@ func New() *Tracker {
 	t := &Tracker{
 		lastSeen:          make(map[int][2]int64),
 		pendingTraffic:    make(map[int][2]int64),
+		pendingEntry:      make(map[int][2]int64),
 		lastSeenRelay:     make(map[int][2]int64),
 		pendingRelay:      make(map[int][2]int64),
 		lastSeenRelayUser: make(map[int]map[int][2]int64),
@@ -101,6 +106,21 @@ func (t *Tracker) Process(
 	kernelAliveIPs map[int]map[string]bool,
 	connCount int,
 ) {
+	// Compute online from alive IPs.
+	online := make(map[int]int, len(kernelAliveIPs))
+	for uid, ips := range kernelAliveIPs {
+		online[uid] = len(ips)
+	}
+
+	t.process(cumTraffic, kernelAliveIPs, online, len(online), connCount)
+}
+
+// ProcessSummary keeps mandatory accounting without materializing the legacy device map.
+func (t *Tracker) ProcessSummary(traffic map[int][2]int64, onlineCount, connCount int) {
+	t.process(traffic, nil, nil, onlineCount, connCount)
+}
+
+func (t *Tracker) process(cumTraffic map[int][2]int64, kernelAliveIPs map[int]map[string]bool, online map[int]int, onlineCount, connCount int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -123,10 +143,15 @@ func (t *Tracker) Process(
 
 		if deltaUp > 0 || deltaDown > 0 {
 			t.revision++
-			cur := t.pendingTraffic[uid]
+			pending := t.pendingTraffic
+			if t.entryRuntime {
+				pending = t.pendingEntry
+			}
+			cur := pending[uid]
 			cur[0] += deltaUp
 			cur[1] += deltaDown
-			t.pendingTraffic[uid] = cur
+			pending[uid] = cur
+			t.pendingUserBytes += deltaUp + deltaDown
 
 			cycleOut += deltaUp
 			cycleIn += deltaDown
@@ -138,59 +163,100 @@ func (t *Tracker) Process(
 	t.lastProcess = now
 	inSpeed, outSpeed := perSecond(cycleIn, elapsed), perSecond(cycleOut, elapsed)
 
-	// Compute online from alive IPs.
-	online := make(map[int]int, len(kernelAliveIPs))
-	for uid, ips := range kernelAliveIPs {
-		online[uid] = len(ips)
-	}
-
 	// Publish new snapshot (readers will see this atomically).
 	t.live.Store(&snapshot{
-		aliveIPs:  kernelAliveIPs, // kernel provides fresh copy each tick
-		online:    online,
-		connCount: connCount,
-		inSpeed:   inSpeed,
-		outSpeed:  outSpeed,
+		aliveIPs:    kernelAliveIPs, // kernel provides fresh copy each tick
+		online:      online,
+		onlineCount: onlineCount,
+		connCount:   connCount,
+		inSpeed:     inSpeed,
+		outSpeed:    outSpeed,
 	})
 }
 
 // FlushTraffic returns accumulated per-user traffic and resets the pending buffer.
 // Lock-free: reads from live snapshot, then acquires mu only to drain.
 func (t *Tracker) FlushTraffic() map[int][2]int64 {
+	direct, entry := t.FlushScopedTraffic()
+	return TotalTraffic(direct, entry)
+}
+
+// Called after the previous runtime has stopped and its counters have been sampled.
+func (t *Tracker) SetEntryRuntime(entry bool) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.entryRuntime = entry
+}
+
+// TotalTraffic supplies the aggregate expected by existing report consumers.
+// The two input maps and the returned map are immutable after batch creation.
+func TotalTraffic(direct, entry map[int][2]int64) map[int][2]int64 {
+	if len(entry) == 0 {
+		return direct
+	}
+	if len(direct) == 0 {
+		return entry
+	}
+	all := copyTrafficMap(direct)
+	for id, bytes := range entry {
+		v := all[id]
+		all[id] = [2]int64{v[0] + bytes[0], v[1] + bytes[1]}
+	}
+	return all
+}
+
+func (t *Tracker) FlushScopedTraffic() (direct, entry map[int][2]int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.revision++
-	data := t.pendingTraffic
-	t.pendingTraffic = make(map[int][2]int64, len(data))
-	t.mu.Unlock()
-	return data
+	direct, entry = t.pendingTraffic, t.pendingEntry
+	t.pendingUserBytes = 0
+	t.pendingTraffic = make(map[int][2]int64, len(direct))
+	t.pendingEntry = make(map[int][2]int64, len(entry))
+	return direct, entry
 }
 
 // RestoreTraffic adds traffic back (used when push to panel fails).
 func (t *Tracker) RestoreTraffic(data map[int][2]int64) {
+	t.RestoreScopedTraffic(data, nil)
+}
+
+func (t *Tracker) RestoreScopedTraffic(direct, entry map[int][2]int64) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.revision++
-	for uid, d := range data {
-		cur := t.pendingTraffic[uid]
-		cur[0] += d[0]
-		cur[1] += d[1]
-		t.pendingTraffic[uid] = cur
+	restore := func(target, delta map[int][2]int64) {
+		for uid, d := range delta {
+			cur := target[uid]
+			target[uid] = [2]int64{cur[0] + d[0], cur[1] + d[1]}
+			t.pendingUserBytes += d[0] + d[1]
+		}
 	}
-	t.mu.Unlock()
+	restore(t.pendingTraffic, direct)
+	restore(t.pendingEntry, entry)
 }
 
 // HasTraffic returns true if there is accumulated traffic to report.
 func (t *Tracker) HasTraffic() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return len(t.pendingTraffic) > 0
+	return len(t.pendingTraffic) > 0 || len(t.pendingEntry) > 0
 }
 
 // PendingSnapshot 复制尚未刷出的累计流量，不清空缓冲，用于落盘保存。
 func (t *Tracker) PendingSnapshot() (traffic, relay map[int][2]int64, relayUser map[int]map[int][2]int64) {
+	direct, entry, relay, relayUser := t.ScopedPendingSnapshot()
+	return TotalTraffic(direct, entry), relay, relayUser
+}
+
+func (t *Tracker) ScopedPendingSnapshot() (direct, entry, relay map[int][2]int64, relayUser map[int]map[int][2]int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if len(t.pendingTraffic) > 0 {
-		traffic = copyTrafficMap(t.pendingTraffic)
+		direct = copyTrafficMap(t.pendingTraffic)
+	}
+	if len(t.pendingEntry) > 0 {
+		entry = copyTrafficMap(t.pendingEntry)
 	}
 	if len(t.pendingRelay) > 0 {
 		relay = copyTrafficMap(t.pendingRelay)
@@ -206,7 +272,7 @@ func (t *Tracker) PendingSnapshot() (traffic, relay map[int][2]int64, relayUser 
 			relayUser = nil
 		}
 	}
-	return traffic, relay, relayUser
+	return direct, entry, relay, relayUser
 }
 
 // FlushAliveIPs 返回当前权威设备快照。每次都返回完整副本，包括空快照，
@@ -260,8 +326,10 @@ func (t *Tracker) CurrentConnectionCounts() (map[int]int, map[int]map[int]int) {
 // Lock-free: reads from live snapshot.
 func (t *Tracker) LogStats() {
 	s := t.live.Load()
-	nlog.TrackerStats(s.connCount, len(s.online))
+	nlog.TrackerStats(s.connCount, s.onlineCount)
 }
+
+func (t *Tracker) OnlineCount() int { return t.live.Load().onlineCount }
 
 // ActiveConnections returns the last observed active connection count.
 // Lock-free: reads from live snapshot.
@@ -317,4 +385,11 @@ func (t *Tracker) CurrentIPConnectionCounts() map[int]map[string]int {
 		return *current
 	}
 	return nil
+}
+
+// PendingUserBytes counts only ingress usage; route accounting tracks the same bytes separately.
+func (t *Tracker) PendingUserBytes() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.pendingUserBytes
 }

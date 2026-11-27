@@ -65,7 +65,7 @@ func (s *Service) updateFirewall(ctx context.Context, node *model.NodeSpec, user
 		apply = preflight.Prepare
 	}
 	if err := apply(ctx, s.timeConsumer, prepared, s.cfg.Kernel.Type); err != nil {
-		if node.HasRelayFirewall() || !node.SourcePolicy.Enabled() && node.IsRelayLanding() && node.Relay.EntryNodeID > 0 {
+		if !node.SourcePolicy.Enabled() && (node.HasRelayFirewall() || node.IsRelayLanding() && node.Relay.EntryNodeID > 0) {
 			text := []rune(nlog.Sanitize(fmt.Sprintf("落地防火墙核对失败，保留原规则并重试：%v", err)))
 			if len(text) > 300 {
 				text = text[:300]
@@ -121,6 +121,14 @@ func (s *Service) stopKernel() {
 var ErrTrafficProtection = errors.New("machine traffic protection")
 
 func (s *Service) stopKernelFor(cause error) {
+	if s.operations.probeCancel != nil {
+		s.operations.probeCancel()
+		s.operations.probeCancel = nil
+	}
+	s.operations.probe.Store(nil)
+	s.operations.probeConfig = ""
+	s.operations.probeRuntime = "stopped"
+
 	if stopper, ok := s.kernel.(kernel.ImmediateStopper); ok && errors.Is(cause, ErrTrafficProtection) {
 		stopper.StopNow()
 	} else {

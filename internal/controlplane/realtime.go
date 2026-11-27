@@ -42,3 +42,12 @@ func (p *PanelControlPlane) HostMonitoringEnabled() bool { return p.client.HostM
 func (p *MachinePanelControlPlane) HostMonitoringEnabled() bool {
 	return p.client.HostMonitoringEnabled()
 }
+
+func (p *PanelControlPlane) StateDue() bool        { return p.client.StateDue() }
+func (p *MachinePanelControlPlane) StateDue() bool { return p.client.StateDue() }
+
+func (p *PanelControlPlane) OmitDeviceDetails() bool        { return p.client.OmitDeviceDetails() }
+func (p *MachinePanelControlPlane) OmitDeviceDetails() bool { return p.client.OmitDeviceDetails() }
+
+func (p *PanelControlPlane) UserUsageDemand() ([]int, bool)        { return p.client.UserUsageDemand() }
+func (p *MachinePanelControlPlane) UserUsageDemand() ([]int, bool) { return p.client.UserUsageDemand() }

@@ -327,6 +327,10 @@ func (x *Xray) GetRelayUserTraffic(_ context.Context) (map[int]map[int][2]int64,
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	x.collectStatsLocked()
+	return x.copyRelayUserTrafficLocked(), nil
+}
+
+func (x *Xray) copyRelayUserTrafficLocked() map[int]map[int][2]int64 {
 	out := make(map[int]map[int][2]int64)
 	for uid, nodes := range x.cumRelayUserTraffic {
 		if copied := copyTraffic(nodes); copied != nil {
@@ -334,9 +338,9 @@ func (x *Xray) GetRelayUserTraffic(_ context.Context) (map[int]map[int][2]int64,
 		}
 	}
 	if len(out) == 0 {
-		return nil, nil
+		return nil
 	}
-	return out, nil
+	return out
 }
 
 // relayRouteNodes 返回中转入口路由编号到落地节点的映射，与中转流量计数使用同一组编号。

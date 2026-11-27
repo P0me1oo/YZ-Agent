@@ -48,3 +48,27 @@ func TestDeviceIPExcludeAppliesWithoutKernelReload(t *testing.T) {
 		t.Fatal("清空名单不应重载内核")
 	}
 }
+
+func TestNextDeviceExclusionChangesRebuildExistingConnections(t *testing.T) {
+	k := &fakeKernel{}
+	s := newTestService(k)
+	s.lastConfig = &model.NodeSpec{Protocol: "vless", ServerPort: 443, AccessPolicyVersion: 1}
+	s.lastUsers = []model.UserSpec{{ID: 1}}
+	if !s.startKernel(t.Context(), s.lastConfig, s.lastUsers) {
+		t.Fatal("start failed")
+	}
+	before := k.startCalls
+	changed := *s.lastConfig
+	changed.DeviceIPExclude = []string{"8.8.8.8"}
+	if computeConfigHash(s.lastConfig) == computeConfigHash(&changed) {
+		t.Fatal("Next exclusion was omitted from revision")
+	}
+	if !s.applyConfigUpdate(t.Context(), &changed, computeConfigHash(&changed)) || k.startCalls != before+1 {
+		t.Fatal("old connections not rebuilt")
+	}
+	removed := changed
+	removed.DeviceIPExclude = nil
+	if !s.applyConfigUpdate(t.Context(), &removed, computeConfigHash(&removed)) || k.startCalls != before+2 {
+		t.Fatal("removed exemption left existing connection bypass")
+	}
+}

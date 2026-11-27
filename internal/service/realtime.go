@@ -38,25 +38,46 @@ func (s *Service) collectStatus() monitor.Status {
 // publishRuntimeState 不阻塞主循环。慢通道期间不堆积采样，下一次发送直接取最新快照。
 func (s *Service) publishRuntimeState(ctx context.Context) {
 	publisher, ok := s.sink.(controlplane.StatePublisher)
-	if !ok || !publisher.RealtimeEnabled() || !s.stateActive.CompareAndSwap(false, true) {
+	if !ok || !publisher.RealtimeEnabled() {
+		return
+	}
+	if sender, ok := publisher.(interface{ StateDue() bool }); ok && !sender.StateDue() {
+		return
+	}
+	if !s.stateActive.CompareAndSwap(false, true) {
 		return
 	}
 	details, speeds := true, true
 	if demand, ok := publisher.(interface{ TelemetryNeeds() (bool, bool) }); ok {
 		details, speeds = demand.TelemetryNeeds()
 	}
-	counts, relayCounts := s.tracker.CurrentConnectionCounts()
-	state := panel.StatePayload{
-		Alive: s.tracker.FlushAliveIPs(), Online: s.tracker.CurrentOnline(),
-		ConnectionCounts: counts, RelayConnectionCounts: relayCounts,
-		IPConnectionCounts: s.tracker.CurrentIPConnectionCounts(),
-		RelayUserAlive:     s.tracker.RelayUserAlive(),
+	var state panel.StatePayload
+	if s.usageMode {
+		count := s.tracker.OnlineCount()
+		state.OnlineCount = &count
+		state.UserUsage = s.usageBatch
+		s.usageBatch = nil
+	} else {
+		state.Online = s.tracker.CurrentOnline()
 	}
-	if speeds {
+	if demand, ok := publisher.(interface{ OmitDeviceDetails() bool }); !s.usageMode && (!ok || !demand.OmitDeviceDetails()) {
+		state.Alive = s.tracker.FlushAliveIPs()
+		state.ConnectionCounts, state.RelayConnectionCounts = s.tracker.CurrentConnectionCounts()
+		state.IPConnectionCounts = s.tracker.CurrentIPConnectionCounts()
+		state.RelayUserAlive = s.tracker.RelayUserAlive()
+	}
+	if speeds && !s.usageMode {
 		state.UserSpeeds = s.userSpeed.rates
 	}
 	if value := s.operations.snapshot.Load(); value != nil {
-		state.Operations = value
+		if s.usageMode && len(value.AutoSpeed) > 0 {
+			// Targeted leases carry the requested penalties in user_usage only.
+			operation := *value
+			operation.AutoSpeed = nil
+			state.Operations = &operation
+		} else {
+			state.Operations = value
+		}
 	}
 	// Source verification is control state and must not wait for a display lease.
 	if value := s.relayEgress.Load(); value != nil {

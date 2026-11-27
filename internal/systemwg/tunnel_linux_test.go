@@ -9,9 +9,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +47,14 @@ func testPair(t *testing.T) (*model.RelayWireGuardConfig, *model.RelayWireGuardC
 // 真正创建两个网络空间和 WG 设备，检查 TCP 使用 BBR、UDP 往返及重复回收。
 // 必须在具备网络空间权限和 TUN 的 Linux 测试环境运行，不跳过环境失败。
 func TestSystemTCPAndUDP(t *testing.T) {
+	for _, mtu := range []int{1280, 1420, 1500} {
+		t.Run(strconv.Itoa(mtu), func(t *testing.T) { testSystemTCPAndUDP(t, mtu) })
+	}
+}
+
+func testSystemTCPAndUDP(t *testing.T, mtu int) {
 	entry, landing := testPair(t)
+	entry.MTU, landing.MTU = mtu, mtu
 	u, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +139,7 @@ func TestSystemTCPAndUDP(t *testing.T) {
 	}
 	defer udpEcho.Close()
 	go func() {
-		var buf [2048]byte
+		var buf [65535]byte
 		n, addr, err := udpEcho.ReadFrom(buf[:])
 		if err == nil {
 			_, _ = udpEcho.WriteTo(buf[:n], addr)
@@ -142,15 +151,16 @@ func TestSystemTCPAndUDP(t *testing.T) {
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.Write([]byte("udp-check")); err != nil {
+	udpPayload := bytes.Repeat([]byte("udp-check"), 500)
+	if _, err := c.Write(udpPayload); err != nil {
 		t.Fatal(err)
 	}
-	buf := make([]byte, 64)
+	buf := make([]byte, 65535)
 	n, err := c.Read(buf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(buf[:n]) != "udp-check" {
+	if !bytes.Equal(buf[:n], udpPayload) {
 		t.Fatal("UDP 内容不同")
 	}
 	r.Close()
@@ -171,6 +181,40 @@ func TestInvalidKeyDoesNotAllocateNamespace(t *testing.T) {
 	a.PrivateKey = "invalid-test-key"
 	if _, err := newTunnel(a, "", 0); err == nil {
 		t.Fatal("错误密钥未拒绝")
+	}
+}
+
+func TestEndpointDNSRefreshAndIPv4Normalization(t *testing.T) {
+	endpoint, err := resolveEndpoint(t.Context(), "127.0.0.1", 51820)
+	if err != nil || endpoint != "127.0.0.1:51820" {
+		t.Fatalf("IPv4 endpoint changed family: %q %v", endpoint, err)
+	}
+	entry, _ := testPair(t)
+	tunnel, err := newTunnel(entry, endpoint, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tunnel.close()
+	tunnel.endpointHost = "relay.test"
+	next := "[::1]:51821"
+	tunnel.updateEndpoint(t.Context(), func(context.Context, string, int) (string, error) { return next, nil })
+	state, err := tunnel.wg.IpcGet()
+	if err != nil || !strings.Contains(state, "endpoint="+next) {
+		t.Fatal("new endpoint not applied")
+	}
+	tunnel.updateEndpoint(t.Context(), func(context.Context, string, int) (string, error) { return "", errors.New("temporary DNS failure") })
+	if tunnel.endpointAddress != next {
+		t.Fatal("temporary DNS failure cleared endpoint")
+	}
+	if err := tunnel.start(); err != nil {
+		t.Fatal(err)
+	}
+	done := tunnel.done
+	tunnel.close()
+	select {
+	case <-done:
+	default:
+		t.Fatal("endpoint refresh task leaked")
 	}
 }
 

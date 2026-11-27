@@ -70,6 +70,8 @@ type NodeSpec struct {
 	TrafficPattern    string
 
 	Multiplex           *MultiplexConfig
+	AccessPolicyVersion int
+	TrustedProxyIPs     []string
 	AcceptProxyProtocol *bool
 	AutoFirewall        *bool
 
@@ -111,16 +113,25 @@ type RelayConfig struct {
 }
 
 type RelayChild struct {
-	NodeID    int
-	Tag       string
-	RouteID   int
-	Protocol  string
-	Address   string
-	Port      int
-	Cipher    string
-	Password  string
-	VLESS     *RelayVLESSConfig
-	WireGuard *RelayWireGuardConfig
+	TrafficBinding int
+	NodeID         int
+	Tag            string
+	RouteID        int
+	Protocol       string
+	Address        string
+	Port           int
+	Cipher         string
+	Password       string
+	VLESS          *RelayVLESSConfig
+	WireGuard      *RelayWireGuardConfig
+}
+
+// LoadKey separates immutable placement counters from legacy logical node counters in the durable report queue.
+func (c RelayChild) LoadKey() int {
+	if c.TrafficBinding > 0 {
+		return -c.TrafficBinding
+	}
+	return c.NodeID
 }
 
 type RelayWireGuardConfig = panel.RelayWireGuardConfig

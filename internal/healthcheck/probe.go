@@ -17,10 +17,14 @@ import (
 )
 
 type Config struct {
-	Enabled  bool   `json:"enabled"`
-	URL      string `json:"url"`
-	Interval int    `json:"interval"`
-	Request  string `json:"request,omitempty"`
+	Clients         map[string]map[string]any `json:"clients,omitempty"`
+	Forwarding      map[string]any            `json:"forwarding,omitempty"`
+	ForwardingError string                    `json:"forwarding_error,omitempty"`
+	Generation      string                    `json:"generation,omitempty"`
+	Enabled         bool                      `json:"enabled"`
+	URL             string                    `json:"url"`
+	Interval        int                       `json:"interval"`
+	Request         string                    `json:"request,omitempty"`
 }
 type Step struct {
 	Name   string `json:"name"`
@@ -29,6 +33,10 @@ type Step struct {
 	Error  string `json:"error,omitempty"`
 }
 type Result struct {
+	Run        string  `json:"run,omitempty"`
+	Generation string  `json:"generation,omitempty"`
+	Request    string  `json:"request,omitempty"`
+	Duration   int64   `json:"duration_ms,omitempty"`
 	ConfigHash string  `json:"config_hash"`
 	ID         string  `json:"id"`
 	Checked    int64   `json:"checked_at"`
@@ -63,12 +71,12 @@ func resolveTarget(
 	}
 	invalidEndpoint := u.Scheme != "https" || u.Hostname() == ""
 	forbiddenParts := u.User != nil || u.Fragment != "" || u.RawQuery != ""
-	if invalidEndpoint || forbiddenParts {
+	if invalidEndpoint || forbiddenParts || len(raw) > 500 || u.ForceQuery {
 		return nil, nil, fmt.Errorf("只支持无认证信息的 HTTPS 公网地址")
 	}
 	ips, err := lookup(ctx, u.Hostname())
 	if err != nil {
-		return nil, nil, fmt.Errorf("目标域名解析失败")
+		return nil, nil, fmt.Errorf("目标域名解析失败: %w", err)
 	}
 	if len(ips) == 0 {
 		return nil, nil, fmt.Errorf("目标没有地址")
@@ -104,6 +112,9 @@ func resolveTarget(
 			}
 		}
 	}
+	if len(addresses) > 16 {
+		addresses = addresses[:16]
+	}
 	return u, addresses, nil
 }
 
@@ -118,11 +129,16 @@ func Request(ctx context.Context, u *url.URL, addresses []string, dial DialFunc)
 
 func requestTransport(u *url.URL, dial DialFunc) *http.Transport {
 	transport := &http.Transport{
-		TLSClientConfig:       &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12},
-		DialContext:           dial,
-		DisableKeepAlives:     true,
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 5 * time.Second,
+		TLSClientConfig: &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12},
+		DialContext:     dial,
+		// Each attempt closes idle sockets; avoid forced close racing QUIC response delivery.
+		DisableKeepAlives:      false,
+		MaxIdleConns:           1,
+		MaxIdleConnsPerHost:    1,
+		TLSHandshakeTimeout:    5 * time.Second,
+		ResponseHeaderTimeout:  5 * time.Second,
+		MaxResponseHeaderBytes: 32 << 10,
+		DisableCompression:     true,
 	}
 	return transport
 }
@@ -203,7 +219,7 @@ func requestAddress(ctx context.Context, u *url.URL, address string, base *http.
 	req.Header.Set("User-Agent", "YZ-Agent-Health/1")
 	resp, err := client.Do(req)
 	if err != nil {
-		return true, fmt.Errorf("代理出站或 TLS 请求失败")
+		return true, fmt.Errorf("代理出站或 TLS 请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))

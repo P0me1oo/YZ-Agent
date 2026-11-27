@@ -9,7 +9,9 @@ func (t *Tracker) RetireConfirmed(retire func(model.TrafficCounters) model.Traff
 	defer t.mu.Unlock()
 	candidates := model.TrafficCounters{Users: make(map[int][2]int64), Relay: make(map[int][2]int64), RelayUsers: make(map[int]map[int][2]int64)}
 	for id, value := range t.lastSeen {
-		if _, ok := t.pendingTraffic[id]; !ok {
+		_, direct := t.pendingTraffic[id]
+		_, entry := t.pendingEntry[id]
+		if !direct && !entry {
 			candidates.Users[id] = value
 		}
 	}
@@ -27,6 +29,9 @@ func (t *Tracker) RetireConfirmed(retire func(model.TrafficCounters) model.Traff
 				candidates.RelayUsers[uid][id] = value
 			}
 		}
+	}
+	if len(candidates.Users) == 0 && len(candidates.Relay) == 0 && len(candidates.RelayUsers) == 0 {
+		return
 	}
 	removed := retire(candidates)
 	for id := range removed.Users {

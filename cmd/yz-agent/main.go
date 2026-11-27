@@ -17,6 +17,7 @@ import (
 
 	"github.com/P0me1oo/YZ-Agent/internal/agentcli"
 	"github.com/P0me1oo/YZ-Agent/internal/agentlog"
+	"github.com/P0me1oo/YZ-Agent/internal/binding"
 	"github.com/P0me1oo/YZ-Agent/internal/buildinfo"
 	"github.com/P0me1oo/YZ-Agent/internal/config"
 	"github.com/P0me1oo/YZ-Agent/internal/firewall"
@@ -29,7 +30,7 @@ import (
 )
 
 var (
-	version       = "v2.48.0"
+	version       = "v2.58.0"
 	buildTime     = "unknown"
 	commit        = "unknown"
 	processBootID = fmt.Sprintf("%x", randomBootID())
@@ -79,7 +80,7 @@ func main() {
 		os.Exit(1)
 	}
 	privacyCtx, stopPrivacy := context.WithTimeout(context.Background(), 45*time.Second)
-	if err := config.PreparePrivacy(privacyCtx, *configPath, rootCfg); err != nil {
+	if err := config.PreparePrivacy(privacyCtx, *configPath, rootCfg); err != nil && !rootCfg.CanRetryMachinePrivacy() {
 		stopPrivacy()
 		startupFailure(rootCfg, "failed to prepare file protection", err)
 		os.Exit(1)
@@ -184,9 +185,15 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 
 	watchCtx, stopWatch := context.WithCancel(context.Background())
 	defer stopWatch()
+	cleanupWake := make(chan struct{}, 1)
+	go resumeBindingCleanup(watchCtx, configPath, cleanupWake)
 	reloadCh := make(chan *config.RootConfig, 1)
 	var reloadMu sync.Mutex
 	enqueueReload := func(cfg *config.RootConfig) {
+		select {
+		case cleanupWake <- struct{}{}:
+		default:
+		}
 		instances, err := cfg.NormalizeInstances()
 		if err == nil {
 			err = config.ValidateStartupLayout(instances)
@@ -210,7 +217,20 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 	if watcher != nil {
 		defer watcher.Stop()
 	}
-	go watchDeletedBindings(watchCtx, configPath, enqueueReload)
+	var pruneMu sync.Mutex
+	pruneBinding := func(confirmed binding.Confirmation) {
+		pruneMu.Lock()
+		defer pruneMu.Unlock()
+		changed, err := config.PruneConfirmedMachine(watchCtx, configPath, confirmed)
+		if err != nil {
+			nlog.Core().Warn("绑定清理未完成，稍后重试", "error", err)
+		}
+		if changed {
+			if current, err := config.LoadRoot(configPath); err == nil {
+				enqueueReload(current)
+			}
+		}
+	}
 
 	for root := initialRoot; ; {
 		if port := root.EffectiveHealthPort(); port != healthPort {
@@ -244,7 +264,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 			prepare, stop := context.WithTimeout(ctx, 45*time.Second)
 			err := config.PreparePrivacy(prepare, configPath, root)
 			stop()
-			if err != nil {
+			if err != nil && !root.CanRetryMachinePrivacy() {
 				cancel()
 				startupFailure(root, "failed to prepare file protection during reload", err)
 				os.Exit(1)
@@ -334,6 +354,10 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 						health.set(id, service.RuntimeFailed)
 					}
 					reportError(instanceCfg.PrivacyError)
+					if instanceCfg.IsMachineMode() {
+						// WatchPrivacy retries this identity even when it is the last binding.
+						<-ctx.Done()
+					}
 					return
 				}
 				if instanceCfg.IsMachineMode() {
@@ -342,6 +366,7 @@ func runWithReload(initialRoot *config.RootConfig, configPath string, rotator *l
 					nlog.Core().Info("starting machine instance", "instance", instanceCfg.InstanceID, "machine_id", instanceCfg.Machine.MachineID, "panel_url", instanceCfg.Panel.URL)
 					orch := machine.New(instanceCfg)
 					orch.SetAgentRuntime(version, processBootID)
+					orch.SetBindingDeletionHandler(pruneBinding)
 					orch.SetFirewallController(firewallManager)
 					orch.SetStatusHandler(func(status service.RuntimeStatus) {
 						health.set(healthIDs[0], status)

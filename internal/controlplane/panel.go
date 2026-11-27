@@ -151,6 +151,9 @@ func (p *PanelControlPlane) Report(payload ReportPayload) error {
 }
 
 func (p *PanelControlPlane) ReportContext(ctx context.Context, payload ReportPayload) error {
+	if p.client.UsesScopedTraffic() {
+		return reportScopedTraffic(ctx, p.client, payload)
+	}
 	return p.client.ReportContext(ctx, payload.ReportID, payload.Traffic, payload.RelayTraffic, payload.RelayUserTraffic, payload.RelayUserAlive, payload.Alive, payload.Online, payload.CPU, payload.Mem, payload.Swap, payload.Disk, payload.Metrics, payload.LimitEvents, panel.ConnectionSnapshot{Users: payload.ConnectionCounts, Relay: payload.RelayConnectionCounts, IPs: payload.IPConnectionCounts})
 }
 
@@ -240,4 +243,12 @@ func (p *panelPushClient) IsConnected() bool       { return p.inner.IsConnected(
 func (p *panelPushClient) TakeResync() bool        { return p.needsResync.Swap(false) }
 func (p *panelPushClient) SendDeviceReport(devices map[int][]string) {
 	p.inner.SendDeviceReport(devices)
+}
+
+func reportScopedTraffic(ctx context.Context, client *panel.Client, payload ReportPayload) error {
+	if !payload.ScopedTraffic {
+		return fmt.Errorf("当前面板要求分项流量账单，旧批次缺少采集口径，已保留待报数据")
+	}
+	return client.ReportScopedTraffic(ctx, payload.ReportID, payload.DirectTraffic, payload.EntryTraffic,
+		payload.RelayUserTraffic, payload.RelayTraffic, payload.LimitEvents)
 }

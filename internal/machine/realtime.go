@@ -9,7 +9,7 @@ import (
 )
 
 func (o *Orchestrator) publishRuntimeState(ctx context.Context) {
-	if !o.client.RealtimeEnabled() || !o.stateActive.CompareAndSwap(false, true) {
+	if !o.client.RealtimeEnabled() || !o.client.StateDue() || !o.stateActive.CompareAndSwap(false, true) {
 		return
 	}
 	var load map[string]interface{}

@@ -1,5 +1,7 @@
 # 系统 TCP WireGuard 中转
 
+当前 Next 配套的能力门控、资源限制、CUBIC 回退、MTU 与 DNS 修正见 [2.52.0 适配](next-wireguard-relay.md)。以下保留 2.5.0 的历史设计和验收。
+
 `v2.5.0` 在 `v2.0.0` 系统 TCP WG 格式上移除 Xray 本机转接，保留跨核心互通；当前发布状态见 [兼容矩阵](../YZ_COMPATIBILITY.md)。从 WG `1.x` 升级仍需要入口与落地一起更新。
 
 ## 数据路径

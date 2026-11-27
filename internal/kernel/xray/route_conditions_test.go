@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/P0me1oo/YZ-Agent/internal/kernel"
+	"github.com/P0me1oo/YZ-Agent/internal/model"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/xtls/xray-core/infra/conf/serial"
 )
@@ -147,5 +148,16 @@ func TestBuildRoutingIPBlockBeforeRelay(t *testing.T) {
 	}
 	if got := buildRouting(routes[:1], nil, nil, nil, nil)["domainStrategy"]; got != "AsIs" {
 		t.Fatalf("domain-only routing should retain AsIs: %v", got)
+	}
+}
+
+func TestNextDomainAndIPRouteConditions(t *testing.T) {
+	rules := compilePanelRouteRule(model.RouteRule{ID: 1, Action: "block", Match: []string{"domain:example.com", "full:exact.example"}})
+	if len(rules) != 1 || !reflect.DeepEqual(rules[0]["domain"], []string{"domain:example.com", "full:exact.example"}) {
+		t.Fatalf("domain prefixes corrupted: %#v", rules)
+	}
+	routing := buildRouting([]model.RouteRule{{ID: 2, Action: "direct", Match: []string{"8.8.8.0/24"}}}, nil, nil, nil, nil)
+	if routing["domainStrategy"] != "IPOnDemand" {
+		t.Fatal("non-block IP routing cannot resolve domains")
 	}
 }

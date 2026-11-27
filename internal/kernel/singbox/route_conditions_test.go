@@ -195,3 +195,10 @@ func TestBuildRoutesIPBlockBeforeRelay(t *testing.T) {
 		t.Fatalf("resolve=%d block=%d relay=%d direct=%d", resolveAt, blockAt, relayAt, directAt)
 	}
 }
+
+func TestNextFullDomainAndSuffixRemainDistinct(t *testing.T) {
+	rules := compilePanelRouteRule(model.RouteRule{ID: 1, Action: "block", Match: []string{"domain:example.com", "full:exact.example"}})
+	if len(rules) != 2 || !reflect.DeepEqual(rules[0]["domain"], []string{"exact.example"}) || !reflect.DeepEqual(rules[1]["domain_suffix"], []string{"example.com"}) {
+		t.Fatalf("full/suffix domain semantics lost: %#v", rules)
+	}
+}

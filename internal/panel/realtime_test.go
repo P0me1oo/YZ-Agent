@@ -55,8 +55,14 @@ func TestRealtimeHTTPPreservesEmptySnapshotsAndUsesFallbackInterval(t *testing.T
 	client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 1})
 	client.realtime.enabled.Store(true)
 	state := StatePayload{IPConnectionCounts: map[int]map[string]int{}, Alive: map[int][]string{}, ConnectionCounts: map[int]int{}, UserSpeeds: map[int][2]int64{}}
+	if !client.StateDue() {
+		t.Fatal("first sample postponed")
+	}
 	if err := client.PublishState(context.Background(), state); err != nil {
 		t.Fatal(err)
+	}
+	if client.StateDue() {
+		t.Fatal("prepared a disposable fallback sample")
 	}
 	if err := client.PublishState(context.Background(), state); err != nil {
 		t.Fatal(err)
@@ -65,6 +71,9 @@ func TestRealtimeHTTPPreservesEmptySnapshotsAndUsesFallbackInterval(t *testing.T
 		t.Fatal("HTTP 兜底未遵循十秒间隔")
 	}
 	client.realtime.lastFallback = time.Now().Add(-11 * time.Second)
+	if !client.StateDue() {
+		t.Fatal("latest sample not collected after the fallback interval")
+	}
 	if err := client.PublishState(context.Background(), state); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +88,21 @@ func TestRealtimeTrafficFallsBackWithUnchangedBatchAfterSocketCloses(t *testing.
 	settlements := 0
 	var httpPosts atomic.Int32
 	upgrader := websocket.Upgrader{}
+	checkBill := func(body map[string]interface{}) {
+		t.Helper()
+		for field, want := range map[string]string{
+			"direct_traffic": `{"1":[10,20]}`, "entry_traffic": `{"1":[30,40]}`,
+			"relay_user_traffic": `{"1":{"0":[5,6]}}`, "relay_loads": `{"9":[7,8]}`,
+		} {
+			got, _ := json.Marshal(body[field])
+			if string(got) != want {
+				t.Errorf("%s = %s, want %s", field, got, want)
+			}
+		}
+		if body["traffic_accounting"] != scopedTrafficVersion || body["traffic"] != nil || body["relay_traffic"] != nil {
+			t.Error("unexpected traffic contract")
+		}
+	}
 	accept := func(id string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -102,6 +126,7 @@ func TestRealtimeTrafficFallsBackWithUnchangedBatchAfterSocketCloses(t *testing.
 			}
 			var body map[string]interface{}
 			_ = json.Unmarshal(message.Data, &body)
+			checkBill(body)
 			accept(body["report_id"].(string))
 			return // 接收后断开，不发送确认。
 		}
@@ -112,6 +137,7 @@ func TestRealtimeTrafficFallsBackWithUnchangedBatchAfterSocketCloses(t *testing.
 			return
 		}
 		httpPosts.Add(1)
+		checkBill(body)
 		id, _ := body["report_id"].(string)
 		if id != "test-persisted-batch" {
 			t.Errorf("切换通道改变了批次编号: %q", id)
@@ -146,11 +172,11 @@ func TestRealtimeTrafficFallsBackWithUnchangedBatchAfterSocketCloses(t *testing.
 	}
 	client := NewClient(config.PanelConfig{URL: server.URL, NodeID: 1})
 	client.realtime.enabled.Store(true)
+	client.scopedAccounting.Store(true)
 	client.SetWebSocketProvider(func() *WSClient { return ws })
-	err := client.reportRealtime(ctx, map[string]interface{}{
-		"report_id": "test-persisted-batch", "traffic": map[int][2]int64{1: {10, 20}},
-		"alive": map[int][]string{1: {"8.8.8.8"}}, "status": map[string]interface{}{"cpu": 20},
-	})
+	err := client.ReportScopedTraffic(ctx, "test-persisted-batch",
+		map[int][2]int64{1: {10, 20}}, map[int][2]int64{1: {30, 40}},
+		map[int]map[int][2]int64{1: {0: {5, 6}}}, map[int][2]int64{-9: {7, 8}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

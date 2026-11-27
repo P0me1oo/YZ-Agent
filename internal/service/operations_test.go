@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -242,5 +243,37 @@ func TestAutoSpeedCorruptPersistenceIsPreserved(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if string(data) != "invalid-json" || s.autoSpeed.error == "" {
 		t.Fatal("corrupt file overwritten or hidden")
+	}
+}
+
+func TestHealthMachineConcurrencyAndCancellation(t *testing.T) {
+	for range cap(healthSlots) {
+		healthSlots <- struct{}{}
+	}
+	s := newTestService(&fakeKernel{running: true})
+	s.lastConfig = &model.NodeSpec{Protocol: "vless", HealthCheck: &healthcheck.Config{Enabled: true, Generation: "one"}}
+	s.updateOperations(t.Context())
+	if s.operations.probing.Load() || !s.operations.lastProbe.IsZero() {
+		t.Fatal("busy machine queued a check")
+	}
+	for range cap(healthSlots) {
+		<-healthSlots
+	}
+	s.operations.probeConfig = "before"
+	s.operations.probeRuntime = "running"
+	ctx, cancel := context.WithCancel(t.Context())
+	s.operations.probeCancel = cancel
+	s.lastConfig.HealthCheck.Enabled = false
+	s.updateOperations(t.Context())
+	if ctx.Err() != context.Canceled {
+		t.Fatal("disabled check did not cancel old job")
+	}
+}
+
+func TestHealthErrorsPreserveCauseWithoutCredentials(t *testing.T) {
+	scrub := healthErrorScrubber(map[string]map[string]any{"": {"uuid": "diagnostic-private-credential"}}, nil, nil)
+	got := scrub("dial tcp: connection refused; invalid uuid diagnostic-private-credential")
+	if strings.Contains(got, "diagnostic-private-credential") || !strings.Contains(got, "connection refused") {
+		t.Fatal(got)
 	}
 }

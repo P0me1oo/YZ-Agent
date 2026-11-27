@@ -90,7 +90,7 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 		return Plan{}, err
 	}
 	// Go 的 IPv4 通配监听在双栈系统上可能实际创建 IPv6 socket。
-	if node.HasRelayFirewall() && strings.TrimSpace(node.ListenIP) == "0.0.0.0" {
+	if (node.HasRelayFirewall() || node.SourcePolicy.Enabled()) && strings.TrimSpace(node.ListenIP) == "0.0.0.0" {
 		addresses = []Rule{{Family: 4}, {Family: 6}}
 	}
 	protocols, err := listenerProtocols(&node, kernelType)
@@ -112,6 +112,31 @@ func PlanForNode(nc *model.NodeSpec, kernelType string) (Plan, error) {
 				return Plan{}, fmt.Errorf("系统防火墙来源集合包含无效网段")
 			}
 			plan.Blocked = append(plan.Blocked, prefix.Masked().String())
+		}
+	}
+	// The firewall sees the transport peer; the core still evaluates the original
+	// source policy against the client address supplied by a trusted proxy.
+	if plan.Restricted && nc.AccessPolicyVersion == 1 && nc.GetProxyProtocol() {
+		var blocked netipx.IPSetBuilder
+		for _, raw := range plan.Blocked {
+			blocked.AddPrefix(netip.MustParsePrefix(raw))
+		}
+		for _, raw := range nc.TrustedProxyIPs {
+			if ip, err := netip.ParseAddr(raw); err == nil {
+				blocked.Remove(ip.Unmap())
+			} else if p, err := netip.ParsePrefix(raw); err == nil {
+				blocked.RemovePrefix(p.Masked())
+			} else {
+				return Plan{}, fmt.Errorf("可信代理来源无效")
+			}
+		}
+		set, err := blocked.IPSet()
+		if err != nil {
+			return Plan{}, err
+		}
+		plan.Blocked = nil
+		for _, p := range set.Prefixes() {
+			plan.Blocked = append(plan.Blocked, p.String())
 		}
 	}
 	for _, address := range addresses {

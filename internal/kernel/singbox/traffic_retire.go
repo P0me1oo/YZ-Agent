@@ -16,6 +16,7 @@ func (s *SingBox) RetireTraffic(candidates model.TrafficCounters) model.TrafficC
 		}
 		for _, child := range s.nodeConfig.Relay.Children {
 			keepNodes[child.NodeID] = true
+			keepNodes[child.LoadKey()] = true
 		}
 	}
 	tracker := s.connTracker

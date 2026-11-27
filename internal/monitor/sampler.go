@@ -6,7 +6,8 @@ import (
 	"time"
 )
 
-// 同一进程内的逻辑节点共用一秒采样，避免重复读取系统及互相扰动速率基线。
+// 共用进程快照，避免多个逻辑节点在同一秒重复触发运行时统计。
+var processSampler = sampler{now: time.Now, collect: processStatus, interval: time.Second}
 var systemSampler = sampler{now: time.Now, collect: collect, interval: time.Second}
 
 type sampler struct {

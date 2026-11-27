@@ -73,12 +73,17 @@ type ReportPayload struct {
 	// ReportID 标识一次刷出的报告批次，失败重试时复用同一 ID。
 	// 为空时兼容未提供批次标识的旧调用方。
 	ReportID string
-	Traffic  map[int][2]int64
+	// ScopedTraffic records that ingress deltas were classified at collection time.
+	// Traffic is the aggregate for panels using the earlier reporting protocol.
+	ScopedTraffic bool
+	DirectTraffic map[int][2]int64
+	EntryTraffic  map[int][2]int64
+	Traffic       map[int][2]int64
 	// RelayTraffic 是入口节点上各中转逻辑节点独立出站的流量，键为逻辑节点 ID。
 	// 只作为落地线路运营统计，面板不据此扣除用户套餐。
 	RelayTraffic map[int][2]int64
 	// RelayUserTraffic 是入口节点按用户和逻辑落地节点拆分的流量。
-	// 它只用于归属明细，不参与用户套餐扣除，也不替代 RelayTraffic。
+	// Next 使用此明细结算前置用户套餐流量，落地服务器承载量另计。
 	RelayUserTraffic map[int]map[int][2]int64
 	// RelayUserAlive 是中转入口当前在线来源按用户和实际出网节点的拆分，节点 0 表示入口直连。
 	// 它只用于按实际节点统计连接，不替代 Alive，也不参与设备数限制。

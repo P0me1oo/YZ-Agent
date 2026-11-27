@@ -6,6 +6,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
+	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"net"
 	"net/netip"
 	"sort"
@@ -24,7 +26,17 @@ var Defaults = []string{
 	"www.intel.com:443", "www.sony.com:443", "dl.google.com:443",
 }
 
+type CheckStep struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	MS     int64  `json:"latency_ms"`
+	Error  string `json:"error,omitempty"`
+}
 type Result struct {
+	DurationMS int64       `json:"duration_ms,omitempty"`
+	Steps      []CheckStep `json:"steps,omitempty"`
+	Error      string      `json:"error,omitempty"`
+
 	Target         string      `json:"target"`
 	Host           string      `json:"host"`
 	IP             string      `json:"ip"`
@@ -181,7 +193,7 @@ func certificateLabel(value string) string {
 	return string(runes[:min(len(runes), 512)])
 }
 
-func (s Scanner) dial(ctx context.Context, host string, port int) (net.Conn, string, error) {
+func (s Scanner) resolve(ctx context.Context, host string) ([]netip.Addr, error) {
 	ips := []netip.Addr{}
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ips = append(ips, ip)
@@ -195,20 +207,40 @@ func (s Scanner) dial(ctx context.Context, host string, port int) (net.Conn, str
 		var err error
 		ips, err = lookup(ctx, host)
 		if err != nil || len(ips) == 0 {
-			return nil, "", errors.New("dns_failed")
+			if err == nil {
+				err = errors.New("no addresses")
+			}
+			return nil, fmt.Errorf("dns_failed: %w", err)
 		}
 	}
 	for _, ip := range ips {
 		if !publicAddress(ip) {
-			return nil, "", errors.New("private_target")
+			return nil, errors.New("private_target")
 		}
 	}
+	return ips, nil
+}
+func (s Scanner) dial(ctx context.Context, host string, port int) (net.Conn, string, error) {
+	ips, err := s.resolve(ctx, host)
+	if err != nil {
+		return nil, "", err
+	}
+	return s.dialIPs(ctx, ips, port)
+}
+func (s Scanner) dialIPs(ctx context.Context, ips []netip.Addr, port int) (net.Conn, string, error) {
 	dial := s.Dial
 	if dial == nil {
 		dial = (&net.Dialer{}).DialContext
 	}
-	for _, ip := range ips {
-		conn, err := dial(ctx, "tcp", net.JoinHostPort(ip.Unmap().String(), strconv.Itoa(port)))
+	var lastErr error
+	for i, ip := range ips {
+		if i >= 16 {
+			break
+		}
+		attempt, cancel := context.WithTimeout(ctx, 2*time.Second)
+		conn, err := dial(attempt, "tcp", net.JoinHostPort(ip.Unmap().String(), strconv.Itoa(port)))
+		cancel()
+		lastErr = err
 		if err == nil {
 			return conn, ip.Unmap().String(), nil
 		}
@@ -216,11 +248,11 @@ func (s Scanner) dial(ctx context.Context, host string, port int) (net.Conn, str
 			break
 		}
 	}
-	return nil, "", errors.New("connection_failed")
+	return nil, "", fmt.Errorf("connection_failed: %w", lastErr)
 }
 
-func (s Scanner) probe(ctx context.Context, item target) Result {
-	r := Result{Host: item.sni, Port: item.port, Target: net.JoinHostPort(item.host, strconv.Itoa(item.port)), ServerNames: []string{}}
+func (s Scanner) probe(ctx context.Context, item target) (r Result) {
+	r = Result{Host: item.sni, Port: item.port, Target: net.JoinHostPort(item.host, strconv.Itoa(item.port)), ServerNames: []string{}}
 	if s.Diagnostics {
 		r.CDN = &CDNResult{Status: "unknown", Providers: []string{}, Evidence: []string{}}
 		r.HTTP = &HTTPResult{Status: "not_checked"}
@@ -232,12 +264,38 @@ func (s Scanner) probe(ctx context.Context, item target) Result {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	started := time.Now()
-	conn, ip, err := s.dial(ctx, item.host, item.port)
+	defer func() {
+		r.DurationMS = max(1, time.Since(started).Milliseconds())
+		if r.LatencyMS == 0 {
+			r.LatencyMS = r.DurationMS
+		}
+	}()
+	ips, err := s.resolve(ctx, item.host)
+	dns := CheckStep{Name: "dns", Status: "ok", MS: time.Since(started).Milliseconds()}
 	if err != nil {
-		r.Reason = err.Error()
+		dns.Status = "failed"
+		dns.Error = nlog.Sanitize(err.Error())
+		r.Steps = append(r.Steps, dns)
+		r.Error = dns.Error
+		r.Reason = strings.SplitN(err.Error(), ":", 2)[0]
+		return r
+	}
+	r.Steps = append(r.Steps, dns)
+	connectStart := time.Now()
+	conn, ip, err := s.dialIPs(ctx, ips, item.port)
+	if err != nil {
+		r.Reason = strings.SplitN(err.Error(), ":", 2)[0]
+		r.Error = nlog.Sanitize(err.Error())
+		name := "connect"
+		if r.Reason == "dns_failed" || r.Reason == "private_target" {
+			name = "dns"
+		}
+		r.Steps = append(r.Steps, CheckStep{Name: name, Status: "failed", MS: time.Since(started).Milliseconds(), Error: r.Error})
 		return r
 	}
 	defer conn.Close()
+	r.Steps = append(r.Steps, CheckStep{Name: "connect", Status: "ok", MS: time.Since(connectStart).Milliseconds()})
+	tlsStart := time.Now()
 	r.IP = ip
 	// 名称和证书链在握手后分别验证，才能同时显示失败原因及证书域名。
 	tlsConn := tls.Client(conn, &tls.Config{ServerName: item.sni, InsecureSkipVerify: true,
@@ -245,9 +303,12 @@ func (s Scanner) probe(ctx context.Context, item target) Result {
 		CurvePreferences: []tls.CurveID{tls.X25519, tls.X25519MLKEM768}})
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		r.Reason = "tls_failed"
+		r.Error = nlog.Sanitize(err.Error())
+		r.Steps = append(r.Steps, CheckStep{Name: "tls", Status: "failed", MS: time.Since(tlsStart).Milliseconds(), Error: r.Error})
 		return r
 	}
 	r.LatencyMS = max(1, time.Since(started).Milliseconds())
+	r.Steps = append(r.Steps, CheckStep{Name: "tls", Status: "ok", MS: time.Since(tlsStart).Milliseconds()})
 	state := tlsConn.ConnectionState()
 	r.TLS13 = state.Version == tls.VersionTLS13
 	if r.TLS13 {
@@ -297,6 +358,7 @@ func (s Scanner) probe(ctx context.Context, item target) Result {
 	switch {
 	case !r.CertValid:
 		r.Reason = "certificate_invalid"
+		r.Error = nlog.Sanitize(err.Error())
 	case !r.TLS13:
 		r.Reason = "tls13_required"
 	case !r.H2:
@@ -306,6 +368,11 @@ func (s Scanner) probe(ctx context.Context, item target) Result {
 	default:
 		r.Feasible = true
 	}
+	status := "ok"
+	if !r.Feasible {
+		status = "failed"
+	}
+	r.Steps = append(r.Steps, CheckStep{Name: "compatibility", Status: status, Error: r.Reason})
 	if s.Diagnostics {
 		s.inspect(ctx, item, &r, tlsConn)
 	}

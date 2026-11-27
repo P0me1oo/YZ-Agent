@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/P0me1oo/YZ-Agent/internal/binding"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
 	"gopkg.in/yaml.v3"
 )
@@ -835,19 +836,55 @@ func preserveConfigFields(before, after []byte) ([]byte, error) {
 	return yaml.Marshal(mergeFields(defaults, updated))
 }
 
+// An unavailable machine can still confirm deletion using its public identity.
+// File/lock failures and node-only startup errors retain their normal handling.
+func (root *RootConfig) CanRetryMachinePrivacy() bool {
+	if !root.PrivacyReady {
+		return false
+	}
+	for _, c := range privacyItems(root) {
+		if c.IsMachineMode() && c.PrivacyError != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // 策略变化或面板恢复后自动重试；已运行的实例不因一次领取失败被停止。
 func WatchPrivacy(ctx context.Context, path string, initial *RootConfig, ready func(*RootConfig)) {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 	failed := map[int]bool{}
+	failedMachines := []privacy.Bootstrap{}
 	for i, c := range privacyItems(initial) {
 		failed[i] = c.PrivacyError != nil
+		if failed[i] && c.IsMachineMode() {
+			failedMachines = append(failedMachines, bootstrapFor(c, path))
+		}
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+		if len(failedMachines) > 0 {
+			// These instances have no runtime control heartbeat until protection recovers.
+			changed, _ := pruneDeletedMachines(ctx, path, func(panel string, id int, token string) bool {
+				for _, b := range failedMachines {
+					if b.URL == panel && b.MachineID == id && b.Credential(path) == token {
+						deleted, _ := binding.Deleted(ctx, panel, id, token)
+						return deleted
+					}
+				}
+				return false
+			})
+			if changed {
+				if root, err := LoadRoot(path); err == nil {
+					ready(root)
+					return
+				}
+			}
 		}
 		root, err := LoadRoot(path)
 		if err != nil || ctx.Err() != nil {

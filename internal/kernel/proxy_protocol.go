@@ -6,6 +6,24 @@ import (
 )
 
 func ProxyProtocolPrefixesForNode(node *model.NodeSpec) []netip.Prefix {
+	if node == nil {
+		return nil
+	}
+	if node.AccessPolicyVersion > 0 {
+		if !node.GetProxyProtocol() {
+			return nil
+		}
+		prefixes := []netip.Prefix{}
+		for _, value := range node.TrustedProxyIPs {
+			if ip, err := netip.ParseAddr(value); err == nil {
+				ip = ip.Unmap()
+				prefixes = append(prefixes, netip.PrefixFrom(ip, ip.BitLen()))
+			} else if p, err := netip.ParsePrefix(value); err == nil {
+				prefixes = append(prefixes, p.Masked())
+			}
+		}
+		return prefixes
+	}
 	if node.BalancerReceiver == nil {
 		return ProxyProtocolPrefixes(node.ProxyProtocolSetting())
 	}

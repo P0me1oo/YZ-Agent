@@ -23,9 +23,17 @@ type deletedBinding struct {
 	token      string
 }
 
-// Filter only public binding envelopes. A deleted machine may no longer be
-// able to decrypt its data; unrelated ciphertext and unknown fields stay intact.
-func filterDeletedBindings(ctx context.Context, path string, before []byte) ([]byte, []deletedBinding, error) {
+type deletionCheck func(panel string, id int, token string) bool
+
+func discoveryCheck(ctx context.Context) deletionCheck {
+	return func(panel string, id int, token string) bool {
+		deleted, _ := binding.Deleted(ctx, panel, id, token)
+		return deleted
+	}
+}
+
+// Only inspect public binding envelopes. Other ciphertext and unknown fields stay intact.
+func filterDeletedBindings(path string, before, credentials []byte, matches deletionCheck) ([]byte, []deletedBinding, error) {
 	if privacy.IsEncrypted(before) {
 		// Legacy recovery envelopes can contain multiple hidden identities. Without
 		// public per-instance boundaries their bootstrap is insufficient to prune.
@@ -71,8 +79,13 @@ func filterDeletedBindings(ctx context.Context, path string, before []byte) ([]b
 			continue
 		}
 		token := b.Credential(path)
-		deleted, _ := binding.Deleted(ctx, b.URL, b.MachineID, token)
-		if !deleted {
+		// A running process may still have the old environment after a rebind.
+		// The file that will be used on the next start must refer to the same identity.
+		if b.Token != "" && b.Token != token || !matchesCredentialFile(credentials, b.TokenEnv, token) {
+			kept = append(kept, entry)
+			continue
+		}
+		if !matches(b.URL, b.MachineID, token) {
 			kept = append(kept, entry)
 			continue
 		}
@@ -90,6 +103,9 @@ func filterDeletedBindings(ctx context.Context, path string, before []byte) ([]b
 	}
 	document["instances"] = kept
 	if len(kept) == 0 {
+		// A multi-instance file may also have an inherited panel URL or credential.
+		delete(document, "panel")
+		delete(document, "machine")
 		document["binding_idle"] = true
 		if multi && root.HealthPort == 0 && len(root.Instances) > 0 {
 			document["health_port"] = root.Instances[0].HealthPort
@@ -101,11 +117,33 @@ func filterDeletedBindings(ctx context.Context, path string, before []byte) ([]b
 	return after, removed, err
 }
 
+func matchesCredentialFile(data []byte, name, token string) bool {
+	if name == "" {
+		return true
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && key == name && value != token {
+			return false
+		}
+	}
+	return true
+}
+
 // PruneDeletedMachines verifies deletion before taking the local write lock,
 // then compares config and credentials again so a concurrent rebind wins.
 // It never removes data directories, certificates, pending traffic or backups.
 func PruneDeletedMachines(ctx context.Context, path string) (bool, error) {
-	if err := finishPendingBindingCleanup(ctx, path); err != nil {
+	return pruneDeletedMachines(ctx, path, discoveryCheck(ctx))
+}
+
+// PruneConfirmedMachine rechecks the on-disk identity without querying any panel.
+func PruneConfirmedMachine(ctx context.Context, path string, confirmation binding.Confirmation) (bool, error) {
+	return pruneDeletedMachines(ctx, path, confirmation.Matches)
+}
+
+func pruneDeletedMachines(ctx context.Context, path string, matches deletionCheck) (bool, error) {
+	if err := FinishPendingBindingCleanup(ctx, path); err != nil {
 		return false, err
 	}
 	before, err := os.ReadFile(path)
@@ -120,7 +158,7 @@ func PruneDeletedMachines(ctx context.Context, path string) (bool, error) {
 	if credErr != nil && !os.IsNotExist(credErr) {
 		return false, credErr
 	}
-	after, removed, err := filterDeletedBindings(ctx, path, before)
+	after, removed, err := filterDeletedBindings(path, before, credentials, matches)
 	if err != nil || len(removed) == 0 {
 		return false, err
 	}
@@ -177,7 +215,7 @@ type bindingCleanup struct {
 	Bindings   []bindingCleanupItem `json:"bindings"`
 }
 
-func finishPendingBindingCleanup(ctx context.Context, path string) error {
+func FinishPendingBindingCleanup(ctx context.Context, path string) error {
 	queuePath := filepath.Join(filepath.Dir(path), ".binding-cleanup.json")
 	if _, err := os.Stat(queuePath); os.IsNotExist(err) {
 		return nil
@@ -327,7 +365,11 @@ func LoadWritableBindingRoot(ctx context.Context, path string) (*RootConfig, err
 	if err != nil {
 		return nil, err
 	}
-	after, removed, err := filterDeletedBindings(ctx, path, before)
+	credentials, err := os.ReadFile(filepath.Join(filepath.Dir(path), "credentials.env"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	after, removed, err := filterDeletedBindings(path, before, credentials, discoveryCheck(ctx))
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/netip"
+	"runtime"
 	"strings"
 )
 
@@ -447,6 +448,9 @@ func validateRouteID(routeID int, field string) error {
 func validateRelayWireGuard(w *RelayWireGuardConfig) error {
 	if w == nil {
 		return fmt.Errorf("wireguard settings are required")
+	}
+	if w.Transport != "" && (w.Transport != "socks-v1" || runtime.GOOS != "linux") {
+		return fmt.Errorf("unsupported WireGuard relay transport on this platform")
 	}
 	if len(w.Peers) > 0 {
 		if len(w.Peers) > 64 {

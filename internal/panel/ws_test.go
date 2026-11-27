@@ -343,3 +343,39 @@ func TestWSClient_SyncDevicesAcceptsArrayAndNumericKeyObject(t *testing.T) {
 		})
 	}
 }
+
+func TestMachineDeletedHintMatchesAuthenticatedSocketOnce(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		conn.WriteJSON(wsMessage{Event: "auth.success"})
+		for _, id := range []int{9, 7, 7} {
+			data, _ := json.Marshal(map[string]int{"machine_id": id})
+			conn.WriteJSON(wsMessage{Event: WSEventMachineDeleted, Data: data})
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name                string
+		machine, node, want int
+	}{{"machine", 7, 0, 1}, {"other", 10, 0, 0}, {"node", 0, 7, 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			hints := 0
+			client := NewWSClient("ws"+strings.TrimPrefix(server.URL, "http"), "fixture", tc.node, WSClientConfig{MachineID: tc.machine}, func(e WSEvent) {
+				if e.Type == WSEventMachineDeleted {
+					hints++
+				}
+			}, nil, nil)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			_ = client.connect(ctx)
+			if hints != tc.want {
+				t.Fatalf("got %d hints, want %d", hints, tc.want)
+			}
+		})
+	}
+}

@@ -34,9 +34,10 @@ func (s *StringOrArray) UnmarshalJSON(data []byte) error {
 
 // HandshakeResponse is the response from POST /api/v2/server/handshake
 type HandshakeResponse struct {
-	HostMonitoring *bool      `json:"host_monitoring"`
-	LogPolicy      *LogPolicy `json:"log_policy,omitempty"`
-	AgentLog       struct {
+	TrafficAccounting string     `json:"traffic_accounting"`
+	HostMonitoring    *bool      `json:"host_monitoring"`
+	LogPolicy         *LogPolicy `json:"log_policy,omitempty"`
+	AgentLog          struct {
 		Version  int      `json:"version"`
 		Events   []string `json:"events"`
 		MinLevel string   `json:"min_level"`
@@ -104,6 +105,7 @@ type MachineNode struct {
 
 // MachineNodesResponse is the response from GET /api/v2/server/machine/nodes.
 type MachineNodesResponse struct {
+	TrafficBlocked bool                   `json:"traffic_blocked"`
 	AccessLog      *AccessLogPolicy       `json:"access_log,omitempty"`
 	HostMonitoring *bool                  `json:"host_monitoring"`
 	LogPolicy      *LogPolicy             `json:"log_policy,omitempty"`
@@ -191,8 +193,10 @@ type NodeConfig struct {
 	Multiplex *MultiplexConfig `json:"multiplex,omitempty"`
 
 	// Proxy Protocol (supports both top-level and networkSettings for compatibility)
-	AcceptProxyProtocol *bool `json:"accept_proxy_protocol,omitempty"`
-	AutoFirewall        *bool `json:"auto_firewall,omitempty"`
+	AccessPolicyVersion int      `json:"access_policy_version,omitempty"`
+	TrustedProxyIPs     []string `json:"trusted_proxy_ips,omitempty"`
+	AcceptProxyProtocol *bool    `json:"accept_proxy_protocol,omitempty"`
+	AutoFirewall        *bool    `json:"auto_firewall,omitempty"`
 
 	// Relay describes the transit topology (Xboard extension). Nil for plain nodes.
 	Relay *RelayConfig `json:"relay,omitempty"`
@@ -250,20 +254,22 @@ type RelayEgressTarget struct {
 
 // RelayChild is one logical node reachable through an internal outbound on the entry.
 type RelayChild struct {
-	NodeID    int                   `json:"node_id"`
-	Tag       string                `json:"tag"`
-	RouteID   int                   `json:"route_id"`
-	Protocol  string                `json:"protocol"`
-	Address   string                `json:"address"`
-	Port      int                   `json:"port"`
-	Cipher    string                `json:"cipher"`
-	Password  string                `json:"password"`
-	VLESS     *RelayVLESSConfig     `json:"vless,omitempty"`
-	WireGuard *RelayWireGuardConfig `json:"wireguard,omitempty"`
+	TrafficBinding int                   `json:"traffic_binding,omitempty"`
+	NodeID         int                   `json:"node_id"`
+	Tag            string                `json:"tag"`
+	RouteID        int                   `json:"route_id"`
+	Protocol       string                `json:"protocol"`
+	Address        string                `json:"address"`
+	Port           int                   `json:"port"`
+	Cipher         string                `json:"cipher"`
+	Password       string                `json:"password"`
+	VLESS          *RelayVLESSConfig     `json:"vless,omitempty"`
+	WireGuard      *RelayWireGuardConfig `json:"wireguard,omitempty"`
 }
 
 // RelayWireGuardConfig 仅包含本端私钥、对端公钥和用户态隧道参数。
 type RelayWireGuardConfig struct {
+	Transport     string               `json:"transport,omitempty"`
 	Peers         []RelayWireGuardPeer `json:"peers,omitempty"`
 	PrivateKey    string               `json:"private_key"`
 	PeerPublicKey string               `json:"peer_public_key"`

@@ -152,6 +152,7 @@ type ConnTracker struct {
 	uuidMap         map[string]int      // UUID → userID (for lookup in RoutedConnection)
 	connMap         map[string]net.Conn // connID → conn (only for force-close support)
 	identities      map[string]relayIdentity
+	relayLoadKeys   map[string]int
 	relayNodes      map[string]int
 	relayEntry      bool
 	relayAccounting bool
@@ -291,6 +292,9 @@ func (t *ConnTracker) RoutedConnection(
 	metadata adapter.InboundContext,
 	_ adapter.Rule, outbound adapter.Outbound,
 ) net.Conn {
+	if internal, _ := ctx.Value(healthProbeContextKey{}).(bool); internal {
+		return conn
+	}
 	uuid, uid, us, relay, allowed := t.resolveUser(metadata.User, outbound)
 	if !allowed {
 		_ = conn.Close()
@@ -594,7 +598,11 @@ func (t *ConnTracker) acquireDevice(ctx context.Context, userID int, sourceIP st
 	if !gate.Enabled() {
 		return nil, nil
 	}
-	permit, err := gate.Acquire(ctx, userID, sourceIP)
+	var permit *devicegate.Permit
+	var err error
+	if t.deviceFilter.CountKey(sourceIP) != "" {
+		permit, err = gate.Acquire(ctx, userID, sourceIP)
+	}
 	if err == nil && us != nil {
 		t.usersMu.RLock()
 		valid := t.users[userID] == us

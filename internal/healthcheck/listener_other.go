@@ -11,7 +11,10 @@ import (
 )
 
 func processConnections(ctx context.Context, pid int32) ([]gnet.ConnectionStat, error) {
-	return gnet.ConnectionsPidWithContext(ctx, "tcp", pid)
+	return processNetworkConnections(ctx, pid, "tcp")
+}
+func processNetworkConnections(ctx context.Context, pid int32, network string) ([]gnet.ConnectionStat, error) {
+	return gnet.ConnectionsPidWithContext(ctx, network, pid)
 }
 
 func dualStackListener(connection gnet.ConnectionStat) (bool, error) {

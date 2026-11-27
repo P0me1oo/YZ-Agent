@@ -11,10 +11,8 @@ import (
 	"github.com/P0me1oo/YZ-Agent/internal/nlog"
 	"github.com/P0me1oo/YZ-Agent/internal/panel"
 	"github.com/P0me1oo/YZ-Agent/internal/privacy"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -35,6 +33,13 @@ type operationsState struct {
 	probeRequest      string
 	probeAddresses    *healthcheck.Prober
 	probeAddressKey   string
+	probeCancel       context.CancelFunc
+	probeRuntime      string
+	probeConfig       string
+	probeNext         int
+	healthReportBusy  atomic.Bool
+	healthReported    atomic.Pointer[string]
+	lastHealthReport  time.Time
 }
 type renewResult struct {
 	ID     string `json:"id"`
@@ -57,6 +62,7 @@ type operationsSnapshot struct {
 	PendingBytes    int64                     `json:"pending_bytes"`
 	AutoSpeed       map[int]autospeed.Penalty `json:"auto_speed"`
 	AutoSpeedError  string                    `json:"auto_speed_error,omitempty"`
+	PolicyWarning   string                    `json:"policy_warning,omitempty"`
 	FirewallWarning string                    `json:"firewall_warning,omitempty"`
 	RelayFirewall   string                    `json:"relay_firewall,omitempty"`
 }
@@ -124,114 +130,13 @@ func (s *Service) updateOperations(ctx context.Context) {
 		}()
 	}
 	c := cfg.HealthCheck
-	if c != nil && c.Enabled && s.kernel.IsRunning() && len(s.lastUsers) > 0 || c != nil && c.Enabled && s.kernel.IsRunning() && cfg.IsRelayLanding() {
-		interval := time.Duration(max(30, min(3600, c.Interval))) * time.Second
-		if (time.Since(s.operations.lastProbe) >= interval || c.Request != s.operations.probeRequest) && s.operations.probing.CompareAndSwap(false, true) {
-			s.operations.lastProbe = time.Now()
-			s.operations.probeRequest = c.Request
-			target := c.URL
-			port := cfg.ServerPort
-			listen := cfg.ListenIP
-			if listen == "" {
-				listen = "::"
-			}
-			if cfg.IsRelayLanding() && cfg.Relay.ListenPort > 0 {
-				port = cfg.Relay.ListenPort
-			}
-			tcp := healthcheck.IsTCP(cfg.Protocol, cfg.Network, cfg.TLS, cfg.TLSSettings)
-			if cfg.IsRelayLanding() {
-				switch cfg.Relay.Protocol {
-				case "wireguard":
-					tcp = false
-				case "shadowsocks":
-					tcp = true
-				case "vless":
-					tcp = healthcheck.IsTCP("vless", cfg.Network, cfg.TLS, cfg.TLSSettings)
-				}
-			}
-			routes := map[string]int{"": 0}
-			totalRoutes := 1
-			if cfg.Relay != nil && cfg.Relay.IsEntry() {
-				totalRoutes += len(cfg.Relay.Children)
-			}
-			if cfg.Relay != nil && cfg.Relay.IsEntry() {
-				for _, child := range cfg.Relay.Children {
-					if len(routes) >= 17 {
-						break
-					}
-					routes[child.Tag] = child.NodeID
-				}
-			}
-			generation := computeKernelConfigHash(cfg)
-			addressKey := generation + "|" + target
-			if s.operations.probeAddresses == nil || s.operations.probeAddressKey != addressKey {
-				s.operations.probeAddresses = &healthcheck.Prober{}
-				s.operations.probeAddressKey = addressKey
-			}
-			prober := s.operations.probeAddresses
-			go func() {
-				defer s.operations.probing.Store(false)
-				job, cancel := context.WithTimeout(ctx, 30*time.Second)
-				defer cancel()
-				result := &healthcheck.Result{ID: fmt.Sprintf("%d", time.Now().UnixNano()), Checked: time.Now().Unix(), Status: "ok", Source: "节点本机", ConfigHash: generation, Target: target, Steps: []healthcheck.Step{}}
-				if tcp {
-					start := time.Now()
-					listening, err := healthcheck.Listener(job, net.JoinHostPort(listen, strconv.Itoa(port)))
-					step := healthcheck.Step{Name: "listener", Status: "ok", MS: time.Since(start).Milliseconds()}
-					if err != nil {
-						step.Status = "not_supported"
-						step.Error = "本机监听状态无法读取"
-						result.Status = "partial"
-					} else if !listening {
-						step.Status = "failed"
-						step.Error = "当前进程没有对应的 TCP 监听"
-						result.Status = "failed"
-					}
-					result.Steps = append(result.Steps, step)
-				} else {
-					result.Steps = append(result.Steps, healthcheck.Step{Name: "listener", Status: "not_supported", Error: "UDP 入站不以 TCP 探测"})
-				}
-				dialer, ok := s.kernel.(interface {
-					ProbeDial(context.Context, string, string, string) (net.Conn, error)
-				})
-				if !ok {
-					result.Status = "unsupported"
-				} else if u, addresses, err := healthcheck.Target(job, target); err != nil {
-					result.Status = "failed"
-					result.Steps = append(result.Steps, healthcheck.Step{Name: "target", Status: "failed", Error: err.Error()})
-				} else {
-					result.Routes = healthcheck.CheckRoutes(job, routes, func(ctx context.Context, tag string) (int64, error) {
-						return prober.Request(
-							ctx,
-							tag,
-							u,
-							addresses,
-							func(ctx context.Context, network, address string) (net.Conn, error) {
-								return dialer.ProbeDial(ctx, tag, network, address)
-							},
-						)
-					})
-					for _, route := range result.Routes {
-						if route.Status == "failed" {
-							result.Status = "failed"
-						} else if route.Status == "incomplete" && result.Status == "ok" {
-							result.Status = "partial"
-						}
-					}
-				}
-				if totalRoutes > len(routes) {
-					result.Steps = append(result.Steps, healthcheck.Step{Name: "routes", Status: "not_supported", Error: fmt.Sprintf("本次检查 %d/%d 个出站", len(routes), totalRoutes)})
-					if result.Status == "ok" {
-						result.Status = "partial"
-					}
-				}
-				// 结果带配置指纹，主循环丢弃重载前的迟到结果。
-				s.operations.probe.Store(result)
-			}()
-		}
-	}
+	s.updateHealth(ctx)
+
 	s.operations.sequence++
 	snapshot := &operationsSnapshot{Run: s.operations.run, Sequence: s.operations.sequence, ErrorID: s.runtimeErrorID, Version: 1, SampledAt: time.Now().UnixMilli(), Runtime: "running", ConfigHash: computeKernelConfigHash(cfg), Control: s.controlVersion.Current(), Health: s.operations.probe.Load(), AutoSpeed: s.autoSpeed.manager.Snapshot(time.Now()), AutoSpeedError: s.autoSpeed.error, Renewal: s.operations.renewDone.Load()}
+	if cfg.SourcePolicy.NeedsCN() && s.sourcePolicyLastError != "" {
+		snapshot.PolicyWarning = "大陆来源库更新失败，继续使用已验证缓存"
+	}
 	if warning := s.firewallNotice.Load(); warning != nil {
 		snapshot.FirewallWarning = *warning
 	}
@@ -245,7 +150,7 @@ func (s *Service) updateOperations(ctx context.Context) {
 			snapshot.RelayFirewall = "applied"
 		}
 	}
-	if c == nil || !c.Enabled || snapshot.Health != nil && snapshot.Health.ConfigHash != snapshot.ConfigHash {
+	if c == nil || !c.Enabled || snapshot.Health != nil && (snapshot.Health.ConfigHash != snapshot.ConfigHash || snapshot.Health.Generation != c.Generation || snapshot.Health.Target != c.URL || snapshot.Health.Request != c.Request || c.Generation != "" && snapshot.Health.Run != s.operations.run) {
 		snapshot.Health = nil
 	}
 	if c == nil || !c.Enabled || !s.kernel.IsRunning() {
@@ -255,8 +160,10 @@ func (s *Service) updateOperations(ctx context.Context) {
 	if !s.kernel.IsRunning() {
 		snapshot.Runtime = "stopped"
 		snapshot.Health = nil
-		s.operations.probe.Store(nil)
-		s.operations.lastProbe = time.Time{}
+		if c == nil || c.Generation == "" {
+			s.operations.probe.Store(nil)
+			s.operations.lastProbe = time.Time{}
+		}
 	}
 	if s.runtimeError != nil {
 		snapshot.Runtime = "failed"
@@ -274,10 +181,7 @@ func (s *Service) updateOperations(ctx context.Context) {
 	}
 	// 只统计入口用户流量，内部中转明细不重复累计。
 	s.reportMu.Lock()
-	pending, _, _ := s.tracker.PendingSnapshot()
-	for _, v := range pending {
-		snapshot.PendingBytes += v[0] + v[1]
-	}
+	snapshot.PendingBytes = s.tracker.PendingUserBytes()
 	if s.retryReport != nil {
 		for _, v := range s.retryReport.payload.Traffic {
 			snapshot.PendingBytes += v[0] + v[1]
