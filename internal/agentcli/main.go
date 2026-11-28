@@ -84,11 +84,12 @@ type fileInstance struct {
 }
 
 type filePanelConfig struct {
-	URL      string `yaml:"url"`
-	Token    string `yaml:"token,omitempty"`
-	TokenEnv string `yaml:"token_env,omitempty"`
-	NodeID   int    `yaml:"node_id,omitempty"`
-	NodeType string `yaml:"node_type,omitempty"`
+	HTTPConfirmedURL string `yaml:"http_confirmed_url,omitempty"`
+	URL              string `yaml:"url"`
+	Token            string `yaml:"token,omitempty"`
+	TokenEnv         string `yaml:"token_env,omitempty"`
+	NodeID           int    `yaml:"node_id,omitempty"`
+	NodeType         string `yaml:"node_type,omitempty"`
 }
 
 type fileMachineConfig struct {
@@ -1081,10 +1082,11 @@ func writeRootConfig(path string, root *config.RootConfig) error {
 		fi := fileInstance{
 			ID: inst.InstanceID,
 			Panel: filePanelConfig{
-				URL:      inst.Panel.URL,
-				TokenEnv: inst.Panel.TokenEnv,
-				NodeID:   inst.Panel.NodeID,
-				NodeType: inst.Panel.NodeType,
+				HTTPConfirmedURL: inst.Panel.HTTPConfirmedURL,
+				URL:              inst.Panel.URL,
+				TokenEnv:         inst.Panel.TokenEnv,
+				NodeID:           inst.Panel.NodeID,
+				NodeType:         inst.Panel.NodeType,
 			},
 			Kernel: fileKernelConfig{
 				Type:                inst.Kernel.Type,
@@ -1609,11 +1611,13 @@ func runConfigInit(args []string) error {
 
 func runConfigInitWithInput(args []string, input io.Reader) error {
 	// 安装器探测能力，回退旧版本时继续使用其已有参数。
-	if len(args) == 1 && (args[0] == "--supports-token-stdin" || args[0] == "--supports-private-storage") {
+	if len(args) == 1 && (args[0] == "--supports-token-stdin" || args[0] == "--supports-private-storage" ||
+		args[0] == "--supports-http-confirmation") {
 		return nil
 	}
 	var (
 		legacyOutput   bool
+		httpConfirmed  bool
 		configIn       string
 		configOut      string
 		credentialsIn  string
@@ -1637,6 +1641,10 @@ func runConfigInitWithInput(args []string, input io.Reader) error {
 	)
 
 	for i := 0; i < len(args); i++ {
+		if args[i] == "--http-confirmed" {
+			httpConfirmed = true
+			continue
+		}
 		if args[i] == "--legacy-output" {
 			legacyOutput = true
 			continue
@@ -1771,6 +1779,13 @@ func runConfigInitWithInput(args []string, input io.Reader) error {
 		Log:        config.LogConfig{Level: "info", Output: "stdout"},
 		HealthPort: healthPort,
 	}
+	if httpConfirmed {
+		confirmedURL := privacy.NormalizePanelURL(panelURL)
+		if !strings.HasPrefix(confirmedURL, "http://") {
+			return errors.New("HTTP 确认仅适用于有效的 http:// 面板入口")
+		}
+		inst.Panel.HTTPConfirmedURL = confirmedURL
+	}
 
 	if mode == "machine" {
 		inst.Machine = &config.MachineConfig{MachineID: machineID}
@@ -1855,6 +1870,9 @@ func runConfigInitWithInput(args []string, input io.Reader) error {
 	for i, existing := range instances {
 		if existing.InstanceID == instanceID {
 			// 普通升级保留证书、路由及加密状态，仅替换本次明确提供的安装参数。
+			if !httpConfirmed && privacy.NormalizePanelURL(existing.Panel.HTTPConfirmedURL) == privacy.NormalizePanelURL(panelURL) {
+				inst.Panel.HTTPConfirmedURL = existing.Panel.HTTPConfirmedURL
+			}
 			updated := existing
 			updated.Panel, updated.Machine = inst.Panel, inst.Machine
 			if kernelExplicit {

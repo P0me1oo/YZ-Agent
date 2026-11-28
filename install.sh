@@ -85,6 +85,7 @@ CLI_BINARY_SOURCE=""
 FORCE_RECONFIGURE=0
 PURGE=0
 YES=0
+HTTP_PANEL_CONFIRMED=0
 ARCH=""
 OS=""
 DOWNLOAD_URL=""
@@ -390,6 +391,11 @@ usage() {
     --force-reconfigure 历史兼容参数；安装默认合并已有绑定
     --purge             卸载时同时删除安装数据目录
     --yes, -y           跳过卸载确认
+
+  HTTP 面板：
+    使用 http:// 安装时，必须在终端手动确认后才继续。
+    直接回车、拒绝或没有交互终端时停止；--yes 不跳过此确认。
+    HTTPS 继续校验证书，不会自动降级为 HTTP。
 
   示例：
     sudo bash install.sh --panel https://panel.example.com --token TOKEN --node-id 1
@@ -1083,6 +1089,41 @@ require_reconfigure_confirmation() {
     return
 }
 
+confirm_http_panel() {
+    HTTP_PANEL_CONFIRMED=0
+    local address="${PANEL_URL#"${PANEL_URL%%[![:space:]]*}"}"
+    case "${address,,}" in http://*) ;; *) return 0 ;; esac
+
+    local warning='面板使用 HTTP，连接不会加密，也无法校验面板身份；认证令牌、配置和文件加密密钥可能被截获或篡改。'
+    local answer="" confirm_fd
+    log_warn "$warning"
+    # 安装脚本通常来自管道，不能从标准输入读取确认或接受管道自动作答。
+    if ! { exec {confirm_fd}<>/dev/tty; } 2>/dev/null; then
+        log_error "HTTP 面板需要在交互终端手动确认，请在终端重新运行安装命令"
+        return 1
+    fi
+    if [ ! -t "$confirm_fd" ]; then
+        exec {confirm_fd}>&-
+        log_error "无法读取交互终端，已取消 HTTP 面板安装"
+        return 1
+    fi
+    if [ ! -t 1 ]; then log_warn "$warning" >&"$confirm_fd"; fi
+    printf '确认继续使用 HTTP 面板？[y/N]：' >&"$confirm_fd"
+    if ! IFS= read -r -u "$confirm_fd" answer; then
+        exec {confirm_fd}>&-
+        log_error "未收到确认，已取消 HTTP 面板安装"
+        return 1
+    fi
+    exec {confirm_fd}>&-
+    case "$answer" in
+        y|Y|yes|YES|Yes)
+            HTTP_PANEL_CONFIRMED=1
+            log_info "已确认使用 HTTP 面板，继续安装"
+            ;;
+        *) log_info "已取消 HTTP 面板安装"; return 1 ;;
+    esac
+}
+
 cleanup_mirror_probe() {
     if [ -n "$MIRROR_PROBE_DIR" ] && [ -d "$MIRROR_PROBE_DIR" ]; then
         rm -rf "$MIRROR_PROBE_DIR"
@@ -1441,6 +1482,13 @@ render_config() {
         config_helper="$PREVIOUS_BINARY_PATH"
         init_args+=(--legacy-output)
         PRIVATE_LEGACY_EXPORT=1
+    fi
+    if [ "$HTTP_PANEL_CONFIRMED" -eq 1 ]; then
+        if ! "$BIN_STAGE_DIR/xbctl" config init --supports-http-confirmation >/dev/null 2>&1; then
+            log_error "目标版本不支持保存 HTTP 确认，请选择支持此功能的版本"
+            return 1
+        fi
+        init_args+=(--http-confirmed)
     fi
     # 新版从标准输入接收凭据，避免令牌出现在进程参数中；历史版本保留原兼容方式。
     if "$config_helper" config init --supports-token-stdin >/dev/null 2>&1; then
@@ -1940,6 +1988,7 @@ main() {
     # 无效安装请求在创建锁、安装依赖等系统操作之前报错。
     if [ "$ACTION" = install ]; then validate_install_request; fi
     check_root
+    if [ "$ACTION" = install ]; then confirm_http_panel || return 1; fi
     select_install_root
     lock_installation
     load_install_paths

@@ -21,6 +21,10 @@ if [[ "$*" == 'config init --supports-token-stdin' ]]; then
     [[ "$MOCK_PRIVATE_INPUT" == 1 ]]
     exit $?
 fi
+if [[ "$*" == 'config init --supports-http-confirmation' ]]; then
+    [[ "${MOCK_HTTP_SUPPORT:-0}" == 1 ]]
+    exit $?
+fi
 printf '%s\n' "$@" >"$MOCK_ARGS"
 from_stdin=0
 received=''
@@ -69,6 +73,36 @@ check_input() (
 
 check_input 1
 check_input 0
+
+check_http_confirmation() (
+    source "$TEST_ROOT/library.sh"
+    trap - ERR EXIT INT TERM
+    MODE=machine MACHINE_ID=5
+    PANEL_URL=http://privacy.example.invalid
+    TOKEN="privacy-test-${RANDOM}-${RANDOM}"
+    HTTP_PANEL_CONFIRMED="$1"
+    TMP_DIR="$TEST_ROOT/http-$1-$2"
+    BIN_STAGE_DIR="$TEST_ROOT/bin"
+    CONFIG_FILE="$TEST_ROOT/no-config.yml"
+    CREDENTIALS_FILE="$TEST_ROOT/no-credentials.env"
+    export MOCK_PRIVATE_INPUT=1 MOCK_EXPECTED_TOKEN="$TOKEN" MOCK_ARGS="$TEST_ROOT/http-args"
+    export MOCK_HTTP_SUPPORT="$2"
+    mkdir -p "$TMP_DIR"
+    if [ "$1" = 1 ] && [ "$2" = 0 ]; then
+        if render_config; then echo "不支持确认的旧程序不应静默继续" >&2; exit 1; fi
+        return
+    fi
+    render_config
+    if [ "$1" = 1 ]; then
+        grep -Fx -- '--http-confirmed' "$MOCK_ARGS" >/dev/null
+    elif grep -Fx -- '--http-confirmed' "$MOCK_ARGS" >/dev/null; then
+        echo "未确认时不应保存 HTTP 授权" >&2
+        exit 1
+    fi
+)
+check_http_confirmation 1 1
+check_http_confirmation 0 1
+check_http_confirmation 1 0
 
 # 显式降级时用现有新程序生成兼容配置。
 mkdir -p "$TEST_ROOT/current"

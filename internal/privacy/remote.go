@@ -18,12 +18,13 @@ import (
 )
 
 type Bootstrap struct {
-	URL             string `json:"url"`
-	MachineID       int    `json:"machine_id,omitempty"`
-	NodeID          int    `json:"node_id,omitempty"`
-	TokenEnv        string `json:"token_env,omitempty"`
-	Token           string `json:"token,omitempty"`
-	CredentialsFile string `json:"credentials_file,omitempty"`
+	HTTPConfirmedURL string `json:"http_confirmed_url,omitempty"`
+	URL              string `json:"url"`
+	MachineID        int    `json:"machine_id,omitempty"`
+	NodeID           int    `json:"node_id,omitempty"`
+	TokenEnv         string `json:"token_env,omitempty"`
+	Token            string `json:"token,omitempty"`
+	CredentialsFile  string `json:"credentials_file,omitempty"`
 }
 
 var ErrPanelUnavailable = errors.New("暂时无法向面板领取文件密钥，稍后自动重试")
@@ -32,6 +33,7 @@ type authKey struct {
 	url           string
 	machine, node int
 	credential    [32]byte
+	httpConfirmed bool
 }
 
 var authenticatedStates sync.Map
@@ -49,7 +51,15 @@ func (b Bootstrap) authenticationKey(token string) authKey {
 	if override := os.Getenv("PANEL_URL"); override != "" {
 		b.URL = override
 	}
-	return authKey{url: NormalizePanelURL(b.URL), machine: b.MachineID, node: b.NodeID, credential: sha256.Sum256([]byte(token))}
+	return authKey{
+		url: NormalizePanelURL(b.URL), machine: b.MachineID, node: b.NodeID,
+		credential: sha256.Sum256([]byte(token)), httpConfirmed: b.confirmedHTTP(),
+	}
+}
+
+func (b Bootstrap) confirmedHTTP() bool {
+	address := NormalizePanelURL(b.URL)
+	return strings.HasPrefix(address, "http://") && address == NormalizePanelURL(b.HTTPConfirmedURL)
 }
 
 func CachedAuthenticatedState(b Bootstrap, configPath string) *State {
@@ -107,6 +117,8 @@ func Fetch(ctx context.Context, b Bootstrap, configPath string, client *http.Cli
 	ip := net.ParseIP(u.Hostname())
 	local := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
 	secure := u.Scheme == "https" || u.Scheme == "http" && local
+	// HTTP 授权仅对安装时确认的入口生效，不能解除 HTTPS 校验或授权环境变量中的其他入口。
+	confirmedHTTP := b.confirmedHTTP()
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, false, errors.New("面板入口协议无效")
 	}
@@ -115,7 +127,7 @@ func Fetch(ctx context.Context, b Bootstrap, configPath string, client *http.Cli
 		return nil, false, errors.New("无法取得文件保护所需的机器认证凭据")
 	}
 	auth := map[string]any{"token": token}
-	if !secure {
+	if !secure && !confirmedHTTP {
 		auth["probe"] = true
 	}
 	endpoint := "/api/v2/server/privacy"
@@ -173,8 +185,8 @@ func Fetch(ctx context.Context, b Bootstrap, configPath string, client *http.Cli
 		authenticatedStates.Delete(b.authenticationKey(token))
 		return nil, false, nil
 	}
-	if !secure {
-		return nil, false, errors.New("文件保护需要 HTTPS 面板入口")
+	if !secure && !confirmedHTTP {
+		return nil, false, errors.New("文件保护需要 HTTPS，或在安装时手动确认当前 HTTP 面板入口")
 	}
 	s, err := New(result.Data.Keys)
 	if err == nil {

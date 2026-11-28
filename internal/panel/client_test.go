@@ -29,6 +29,32 @@ func TestTLSHandshakeFallsBackToHTTPAPIsForCleartextWebSocket(t *testing.T) {
 	}
 }
 
+func TestHTTPConfirmationDoesNotDisableHTTPSCertificateValidation(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"log_policy":{"version":1,"disabled":false}}`))
+	})
+	tlsServer := httptest.NewTLSServer(handler)
+	defer tlsServer.Close()
+	client := NewClient(config.PanelConfig{
+		URL: tlsServer.URL, HTTPConfirmedURL: tlsServer.URL, NodeID: 12,
+	})
+	if _, err := client.HandshakeContext(t.Context()); err == nil {
+		t.Fatal("HTTP 确认不应放行不受信任的 HTTPS 证书")
+	}
+	client.httpClient = tlsServer.Client()
+	if _, err := client.HandshakeContext(t.Context()); err != nil {
+		t.Fatalf("可信 HTTPS 连接失败: %v", err)
+	}
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+	client = NewClient(config.PanelConfig{
+		URL: httpServer.URL, HTTPConfirmedURL: httpServer.URL, NodeID: 12,
+	})
+	if _, err := client.HandshakeContext(t.Context()); err != nil {
+		t.Fatalf("已确认的 HTTP 连接失败: %v", err)
+	}
+}
+
 func TestRequestErrorsOmitAuthenticationQuery(t *testing.T) {
 	ts, client := newTestServer(func(http.ResponseWriter, *http.Request) {})
 	ts.Close()

@@ -236,12 +236,13 @@ func ValidateTimeSync(cfg TimeSyncConfig) error {
 }
 
 type PanelConfig struct {
-	URL       string `yaml:"url"`
-	Token     string `yaml:"token"`
-	TokenEnv  string `yaml:"token_env,omitempty"`
-	NodeID    int    `yaml:"node_id"`
-	NodeType  string `yaml:"node_type"`
-	MachineID int    `yaml:"-"`
+	HTTPConfirmedURL string `yaml:"http_confirmed_url,omitempty"`
+	URL              string `yaml:"url"`
+	Token            string `yaml:"token"`
+	TokenEnv         string `yaml:"token_env,omitempty"`
+	NodeID           int    `yaml:"node_id"`
+	NodeType         string `yaml:"node_type"`
+	MachineID        int    `yaml:"-"`
 }
 
 type NodeConfig struct {

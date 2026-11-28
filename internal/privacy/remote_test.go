@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,81 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestRemoteHTTPConfirmationIsBoundToEndpoint(t *testing.T) {
+	const address = "http://panel.example.invalid:8080"
+	key := testKey(t)
+	for _, tc := range []struct {
+		name, confirmed, override string
+		allowed                   bool
+	}{
+		{"unconfirmed", "", "", false},
+		{"confirmed", address, "", true},
+		{"normalized", "HTTP://PANEL.EXAMPLE.INVALID:8080/", "", true},
+		{"other_host", "http://other.example.invalid:8080", "", false},
+		{"other_port", "http://panel.example.invalid:8081", "", false},
+		{"https_is_not_http", "https://panel.example.invalid:8080", "", false},
+		{"override", address, "http://other.example.invalid", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PANEL_URL", tc.override)
+			b := Bootstrap{URL: address, HTTPConfirmedURL: tc.confirmed, MachineID: 1, Token: rand.Text()}
+			client := &http.Client{Transport: privacyTransport(func(r *http.Request) (*http.Response, error) {
+				var input map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Fatal(err)
+				}
+				if (input["probe"] == true) == tc.allowed {
+					t.Fatal("未按入口确认状态决定是否领取密钥")
+				}
+				body, _ := json.Marshal(map[string]any{"data": map[string]any{
+					"version": 1, "enabled": true, "keys": []Key{key},
+				}})
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
+			})}
+			state, enabled, err := Fetch(t.Context(), b, "", client)
+			if (err == nil && enabled && state != nil) != tc.allowed {
+				t.Fatalf("确认状态未生效: %v", err)
+			}
+			if tc.allowed {
+				b.HTTPConfirmedURL = ""
+				if CachedAuthenticatedState(b, "") != nil {
+					t.Fatal("撤回 HTTP 确认后仍可复用旧授权的密钥缓存")
+				}
+			}
+		})
+	}
+}
+
+func TestRemoteHTTPConfirmationKeepsTLSValidationAndRedirectProtection(t *testing.T) {
+	key := testKey(t)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"version": 1, "enabled": true, "keys": []Key{key},
+		}})
+	})
+	server := httptest.NewTLSServer(handler)
+	defer server.Close()
+	b := Bootstrap{URL: server.URL, HTTPConfirmedURL: server.URL, MachineID: 1, Token: rand.Text()}
+	if _, _, err := Fetch(t.Context(), b, "", nil); !errors.Is(err, ErrPanelUnavailable) {
+		t.Fatalf("自签名 HTTPS 不应被 HTTP 确认放行: %v", err)
+	}
+	if state, enabled, err := Fetch(t.Context(), b, "", server.Client()); err != nil || !enabled || state == nil {
+		t.Fatalf("可信 HTTPS 应正常领取密钥: %v", err)
+	}
+	calls := 0
+	client := &http.Client{Transport: privacyTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: 307, Body: io.NopCloser(strings.NewReader("")),
+			Header: http.Header{"Location": []string{"http://other.example.invalid/privacy"}},
+		}, nil
+	})}
+	b.URL, b.HTTPConfirmedURL = "http://panel.example.invalid", "http://panel.example.invalid"
+	if _, _, err := Fetch(t.Context(), b, "", client); err == nil || calls != 1 {
+		t.Fatal("确认 HTTP 后不应把凭据转发到跳转地址")
+	}
+}
 
 func TestRemoteKeyUsesAuthenticatedPostAndNeverFollowsRedirects(t *testing.T) {
 	token := rand.Text()

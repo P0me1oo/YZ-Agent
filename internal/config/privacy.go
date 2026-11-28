@@ -28,7 +28,8 @@ func privacyItems(root *RootConfig) []*Config {
 
 func bootstrapFor(c *Config, path string) privacy.Bootstrap {
 	b := privacy.Bootstrap{URL: c.Panel.URL, NodeID: c.Panel.NodeID, TokenEnv: c.Panel.TokenEnv,
-		CredentialsFile: filepath.Join(filepath.Dir(path), "credentials.env")}
+		HTTPConfirmedURL: c.Panel.HTTPConfirmedURL,
+		CredentialsFile:  filepath.Join(filepath.Dir(path), "credentials.env")}
 	if !c.IsMachineMode() && c.Panel.NodeID == 0 && len(c.Nodes) > 0 {
 		b.NodeID = c.Nodes[0].NodeID
 	}
@@ -117,6 +118,7 @@ func (rc *RootConfig) openProtected(path string, strict bool) error {
 				continue
 			}
 			value.Panel.URL = c.Panel.URL
+			value.Panel.HTTPConfirmedURL = c.Panel.HTTPConfirmedURL
 			value.Panel.TokenEnv = c.Panel.TokenEnv
 			value.Panel.Token = c.Panel.Token
 			// Forwarding exceptions are local policy. The readable local override
@@ -362,6 +364,9 @@ func within(root, path string) bool {
 
 func publicInstance(c *Config) map[string]any {
 	panel := map[string]any{"url": c.Panel.URL}
+	if c.Panel.HTTPConfirmedURL != "" {
+		panel["http_confirmed_url"] = c.Panel.HTTPConfirmedURL
+	}
 	if c.Panel.TokenEnv != "" {
 		panel["token_env"] = c.Panel.TokenEnv
 	} else if !c.IsMachineMode() {
@@ -514,6 +519,13 @@ func restorePrivateEntry(entry map[string]any, c *Config, state *privacy.State) 
 	if defaults, ok := previous["privacy_defaults"].(map[string]any); ok {
 		delete(previous, "privacy_defaults")
 		previous = mergeFields(defaults, previous)
+	}
+	// 本地撤回的 HTTP 授权不能在关闭文件加密时被旧密文恢复。
+	if panel, ok := previous["panel"].(map[string]any); ok {
+		delete(panel, "http_confirmed_url")
+		if c.Panel.HTTPConfirmedURL != "" {
+			panel["http_confirmed_url"] = c.Panel.HTTPConfirmedURL
+		}
 	}
 	return previous, nil
 }

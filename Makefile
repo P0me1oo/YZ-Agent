@@ -1,4 +1,4 @@
-VERSION ?= v2.51.1
+VERSION ?= v2.51.2
 TEST_EXEC ?=
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -30,6 +30,7 @@ build-all: build-linux build-linux-arm64
 # Run tests
 test:
 	bash tests/install_output_test.sh
+	python3 tests/install_http_confirmation_test.py
 	bash tests/install_dependencies_test.sh
 	bash tests/upgrade_version_test.sh
 	bash tests/download_mirrors_test.sh
